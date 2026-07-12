@@ -1,0 +1,36 @@
+# Meta-Analysis Skill — R Package Requirements
+# All packages are auto-installed on first skill activation
+# R version required: >= 4.0
+
+# Core meta-analysis
+metafor          # Statistical engine (rma, rma.mv, escalc, forest, funnel)
+meta             # RevMan-compatible (metabin, metacont, metagen, funnel, forest)
+dmetar           # Companion to "Doing Meta-Analysis in-R" (GOSH, RoB, power)
+netmeta          # Network meta-analysis (NMA)
+bayesmeta        # Bayesian meta-analysis
+
+# Effect size conversion
+esc              # Effect size computation (esc_mean_sd, esc_t, esc_or)
+
+# Cluster-robust variance estimation
+robumeta         # Robust variance estimation for dependent effect sizes
+clubSandwich     # Cluster-robust SE with small-sample corrections (CR2, HC3)
+
+# Data manipulation
+tidyverse        # Data wrangling (dplyr, tidyr, readr)
+readxl           # Excel import
+haven            # SPSS/Stata import
+
+# Publication-ready graphics
+ggplot2          # Grammar of graphics
+gridExtra        # Arrange multiple plots
+
+# Risk of bias
+robvis           # Risk of bias visualization (RoB 2.0 traffic light)
+
+# Reporting
+rmarkdown        # Dynamic reports
+knitr            # Report rendering
+
+# Optional/GitHub-only (auto-fallback to CRAN)
+# (none)

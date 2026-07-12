@@ -1,0 +1,133 @@
+# Data Input Templates / 数据输入模板
+
+## Type 1: Binary Data / 二分类数据
+
+**Required columns / 必填列**:
+
+| study | n_exp | event_exp | n_ctrl | event_ctrl | year |
+|-------|-------|-----------|--------|------------|------|
+
+**Example / 示例**:
+
+| study | n_exp | event_exp | n_ctrl | event_ctrl | year |
+|-------|-------|-----------|--------|------------|------|
+| Zhang2020 | 100 | 15 | 100 | 30 | 2020 |
+| Wang2019 | 80 | 20 | 80 | 35 | 2019 |
+| Liu2021 | 120 | 10 | 120 | 25 | 2021 |
+
+**Column descriptions / 列名说明**:
+- `study`：研究名称/ID（必填）
+- `n_exp`：处理组总人数（必填）
+- `event_exp`：处理组发生事件人数（必填）
+- `n_ctrl`：对照组总人数（必填）
+- `event_ctrl`：对照组发生事件人数（必填）
+- `year`：发表年份（选填，用于元回归）
+
+**Notes / 说明**:
+- Column names are case-insensitive / 列名不区分大小写
+- Chinese column names supported (e.g., "研究名称" instead of "study") / 支持中英文列名
+
+---
+
+## Type 2: Continuous Data / 连续型数据
+
+**Required columns / 必填列**:
+
+| study | n_exp | mean_exp | sd_exp | n_ctrl | mean_ctrl | sd_ctrl | year |
+|-------|-------|----------|--------|--------|-----------|---------|------|
+
+**Example / 示例**:
+
+| study | n_exp | mean_exp | sd_exp | n_ctrl | mean_ctrl | sd_ctrl | year |
+|-------|-------|----------|--------|--------|-----------|---------|------|
+| Smith2020 | 50 | 12.3 | 3.2 | 48 | 10.1 | 2.8 | 2020 |
+| Doe2019 | 65 | 15.6 | 2.9 | 60 | 13.2 | 3.0 | 2019 |
+| Lee2021 | 40 | 11.8 | 3.5 | 42 | 10.5 | 3.2 | 2021 |
+
+**Column descriptions / 列名说明**:
+- `study`：研究名称/ID（必填）
+- `n_exp`：处理组样本量（必填）
+- `mean_exp`：处理组均值（必填）
+- `sd_exp`：处理组标准差（必填）
+- `n_ctrl`：对照组样本量（必填）
+- `mean_ctrl`：对照组均值（必填）
+- `sd_ctrl`：对照组标准差（必填）
+- `year`：发表年份（选填）
+
+**Notes / 说明**:
+- Supports mean ± 95%CI input (auto-convert to SD) / 支持输入均值±95%CI（自动转换为SD）
+- Ensure SD is standard deviation, not SEM / 请确保 SD 是标准差，不是 SEM（标准误）
+
+---
+
+## Type 3: Pre-calculated Effect Sizes / 已有效应量
+
+**Required columns / 必填列**:
+
+| study | effect_type | effect_size | lower95 | upper95 | year |
+|-------|-------------|-------------|---------|---------|------|
+
+**Example / 示例**:
+
+| study | effect_type | effect_size | lower95 | upper95 | year |
+|-------|-------------|-------------|---------|---------|------|
+| Zhao2020 | lnOR | 0.35 | -0.12 | 0.82 | 2020 |
+| Chen2019 | lnOR | 0.52 | 0.10 | 0.94 | 2019 |
+| Sun2021 | SMD | 0.28 | -0.05 | 0.61 | 2021 |
+
+**Column descriptions / 列名说明**:
+- `study`：研究名称/ID（必填）
+- `effect_type`：效应量类型（必填）：`lnOR` / `SMD` / `ROM` / `ZCOR` / `logHR`
+- `effect_size`：效应量值（必填，lnOR 等已取对数的值）
+- `lower95`：95%CI 下限（必填）
+- `upper95`：95%CI 上限（必填）
+- `year`：发表年份（选填）
+
+**Auto-calculation / 自动计算**:
+- SE from CI: `SE = (upper95 − lower95) / (2 × 1.96)`
+- Variance: `vi = SE²`
+- Original OR will be auto-transformed to logOR / 原始 OR 会自动转换为 logOR
+
+---
+
+## Type 4: File Upload / 文件上传
+
+**Supported formats / 支持格式**: `.csv`, `.xlsx`, `.xls`
+
+**Auto-detection / 自动检测**:
+- File encoding (UTF-8 / GBK) / 文件编码识别
+- Column matching (Chinese/English) / 列名匹配（中英文兼容）
+- Missing value detection / 缺失值检测
+- Data type check / 数据类型检查
+- Record count confirmation / 记录数量确认
+
+**Recommendations / 建议**:
+- Encoding: UTF-8 (avoid Chinese garbling) / 编码：UTF-8（避免中文乱码）
+- Delimiter: comma / 分隔符：逗号
+- First row: column names / 首行：列名
+
+---
+
+## Validation Checklist / 验证检查清单
+
+| Check / 检查项 | Pass / 通过 | Fail / 不通过 |
+|----------------|-------------|---------------|
+| Records ≥ 2 / 记录数≥2 | ✅ X studies detected / 检测到X项研究 | ⚠️ Need ≥ 2 / 至少需要2项 |
+| Required columns / 必填列完整 | ✅ All columns found / 全部必填列检测到 | ❌ Missing: XXX / 缺少列：XXX |
+| No missing values / 无缺失值 | ✅ Complete / 完整 | ⚠️ X missing / 发现X个缺失值 |
+| Valid numbers / 数值合理 | ✅ Range OK / 范围合理 | ⚠️ Outliers in XX / XX列有异常值 |
+| Year format / 年份格式 | ✅ Year detected / 年份正确 | ℹ️ No year column / 未检测到年份列 |
+
+**After passing all checks / 通过所有检查后**:
+
+```
+✅ Data validation complete / 数据格式检查完成
+   - Studies: X / 研究数量：X
+   - Data type: XXX / 数据类型：XXX
+   - Covariates: XXX / 协变量字段：XXX
+   - Missing values: None / X / 缺失值：无 / X
+
+[Show first 3 rows preview / 展示前3行数据预览]
+
+Confirm? Reply "1" to continue. / 确认无误？回复"1"继续分析。
+```
