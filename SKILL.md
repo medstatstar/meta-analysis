@@ -60,36 +60,36 @@ Meta分析是医学领域中至关重要的循证医学分析技术，现有软�
 3. **Workspace / 工作目录**: create `meta_analysis/` + `output/`
 4. **Memory / 记忆**: read `~/.workbuddy/MEMORY.md` for R config
 
-## Data Input / 数据输入
+## Interactive Guide / 交互式引导
 
-### Step A: Choose type / 选择类型
+> **Design**: Vague prompt → Level 1 menu. Category selected → Level 2 sub-menu with data format hints. Sufficient info → skip to analysis.
+> **设计**: 模糊提示 → Level 1 主菜单 → 选择后 Level 2 子菜单（含数据格式指引）→ 信息充足后直接分析。
+
 ```
-1 Binary (events + n) → OR/RR/RD    二分类（事件数+n）
-2 Continuous (mean±SD+n) → SMD/MD   连续型（均值±SD+n）
-3 Pre-calculated (yi + 95%CI)       已有效应量+CI
-4 Upload CSV/Excel                   上传文件
+=== Level 1: Main Category / 主菜单 ===
+1️⃣  Pairwise Meta-Analysis / 两组Meta分析
+2️⃣  Heterogeneity & Bias / 异质性与偏倚
+3️⃣  Advanced Models / 高级模型
+4️⃣  Effect Size & Conversion / 效应量与转换
+5️⃣  Visualization / 可视化
+6️⃣  Study Quality / 研究质量
 ```
 
-> **Other formats (SPSS/Stata/SAS/JSON...)?** Install `@skill:statdata-transfer` to convert 50+ formats.
-> **其他格式（SPSS/Stata/SAS/JSON...）？** 安装 `@skill:statdata-transfer` 可转换 50+ 格式。
-> Required variable frameworks per data type / 各类型所需变量框架:
-> - Binary: `study, n_exp, event_exp, n_ctrl, event_ctrl[, year]` → 二分类
-> - Continuous: `study, n_exp, mean_exp, sd_exp, n_ctrl, mean_ctrl, sd_ctrl[, year]` → 连续型
-> - Effect sizes: `study, effect_type, effect_size, lower95, upper95[, year]` → 效应量
+```
+=== Level 2: Sub-Menus (excerpt) / 子菜单（示例）===
+[1] Pairwise Meta:
+  1. Binary (OR/RR/RD)     → study, n_exp, event_exp, n_ctrl, event_ctrl
+  2. Continuous (SMD/MD)   → study, n_exp, mean_exp, sd_exp, n_ctrl, mean_ctrl, sd_ctrl
+  3. Pre-calculated (yi+CI)→ study, effect_type, effect_size, lower95, upper95
 
-### Step B: Templates / 数据模板
-See `references/data_templates.md` for full examples per type.
-详见 `references/data_templates.md`。
+[2] Heterogeneity & Bias:
+  1. Heterogeneity (I²/Q/τ²)  2. Subgroup analysis  3. Meta-regression
+  4. Publication bias         5. Sensitivity         6. GOSH plot
 
-### Step C: Validation / 验证
-| Check | Pass | Fail |
-|-------|------|------|
-| Records ≥ 2 | ✅ X studies | ⚠️ Need ≥ 2 |
-| Required columns | ✅ Found | ❌ Missing: XXX |
-| No missing values | ✅ Complete | ⚠️ X missing |
-| Valid numbers | ✅ OK | ⚠️ Outliers |
+Full menu tree with data formats → `references/interactive_menu.md`
 
-Confirm → reply "1" to continue. 确认后回复"1"继续。
+> **Other formats?** Install `@skill:statdata-transfer` for 50+ format conversion.
+> **其他格式？** 安装 `@skill:statdata-transfer` 转换 50+ 格式。
 
 ## Core Functions / 核心功能
 
