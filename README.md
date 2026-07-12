@@ -1,5 +1,7 @@
 # meta-analysis
 
+[🇨🇳 中文 (Chinese)](./README_ZH.md)
+
 ## Overview
 
 `meta-analysis` is an R-based comprehensive Meta-Analysis skill for OpenClaw/WorkBuddy. It covers 100% of RevMan functionality, Stata `metareg`/`mvmeta` equivalents, effect size conversions (`esc` package), and cluster-robust variance estimation (`clubSandwich`/`robumeta`).

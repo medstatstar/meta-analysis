@@ -1,5 +1,7 @@
 # meta-analysis 技能
 
+[🇬🇧 English (英文)](./README.md)
+
 ## 概述
 
 `meta-analysis` 是基于 R 语言的全方位 Meta 分析 WorkBuddy 技能。通过自然语言对话驱动分析全流程，覆盖 RevMan 全部功能 + Stata metareg/mvmeta 等价实现。
