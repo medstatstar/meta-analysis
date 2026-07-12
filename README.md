@@ -39,11 +39,11 @@ The skill implements 1:1 code mappings for all RevMan 5.x analysis types. Users 
 
 ```
 # In WorkBuddy chat:
-"帮我做meta分析，这是我的数据..."
-"用随机效应模型合并OR"
-"画森林图，按地区做亚组分析"
-"网状meta分析，有3种干预"
-"做元回归，自变量为发表年份"
+"run a meta-analysis with the following data..."
+"pool the OR using a random-effects model"
+"draw a forest plot, subgroup by region"
+"network meta-analysis with 3 interventions"
+"meta-regression with publication year as the predictor"
 ```
 
 ## Output
