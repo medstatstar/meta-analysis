@@ -31,59 +31,67 @@ prepare_meta_environment <- function(advanced = TRUE) {
 }
 
 # --- 1. 效应量计算 ---
-calculate_effect_size <- function(data, outcome_type, measure = NULL) {
-  #' 计算各种效应量
+calculate_effect_size <- function(data, outcome_type, measure = NULL, cols = NULL) {
+  #' 计算各种效应量（列名大小写不敏感）
   #' @param data 数据框
-  #' @param outcome_type "dichotomous" 或 "continuous"
-  #' @param measure 效应量类型
-  
+  #' @param outcome_type "dichotomous" | "continuous" | "rate" (IRR 率比)
+  #' @param measure OR/RR/RD/PETO | SMD/MD/ROM | IRR
+  #' @param cols 命名列表，逻辑角色 -> 实际列名，如 list(a="A", b="B", c="C", d="D")
+
   library(metafor)
   library(meta)
-  
+
+  data <- as.data.frame(data)
+  names(data) <- tolower(names(data))   # 列名大小写不敏感
+  get_col <- function(role, default) {
+    if (!is.null(cols) && role %in% names(cols)) data[[tolower(cols[[role]])]]
+    else data[[tolower(default)]]
+  }
+
   if (outcome_type == "dichotomous") {
-    # 二分类数据：OR, RR, RD
+    a  <- get_col("event_exp", "event_exp"); n1 <- get_col("n_exp", "n_exp")
+    c_ <- get_col("event_ctrl", "event_ctrl"); n2 <- get_col("n_ctrl", "n_ctrl")
     if (is.null(measure) || measure == "OR") {
-      es <- escalc(measure = "OR",
-                   ai = data$event_exp,
-                   bi = data$n_exp - data$event_exp,
-                   ci = data$event_ctrl,
-                   di = data$n_ctrl - data$event_ctrl)
+      es <- escalc(measure = "OR", ai = a, bi = n1 - a, ci = c_, di = n2 - c_)
     } else if (measure == "RR") {
-      es <- escalc(measure = "RR",
-                   ai = data$event_exp,
-                   bi = data$n_exp - data$event_exp,
-                   ci = data$event_ctrl,
-                   di = data$n_ctrl - data$event_ctrl)
+      es <- escalc(measure = "RR", ai = a, bi = n1 - a, ci = c_, di = n2 - c_)
     } else if (measure == "RD") {
-      es <- escalc(measure = "RD",
-                   ai = data$event_exp,
-                   bi = data$n_exp - data$event_exp,
-                   ci = data$event_ctrl,
-                   di = data$n_ctrl - data$event_ctrl)
+      es <- escalc(measure = "RD", ai = a, bi = n1 - a, ci = c_, di = n2 - c_)
     } else if (measure == "PETO") {
-      es <- escalc(measure = "PETO",
-                   ai = data$event_exp,
-                   bi = data$n_exp - data$event_exp,
-                   ci = data$event_ctrl,
-                   di = data$n_ctrl - data$event_ctrl)
-    }
+      es <- escalc(measure = "PETO", ai = a, bi = n1 - a, ci = c_, di = n2 - c_)
+    } else stop("dichotomous measure not supported: ", measure)
+
   } else if (outcome_type == "continuous") {
-    # 连续型数据：SMD, MD, ROM
     if (is.null(measure) || measure == "SMD") {
       es <- escalc(measure = "SMD",
-                   n1i = data$n_exp, m1i = data$mean_exp, sd1i = data$sd_exp,
-                   n2i = data$n_ctrl, m2i = data$mean_ctrl, sd2i = data$sd_ctrl)
+                   n1i = get_col("n_exp","n_exp"), m1i = get_col("mean_exp","mean_exp"),
+                   sd1i = get_col("sd_exp","sd_exp"), n2i = get_col("n_ctrl","n_ctrl"),
+                   m2i = get_col("mean_ctrl","mean_ctrl"), sd2i = get_col("sd_ctrl","sd_ctrl"))
     } else if (measure == "MD") {
       es <- escalc(measure = "MD",
-                   n1i = data$n_exp, m1i = data$mean_exp, sd1i = data$sd_exp,
-                   n2i = data$n_ctrl, m2i = data$mean_ctrl, sd2i = data$sd_ctrl)
+                   n1i = get_col("n_exp","n_exp"), m1i = get_col("mean_exp","mean_exp"),
+                   sd1i = get_col("sd_exp","sd_exp"), n2i = get_col("n_ctrl","n_ctrl"),
+                   m2i = get_col("mean_ctrl","mean_ctrl"), sd2i = get_col("sd_ctrl","sd_ctrl"))
     } else if (measure == "ROM") {
       es <- escalc(measure = "ROM",
-                   n1i = data$n_exp, m1i = data$mean_exp, sd1i = data$sd_exp,
-                   n2i = data$n_ctrl, m2i = data$mean_ctrl, sd2i = data$sd_ctrl)
-    }
+                   n1i = get_col("n_exp","n_exp"), m1i = get_col("mean_exp","mean_exp"),
+                   sd1i = get_col("sd_exp","sd_exp"), n2i = get_col("n_ctrl","n_ctrl"),
+                   m2i = get_col("mean_ctrl","mean_ctrl"), sd2i = get_col("sd_ctrl","sd_ctrl"))
+    } else stop("continuous measure not supported: ", measure)
+
+  } else if (outcome_type == "rate") {
+    # 率比 (Incidence Rate Ratio): a/c=事件数, b/d=人时(分母)
+    a  <- get_col("a", "a"); b <- get_col("b", "b")
+    c_ <- get_col("c", "c"); d <- get_col("d", "d")
+    if (is.null(measure)) measure <- "IRR"
+    if (measure == "IRR") {
+      es <- escalc(measure = "IRR", x1i = a, t1i = b, x2i = c_, t2i = d)
+    } else stop("rate measure not supported: ", measure)
+
+  } else {
+    stop("Unknown outcome_type: ", outcome_type)
   }
-  
+
   return(es)
 }
 
@@ -114,7 +122,10 @@ run_meta_analysis <- function(es_data, method = "REML",
   
   # 计算预测区间
   res$prediction <- predict(res)
-  
+  res$method <- method
+  res$random <- random_effects
+  res$test_type <- test_type
+
   return(res)
 }
 
@@ -128,7 +139,7 @@ analyze_heterogeneity <- function(model_result) {
     tau2 = model_result$tau2,
     Q = model_result$QE,
     df = model_result$k - 1,
-    p_Q = model_result$pval.Q
+    p_Q = if (is.null(model_result$QEp)) NA else model_result$QEp
   )
   
   # 解释
@@ -162,7 +173,7 @@ analyze_publication_bias <- function(es_data, model_result) {
   }
   
   # 剪补法
-  if (nrow(es_data) >= 5)
+  if (nrow(es_data) >= 5) {
     tf <- trimfill(model_result)
     results$trimfill <- list(
       k0 = tf$k0,
@@ -206,8 +217,8 @@ run_subgroup_analysis <- function(es_data, group_var) {
       ci_lb = model$ci.lb,
       ci_ub = model$ci.ub
     ),
-    between_group_Q = Wald_test$QM,
-    between_group_p = Wald_test$pval
+    between_group_Q = wald_test$QM,
+    between_group_p = wald_test$pval
   ))
 }
 
@@ -304,94 +315,90 @@ run_sensitivity_analysis <- function(es_data, analysis_type = "all") {
 # --- 8. 森林图（ggplot 可编辑版本） ---
 create_forest_plot <- function(es_data, model_result,
                                style = "revman",
-                               xlab = "Effect Size",
+                               transform = NULL,
+                               xlab = NULL,
                                title = "Forest Plot") {
-  #' 创建出版级森林图（ggplot2 对象，完全可编辑）
-  #' @param style 风格: "revman", "lancet", "jama", "minimal"
-  
+  #' 出版级森林图（ggplot2，可编辑 SVG）。OR/RR/IRR 自动指数化显示。
+  #' @param transform "exp"(参考线=1) 或 "none"(参考线=0)
   library(ggplot2)
-  
-  # 准备数据
-  study_order <- order(es_data$yi)
-  
-  plot_data <- data.frame(
-    study = factor(es_data$study, levels = es_data$study[study_order]),
-    yi = es_data$yi,
-    lower = es_data$yi - 1.95 * sqrt(es_data$vi),
-    upper = es_data$yi + 1.95 * sqrt(es_data$vi),
-    weight = model_result$w[study_order]
+
+  if (is.null(transform)) transform <- "none"
+  f <- if (transform == "exp") exp else identity
+  ref <- if (transform == "exp") 1 else 0
+
+  od <- order(es_data$yi, decreasing = TRUE)
+  yi <- es_data$yi[od]; vi <- es_data$vi[od]; lab <- es_data$study[od]
+  w  <- (1 / vi)[od]
+  k  <- length(yi)
+
+  d <- data.frame(
+    label = c(lab, "Pooled"),
+    ypos  = c((k + 1):2, 1),
+    est   = c(f(yi), f(model_result$beta[1])),
+    lo    = c(f(yi - 1.96 * sqrt(vi)), f(model_result$ci.lb)),
+    hi    = c(f(yi + 1.96 * sqrt(vi)), f(model_result$ci.ub)),
+    w     = c(w, NA)
   )
-  
-  # 添加合并效应行
-  pooled <- data.frame(
-    study = "Pooled Effect",
-    yi = model_result$beta[1],
-    lower = model_result$ci.lb,
-    upper = model_result$ci.ub,
-    weight = NA
-  )
-  
-  plot_data <- rbind(plot_data, pooled)
-  
-  # 风格设置
-  if (style == "revman") {
-    p <- ggplot(plot_data, aes(y = study)) +
-      geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-      geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.3, size = 0.5) +
-      geom_point(aes(x = yi, size = weight), shape = 15) +
-      scale_size(range = c(2, 6), guide = "none") +
-      labs(x = xlab, y = "", title = title) +
-      theme_classic() +
-      theme(plot.title = element_text(face = "bold"))
-  } else if (style == "minimal") {
-    p <- ggplot(plot_data, aes(y = study)) +
-      geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-      geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.3, size = 0.5,
-                     color = "steelblue") +
-      geom_point(aes(x = yi), color = "steelblue", size = 2) +
-      labs(x = xlab, y = "", title = title) +
-      theme_minimal()
-  }
-  
-  # 合并效应菱形标记（可选）
-  p
-  
+
+  if (is.null(xlab))
+    xlab <- if (transform == "exp") "Effect Ratio (95% CI)" else "Effect Size (95% CI)"
+
+  p <- ggplot(d, aes(y = ypos)) +
+    geom_vline(xintercept = ref, linetype = "dashed", color = "grey50", linewidth = 0.6) +
+    geom_errorbar(aes(xmin = lo, xmax = hi, y = ypos), orientation = "y",
+                  width = 0.25, linewidth = 0.5, color = "#2a3950") +
+    geom_point(data = d[d$label != "Pooled", ], aes(x = est, size = w),
+               shape = 15, color = "#2a3950") +
+    scale_size(range = c(2, 6), guide = "none") +
+    geom_point(data = d[d$label == "Pooled", ], aes(x = est), shape = 23,
+               fill = "#0f9b81", color = "#0f9b81", size = 5) +
+    scale_y_continuous(breaks = d$ypos, labels = d$label,
+                       limits = c(0.5, k + 1.5)) +
+    annotate("text", x = max(d$hi) * 1.03, y = 1,
+             label = sprintf("%.2f [%.2f, %.2f]", f(model_result$beta[1]),
+                             f(model_result$ci.lb), f(model_result$ci.ub)),
+             hjust = 0, size = 3, fontface = "bold", color = "#0f9b81") +
+    labs(x = xlab, y = "", title = title) +
+    theme_minimal() +
+    theme(plot.title = element_text(face = "bold"),
+          panel.grid.major.y = element_blank(),
+          axis.text.y = element_text(size = 10))
   return(p)
 }
 
 # --- 9. 漏斗图 ---
 create_funnel_plot <- function(model_result,
-                               style = "classic") {
-  #' 创建漏斗图（ggplot2）
-  
+                               style = "classic",
+                               transform = NULL,
+                               title = "Funnel Plot") {
+  #' 创建漏斗图（ggplot2）。自动指数化 + 标注 Egger/Begg。
   library(ggplot2)
-  
-  # 使用 metafor 默认 funnel
-  # 或 ggplot2 版本（更灵活）
-  
-  data_es <- model_result$yi
-  data_se <- sqrt(model_result$vi)
-  
-  plot_data <- data.frame(
-    yi = data_es,
-    se = data_se,
-    study = rownames(model_result$data) %||% paste0("Study", seq_along(data_es))
-  )
-  
-  # 漏斗边界
+  library(metafor)
+
+  if (is.null(transform)) transform <- "none"
+  f <- if (transform == "exp") exp else identity
+
+  yi <- model_result$yi
+  se <- sqrt(model_result$vi)
   pooled <- model_result$beta[1]
-  
-  p <- ggplot(plot_data, aes(x = yi, y = 1/se)) +
-    geom_point(size = 3, alpha = 0.7, color = "steelblue") +
-    geom_vline(xintercept = pooled, color = "red", linetype = "dashed") +
-    geom_segment(aes(x = pooled - 1.96 * se, xend = pooled + 1.96 * se,
-                     y = 1/se, yend = 1/se),
-                 color = "grey60", alpha = 0.3) +
-    labs(x = "Effect Size", y = "Precision (1/SE)",
-         title = "Funnel Plot") +
+
+  eg <- tryCatch(regtest(model_result), error = function(e) NULL)
+  bg <- tryCatch(ranktest(model_result), error = function(e) NULL)
+  sub <- sprintf("Egger p = %.3f, Begg p = %.3f",
+                 ifelse(is.null(eg), NA, eg$pval),
+                 ifelse(is.null(bg), NA, bg$pval))
+
+  d <- data.frame(yi = yi, se = se, inv = 1 / se)
+  p <- ggplot(d, aes(x = f(yi), y = inv)) +
+    geom_vline(xintercept = f(pooled), color = "#c0392b", linetype = "dashed", linewidth = 0.8) +
+    geom_vline(xintercept = if (transform == "exp") 1 else 0, color = "grey60", linewidth = 0.4) +
+    geom_segment(aes(x = f(pooled) - 1.96 * se, xend = f(pooled) + 1.96 * se,
+                     y = inv, yend = inv), color = "#a8d5f5", linewidth = 0.3) +
+    geom_point(size = 3, color = "#2a3950", alpha = 0.85) +
+    labs(x = if (transform == "exp") "Effect Ratio" else "Effect Size",
+         y = "Precision (1/SE)", title = title, subtitle = sub) +
     theme_minimal() +
     coord_flip()
-  
   return(p)
 }
 
@@ -403,53 +410,148 @@ generate_results_summary <- function(model_result,
                                      model_name = "Random-Effects (REML)") {
   #' 生成结构化结果摘要
   
-  summary_text <- sprintf("
-========================================
- Meta-Analysis Results Summary
-========================================
+  r <- model_result
+  h <- heterogeneity
+  pred <- r$prediction
+  pred_lo <- if (is.null(pred$cr.lb)) pred$pred - 1.96 * sqrt(pred$se^2 + r$tau2) else pred$cr.lb
+  pred_hi <- if (is.null(pred$cr.ub)) pred$pred + 1.96 * sqrt(pred$se^2 + r$tau2) else pred$cr.ub
 
-Model: %s
-K studies = %d
-
-POOLED EFFECT:
-  Estimate: %.3f
-  95%% CI: [%.3f, %.3f]
-  z = %.3f, p = %.4f
-
-HETEROGENEITY:
-  I² = %.1f%% (%s)
-  τ² = %.4f
-  Q = %.3f, df = %d, p = %.4f
-
-PREDICTION INTERVAL:
-  [%.3f, %.3f]
-
-",
-    model_name,
-    model_result$k,
-    model_result$beta[1],
-    model_result$ci.lb,
-    model_result$ci.ub,
-    model_result$zval,
-    model_result$pval,
-    heterogeneity$I2,
-    heterogeneity$interpretation,
-    heterogeneity$tau2,
-    heterogeneity$Q,
-    heterogeneity$df,
-    heterogeneity$p_Q,
-    model_result$prediction$pred - 1.96 * sqrt(model_result$prediction$se^2 + model_result$tau2),
-    model_result$prediction$pred + 1.96 * sqrt(model_result$prediction$se^2 + model_result$tau2)
-  )
+  summary_text <- paste(c(
+    "========================================",
+    " Meta-Analysis Results Summary",
+    "========================================",
+    "",
+    paste0("Model: ", model_name),
+    paste0("K studies = ", r$k),
+    "",
+    "POOLED EFFECT:",
+    paste0("  Estimate: ", sprintf("%.3f", r$beta[1])),
+    paste0("  95% CI: [", sprintf("%.3f", r$ci.lb), ", ", sprintf("%.3f", r$ci.ub), "]"),
+    paste0("  z = ", sprintf("%.3f", r$zval), ", p = ", sprintf("%.4f", r$pval)),
+    "",
+    "HETEROGENEITY:",
+    paste0("  I2 = ", sprintf("%.1f", h$I2), "% (", h$interpretation, ")"),
+    paste0("  tau2 = ", sprintf("%.4f", h$tau2)),
+    paste0("  Q = ", sprintf("%.3f", h$Q), ", df = ", h$df, ", p = ", sprintf("%.4f", h$p_Q)),
+    "",
+    "PREDICTION INTERVAL:",
+    paste0("  [", sprintf("%.3f", pred_lo), ", ", sprintf("%.3f", pred_hi), "]")
+  ), collapse = "\n")
   
   if (!is.null(pub_bias)) {
-    summary_text <- paste0(summary_text, "\nPUBLICATION BIAS:\n")
-    if (!is.null(pub_bias$egger)) {
+    summary_text <- paste0(summary_text, "\n\nPUBLICATION BIAS:\n")
+    if (!is.null(pub_bias$egger))
       summary_text <- paste0(summary_text, sprintf(
         "  Egger test: z = %.3f, p = %.4f\n",
         pub_bias$egger$z, pub_bias$egger$p))
-    }
+    if (!is.null(pub_bias$begg))
+      summary_text <- paste0(summary_text, sprintf(
+        "  Begg test:  z = %.3f, p = %.4f\n",
+        pub_bias$begg$z, pub_bias$begg$p))
   }
   
   return(summary_text)
+}
+
+# --- 11. 统一分析入口（推荐） ---
+ma_analyze <- function(data, type, measure = NULL, cols = NULL,
+                       method = "REML", test = "knha",
+                       random = TRUE, label_col = NULL) {
+  #' 统一 Meta 分析入口：效应量计算 -> 模型拟合 -> ma_result 对象
+  #' @param type "binary"/"dichotomous" | "continuous" | "rate"/"irr" |
+  #'             "precomp"(需 yi+vi 或 yi+se 或 effect+lower+upper) |
+  #'             "survival"(需 loghr+se 或 hr+lower+upper)
+  #' @param cols 列名映射，见 calculate_effect_size
+  #' @param label_col 研究标签列名（可选）
+  
+  library(metafor)
+  data <- as.data.frame(data)
+  if (!is.null(label_col) && label_col %in% names(data))
+    data$study <- as.character(data[[label_col]])
+  if (is.null(data$study))
+    data$study <- paste0("Study ", seq_len(nrow(data)))
+  
+  ot <- tolower(type)
+  transform <- "none"
+  
+  if (ot %in% c("binary", "dichotomous")) {
+    ot <- "dichotomous"; if (is.null(measure)) measure <- "OR"; transform <- "exp"
+    es <- calculate_effect_size(data, "dichotomous", measure = measure, cols = cols)
+  } else if (ot == "continuous") {
+    if (is.null(measure)) measure <- "SMD"
+    es <- calculate_effect_size(data, "continuous", measure = measure, cols = cols)
+  } else if (ot %in% c("rate", "irr")) {
+    ot <- "rate"; if (is.null(measure)) measure <- "IRR"; transform <- "exp"
+    es <- calculate_effect_size(data, "rate", measure = measure, cols = cols)
+  } else if (ot == "precomp") {
+    names(data) <- tolower(names(data))
+    if (!is.null(data$yi) && !is.null(data$vi)) {
+      es <- escalc(yi = yi, vi = vi, data = data, measure = "GEN")
+    } else if (!is.null(data$yi) && !is.null(data$se)) {
+      es <- escalc(yi = yi, vi = se^2, data = data, measure = "GEN")
+    } else if (!is.null(data$effect) && !is.null(data$lower) && !is.null(data$upper)) {
+      es <- escalc(yi = log(effect),
+                   vi = ((log(upper) - log(lower)) / (2 * 1.96))^2,
+                   data = data, measure = "GEN")
+    } else stop("precomp 需提供 yi+vi / yi+se / effect+lower+upper")
+  } else if (ot == "survival") {
+    names(data) <- tolower(names(data))
+    if (!is.null(data$loghr) && !is.null(data$se)) {
+      es <- escalc(yi = loghr, vi = se^2, data = data, measure = "HR")
+    } else if (!is.null(data$hr) && !is.null(data$lower) && !is.null(data$upper)) {
+      es <- escalc(yi = log(hr),
+                   vi = ((log(upper) - log(lower)) / (2 * 1.96))^2,
+                   data = data, measure = "HR")
+    } else stop("survival 需提供 loghr+se 或 hr+lower+upper")
+    transform <- "exp"
+  } else {
+    stop("Unknown type: ", type)
+  }
+  
+  es$study <- data$study
+  res <- run_meta_analysis(es, method = method, random_effects = random, test_type = test)
+  res$data <- es
+  res$outcome_type <- ot
+  res$measure <- measure
+  res$transform <- transform
+  class(res) <- c("ma_result", class(res))
+  return(res)
+}
+
+# --- 12. 一键出图 + 结果摘要 ---
+ma_save <- function(result, outdir = ".", prefix = "meta",
+                    forest_title = "Forest Plot",
+                    funnel_title = "Funnel Plot") {
+  #' 生成森林图、漏斗图（SVG + PNG）与结果摘要 MD
+  library(ggplot2)
+  library(metafor)
+  library(svglite)
+  
+  dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
+  es <- result$data
+  trans <- result$transform
+  
+  p_f <- create_forest_plot(es, result, transform = trans, title = forest_title)
+  ggsave(file.path(outdir, paste0(prefix, "_forest.svg")), p_f,
+         width = 9, height = 5.5, dpi = 300)
+  ggsave(file.path(outdir, paste0(prefix, "_forest.png")), p_f,
+         width = 9, height = 5.5, dpi = 300)
+  
+  p_u <- create_funnel_plot(result, transform = trans, title = funnel_title)
+  ggsave(file.path(outdir, paste0(prefix, "_funnel.svg")), p_u,
+         width = 8, height = 6, dpi = 300)
+  ggsave(file.path(outdir, paste0(prefix, "_funnel.png")), p_u,
+         width = 8, height = 6, dpi = 300)
+  
+  het <- analyze_heterogeneity(result)
+  pb  <- analyze_publication_bias(es, result)
+  md  <- generate_results_summary(result, het, pub_bias = pb,
+                                   model_name = paste0("Random-Effects (", result$method, ")"))
+  writeLines(md, file.path(outdir, paste0(prefix, "_results.md")))
+  
+  cat("Saved to", outdir, ":\n")
+  cat(" -", prefix, "_forest.svg / .png\n")
+  cat(" -", prefix, "_funnel.svg / .png\n")
+  cat(" -", prefix, "_results.md\n")
+  invisible(list(forest = p_f, funnel = p_u, summary = md))
 }

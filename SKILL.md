@@ -115,6 +115,25 @@ Stata equivalents → `references/stata_to_r_mapping.md`
 Effect size conversions → `references/esc_robust_meta.md`
 Cluster-robust workflows → `references/esc_robust_meta.md`
 
+## Reusable API / 复用接口（强制）
+
+> **规则：任何分析必须调用已有函数，禁止从零编写完整分析脚本。**
+> When running any analysis, ALWAYS `source()` the skill scripts and call the functions below — never rewrite the full pipeline inline.
+
+```r
+# 统一入口：效应量计算 + 模型拟合，返回 ma_result 对象
+source("scripts/meta_analysis_core.R")
+res <- ma_analyze(data, type = "rate",            # binary|continuous|rate|precomp|survival
+                  measure = "IRR",                # 自动选 OR/SMD/IRR 等
+                  method = "REML", test = "knha")
+
+# 一行出图 + 摘要（森林图/漏斗图 SVG+PNG + results.md）
+ma_save(res, outdir = "output", prefix = "meta")
+```
+
+Functions: `ma_analyze()`(分发) · `calculate_effect_size()` · `run_meta_analysis()` · `analyze_heterogeneity()` · `analyze_publication_bias()` · `run_subgroup_analysis()` · `run_meta_regression()` · `run_sensitivity_analysis()` · `create_forest_plot()` · `create_funnel_plot()` · `generate_results_summary()` · `ma_save()`.
+Column names are case-insensitive; override mapping via `cols = list(a="A", b="B", c="C", d="D")`.
+
 ## Security & Scope / 安全与范围
 
 **Local only / 仅本地**: all R runs on user machine. No data transmitted.
