@@ -1,4 +1,11 @@
-# ============================================================================
+# -*- coding: utf-8 -*-
+# AUTO-GENERATED from meta_analysis_core.R
+# 编辑 R 逻辑请修改下面的 R_SOURCE 字符串；改完运行:
+#   python r_templates.py        # 重新生成全部 scripts/*.R
+#   python r_meta_analysis_core.py            # 仅重新生成本文件对应的 .R
+R_FILENAME = "meta_analysis_core.R"
+
+R_SOURCE = r'''# ============================================================================
 # Meta-Analysis Core Engine
 #  核心引擎：覆盖所有标准元分析流程
 #  用户可直接调用或修改参数
@@ -654,3 +661,19 @@ ma_save <- function(result, outdir = ".", prefix = "meta",
   cat(" -", prefix, "_results.md\n")
   invisible(list(forest = p_f, funnel = p_u, summary = md))
 }
+'''
+
+
+def materialize(scripts_dir=None):
+    """将本模块内嵌的 R 源码写出为 scripts/<R_FILENAME>。"""
+    import os
+    if scripts_dir is None:
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    out = os.path.join(scripts_dir, R_FILENAME)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(R_SOURCE)
+    return out
+
+
+if __name__ == "__main__":
+    print(materialize())

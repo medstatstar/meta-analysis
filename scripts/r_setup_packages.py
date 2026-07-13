@@ -1,4 +1,11 @@
-#!/usr/bin/env Rscript
+# -*- coding: utf-8 -*-
+# AUTO-GENERATED from setup_packages.R
+# 编辑 R 逻辑请修改下面的 R_SOURCE 字符串；改完运行:
+#   python r_templates.py        # 重新生成全部 scripts/*.R
+#   python r_setup_packages.py            # 仅重新生成本文件对应的 .R
+R_FILENAME = "setup_packages.R"
+
+R_SOURCE = r'''#!/usr/bin/env Rscript
 # ============================================================================
 #  Meta-Analysis R Packages Setup Script
 #  用法: Rscript setup_packages.R [--advanced]
@@ -106,3 +113,19 @@ if (installed_count < total_count) {
 }
 
 cat("\nDone! 🦞\n")
+'''
+
+
+def materialize(scripts_dir=None):
+    """将本模块内嵌的 R 源码写出为 scripts/<R_FILENAME>。"""
+    import os
+    if scripts_dir is None:
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    out = os.path.join(scripts_dir, R_FILENAME)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(R_SOURCE)
+    return out
+
+
+if __name__ == "__main__":
+    print(materialize())

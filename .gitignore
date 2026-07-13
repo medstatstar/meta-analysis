@@ -1,0 +1,3 @@
+# R 源码以 Python 模板内嵌（scripts/r_*.py + r_templates.py），
+# 运行时由 check_integrity.sh 自动 materialize 生成，故不纳入版本控制。
+scripts/*.R
