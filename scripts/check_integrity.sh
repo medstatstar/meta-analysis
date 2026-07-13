@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Integrity self-check + auto-materialize for the meta-analysis skill.
 # 技能完整性自检：确认 scripts/ 含必要的 R 代码文件；
-# 若缺失，尝试从内嵌的 Python 模板 (r_templates.py) 自动生成，无需用户手动下载。
-# 仅当连模板也缺失 (技能包被市场截断) 时才提示去 ClawHub/GitHub 下载完整版。
+# 若缺失，从内嵌的 Python 模板 (r_templates.py) 自动生成，无需用户手动下载。
 #
 # Usage / 用法:  bash scripts/check_integrity.sh
-# 退出码 0 = 完整(或已自动生成); 非 0 = 确实缺少代码文件(模板也缺失)。
+# 退出码 0 = 完整(或已自动生成); 非 0 = 生成失败。
 
 set -u
 
@@ -49,14 +48,6 @@ if [ -f "$TEMPLATE" ]; then
   fi
 fi
 
-# 3) 连模板也缺失 -> 提示下载完整版
-echo "================================================================"
-echo "⚠️  技能不完整 / INCOMPLETE INSTALLATION"
-echo "----------------------------------------------------------------"
-echo "您安装的技能因为相应技能市场的限制，缺少必要的代码文件，"
-echo "请至 ClawHub 或 GitHub 上本技能的主页下载完整版本。"
-echo ""
-echo "  ClawHub: https://clawhub.ai/skills/meta-analysis"
-echo "  GitHub : https://github.com/medstatstar/meta-analysis"
-echo "================================================================"
+# 3) 生成失败（罕见：如 python 缺失或模板文件损坏）
+echo "⚠️  R 代码生成失败：请确认已安装 Python，并重试 bash scripts/check_integrity.sh"
 exit 1
