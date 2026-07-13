@@ -167,4 +167,4 @@ inkscape input.svg --export-type=png --export-dpi=600 --export-filename=input.ti
 
 ## Project Files / 项目文件
 
-`README.md` | `README_ZH.md` | `LICENSE` (MIT © 2025 Wintone) | `requirements.txt` | `assets/icon.svg`
+`README.md` | `README_ZH.md` | `LICENSE` (MIT © 2025 medstatstar) | `requirements.txt` | `assets/icon.svg`
