@@ -124,7 +124,8 @@ Cluster-robust workflows → `references/esc_robust_meta.md`
 # 统一入口：效应量计算 + 模型拟合，返回 ma_result 对象
 source("scripts/meta_analysis_core.R")
 res <- ma_analyze(data, type = "rate",            # binary|continuous|rate|precomp|survival
-                  measure = "IRR",                # 自动选 OR/SMD/IRR 等
+                                               # |correlation|single_proportion|single_mean
+                  measure = "IRR",                # 自动选 OR/SMD/IRR/ZCOR/PLO/MN 等
                   method = "REML", test = "knha")
 
 # 一行出图 + 摘要（森林图/漏斗图 SVG+PNG + results.md）

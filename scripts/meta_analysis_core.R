@@ -9,7 +9,7 @@ prepare_meta_environment <- function(advanced = TRUE) {
   #' 检查并安装所需的 R 包
   #' @param advanced 是否安装可选增强包
   
-  core_pkgs <- c("metafor", "meta", "netmeta", "ggplot2", "gridExtra")
+  core_pkgs <- c("metafor", "meta", "netmeta", "ggplot2", "gridExtra", "svglite")
   optional_pkgs <- c("metasens", "bayesmeta", "metaviz", "robvis", "gt")
   
   all_pkgs <- if (advanced) c(core_pkgs, optional_pkgs) else core_pkgs
@@ -88,10 +88,36 @@ calculate_effect_size <- function(data, outcome_type, measure = NULL, cols = NUL
       es <- escalc(measure = "IRR", x1i = a, t1i = b, x2i = c_, t2i = d)
     } else stop("rate measure not supported: ", measure)
 
+  } else if (outcome_type == "correlation") {
+    # 相关系数 (Pearson r) -> Fisher z 变换
+    r <- get_col("r", "r"); n <- get_col("n", "n")
+    if (is.null(measure) || measure == "ZCOR") {
+      es <- escalc(measure = "ZCOR", ri = r, ni = n)
+    } else stop("correlation measure not supported: ", measure)
+
+  } else if (outcome_type == "single_proportion") {
+    # 单组率 (proportion)：logit 变换 (PLO) 稳健；PR 为原始比例
+    x <- get_col("events", "events"); n <- get_col("n", "n")
+    if (is.null(measure) || measure == "PLO") {
+      es <- escalc(measure = "PLO", xi = x, ni = n)
+    } else if (measure == "PR") {
+      es <- escalc(measure = "PR", xi = x, ni = n)
+    } else stop("single_proportion measure not supported: ", measure)
+
+  } else if (outcome_type == "single_mean") {
+    # 单组均值 (mean)
+    m <- get_col("mean", "mean"); s <- get_col("sd", "sd"); n <- get_col("n", "n")
+    if (is.null(measure) || measure == "MN") {
+      es <- escalc(measure = "MN", mi = m, sdi = s, ni = n)
+    } else stop("single_mean measure not supported: ", measure)
+
   } else {
     stop("Unknown outcome_type: ", outcome_type)
   }
 
+  # 保留原始数据中的所有协变量列（供亚组/元回归/敏感性分析使用）
+  extras <- setdiff(names(data), names(es))
+  if (length(extras) > 0) es <- cbind(es, data[, extras, drop = FALSE])
   return(es)
 }
 
@@ -192,33 +218,40 @@ analyze_publication_bias <- function(es_data, model_result) {
 # --- 5. 亚组分析 ---
 run_subgroup_analysis <- function(es_data, group_var) {
   #' 按分组变量进行亚组分析
+  #' 返回：各组独立合并效应 + 组间异质性检验（正确做法）
   
   library(metafor)
   
+  if (!group_var %in% names(es_data))
+    stop("group_var not found: ", group_var)
+  
   # 确保分组变量是因子
   es_data[[group_var]] <- as.factor(es_data[[group_var]])
+  levels <- levels(es_data[[group_var]])
   
-  # 运行无截距模型（获取各亚组合并效应）
+  # 各组独立合并效应（每组单独跑 rma，最直观）
+  sub <- lapply(levels, function(lv) {
+    sub_dat <- es_data[es_data[[group_var]] == lv, , drop = FALSE]
+    m <- rma(yi = yi, vi = vi, data = sub_dat, method = "REML", test = "knha")
+    data.frame(subgroup = lv, k = m$k,
+               estimate = m$beta[1], se = m$se,
+               ci_lb = m$ci.lb, ci_ub = m$ci.ub, I2 = m$I2)
+  })
+  subgroup_effects <- do.call(rbind, sub)
+  
+  # 组间异质性检验：带截距模型，btt=2:k 检验“非参照组 vs 参照组”
   model <- rma(yi = yi, vi = vi,
-               mods = as.formula(paste("~", group_var, "- 1")),
+               mods = as.formula(paste("~", group_var)),
                data = es_data,
                method = "REML",
                test = "knha")
-  
-  # 组间异质性检验
-  wald_test <- anova(model, btt = 2:length(unique(es_data[[group_var]])))
+  wald_test <- anova(model, btt = 2:length(levels))
   
   return(list(
     model = model,
-    subgroup_effects = data.frame(
-      subgroup = levels(es_data[[group_var]]),
-      estimate = model$beta,
-      se = model$se,
-      ci_lb = model$ci.lb,
-      ci_ub = model$ci.ub
-    ),
+    subgroup_effects = subgroup_effects,
     between_group_Q = wald_test$QM,
-    between_group_p = wald_test$pval
+    between_group_p = wald_test$QMp
   ))
 }
 
@@ -227,6 +260,7 @@ run_meta_regression <- function(es_data, covariates) {
   #' 元回归分析
   
   library(metafor)
+  library(ggplot2)
   
   # 构建模型公式
   formula_str <- paste("yi ~", paste(covariates, collapse = " + "))
@@ -238,17 +272,29 @@ run_meta_regression <- function(es_data, covariates) {
                method = "REML",
                test = "knha")
   
-  # 气泡图
+  # 气泡图（手动 ggplot，避免依赖 metafor::bubble 的 rma.uni 方法）
+  bubble_plot <- NULL
   if (length(covariates) == 1) {
-    bubble_plot <- bubble(model,
-                          xlab = covariates[1],
-                          ylab = "Effect Size",
-                          cex = 1 / sqrt(es_data$vi))
+    cv <- es_data[[covariates[1]]]
+    df <- data.frame(
+      x  = cv,
+      y  = es_data$yi,
+      lo = es_data$yi - 1.96 * sqrt(es_data$vi),
+      hi = es_data$yi + 1.96 * sqrt(es_data$vi),
+      w  = 1 / sqrt(es_data$vi)
+    )
+    bubble_plot <- ggplot(df, aes(x = x, y = y)) +
+      geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.1,
+                    color = "#2a3950", linewidth = 0.5) +
+      geom_point(aes(size = w), shape = 15, color = "#2a3950") +
+      scale_size(guide = "none") +
+      labs(x = covariates[1], y = "Effect Size (95% CI)") +
+      theme_minimal()
   }
   
   return(list(
     model = model,
-    bubble_plot = if (exists("bubble_plot")) bubble_plot else NULL
+    bubble_plot = bubble_plot
   ))
 }
 
@@ -290,11 +336,10 @@ run_sensitivity_analysis <- function(es_data, analysis_type = "all") {
     # 多种模型对比
     models <- list()
     
-    models$DL <- rma(yi = yi, vi = vi, data = es_data, method = "DL")
+    models$DL   <- rma(yi = yi, vi = vi, data = es_data, method = "DL")
     models$REML <- rma(yi = yi, vi = vi, data = es_data, method = "REML")
-    models$ML <- rma(yi = yi, vi = vi, data = es_data, method = "ML")
-    models$HK <- rma(yi = yi, vi = vi, data = es_data, method = "HK")
-    models$FE <- rma(yi = yi, vi = vi, data = es_data, method = "FE")
+    models$ML   <- rma(yi = yi, vi = vi, data = es_data, method = "ML")
+    models$FE   <- rma(yi = yi, vi = vi, data = es_data, method = "FE")
     
     # 汇总表
     model_summary <- data.frame(
@@ -307,6 +352,24 @@ run_sensitivity_analysis <- function(es_data, analysis_type = "all") {
     )
     
     results$model_comparison <- model_summary
+  }
+  
+  if (analysis_type %in% c("all", "cumul")) {
+    # 累积 Meta（按数据顺序逐个加入）
+    k <- nrow(es_data)
+    cum_est <- cum_lb <- cum_ub <- cum_I2 <- numeric(0)
+    for (i in seq_len(k)) {
+      cm <- rma(yi = yi, vi = vi, data = es_data[seq_len(i), , drop = FALSE],
+                method = "REML")
+      cum_est <- c(cum_est, cm$beta[1])
+      cum_lb  <- c(cum_lb, cm$ci.lb)
+      cum_ub  <- c(cum_ub, cm$ci.ub)
+      cum_I2  <- c(cum_I2, cm$I2)
+    }
+    results$cumul <- data.frame(
+      study    = es_data$study,
+      estimate = cum_est, ci_lb = cum_lb, ci_ub = cum_ub, I2 = cum_I2
+    )
   }
   
   return(results)
@@ -323,8 +386,8 @@ create_forest_plot <- function(es_data, model_result,
   library(ggplot2)
 
   if (is.null(transform)) transform <- "none"
-  f <- if (transform == "exp") exp else identity
-  ref <- if (transform == "exp") 1 else 0
+  f <- switch(transform, exp = exp, tanh = tanh, plogis = plogis, identity)
+  ref <- switch(transform, exp = 1, tanh = 0, plogis = 0.5, identity = 0)
 
   od <- order(es_data$yi, decreasing = TRUE)
   yi <- es_data$yi[od]; vi <- es_data$vi[od]; lab <- es_data$study[od]
@@ -341,7 +404,11 @@ create_forest_plot <- function(es_data, model_result,
   )
 
   if (is.null(xlab))
-    xlab <- if (transform == "exp") "Effect Ratio (95% CI)" else "Effect Size (95% CI)"
+    xlab <- switch(transform,
+                   exp    = "Effect Ratio (95% CI)",
+                   tanh   = "Correlation r (95% CI)",
+                   plogis = "Proportion (95% CI)",
+                   "Effect Size (95% CI)")
 
   p <- ggplot(d, aes(y = ypos)) +
     geom_vline(xintercept = ref, linetype = "dashed", color = "grey50", linewidth = 0.6) +
@@ -376,11 +443,12 @@ create_funnel_plot <- function(model_result,
   library(metafor)
 
   if (is.null(transform)) transform <- "none"
-  f <- if (transform == "exp") exp else identity
+  f <- switch(transform, exp = exp, tanh = tanh, plogis = plogis, identity)
 
   yi <- model_result$yi
   se <- sqrt(model_result$vi)
   pooled <- model_result$beta[1]
+  ref_null <- switch(transform, exp = 1, tanh = 0, plogis = 0.5, identity = 0)
 
   eg <- tryCatch(regtest(model_result), error = function(e) NULL)
   bg <- tryCatch(ranktest(model_result), error = function(e) NULL)
@@ -391,8 +459,8 @@ create_funnel_plot <- function(model_result,
   d <- data.frame(yi = yi, se = se, inv = 1 / se)
   p <- ggplot(d, aes(x = f(yi), y = inv)) +
     geom_vline(xintercept = f(pooled), color = "#c0392b", linetype = "dashed", linewidth = 0.8) +
-    geom_vline(xintercept = if (transform == "exp") 1 else 0, color = "grey60", linewidth = 0.4) +
-    geom_segment(aes(x = f(pooled) - 1.96 * se, xend = f(pooled) + 1.96 * se,
+    geom_vline(xintercept = ref_null, color = "grey60", linewidth = 0.4) +
+    geom_segment(aes(x = f(pooled - 1.96 * se), xend = f(pooled + 1.96 * se),
                      y = inv, yend = inv), color = "#a8d5f5", linewidth = 0.3) +
     geom_point(size = 3, color = "#2a3950", alpha = 0.85) +
     labs(x = if (transform == "exp") "Effect Ratio" else "Effect Size",
@@ -460,14 +528,20 @@ ma_analyze <- function(data, type, measure = NULL, cols = NULL,
   #' 统一 Meta 分析入口：效应量计算 -> 模型拟合 -> ma_result 对象
   #' @param type "binary"/"dichotomous" | "continuous" | "rate"/"irr" |
   #'             "precomp"(需 yi+vi 或 yi+se 或 effect+lower+upper) |
-  #'             "survival"(需 loghr+se 或 hr+lower+upper)
+  #'             "survival"(需 loghr+se 或 hr+lower+upper) |
+  #'             "correlation"(需 r+n, Fisher z) |
+  #'             "single_proportion"/"proportion"(需 events+n) |
+  #'             "single_mean"/"mean"(需 mean+sd+n)
   #' @param cols 列名映射，见 calculate_effect_size
   #' @param label_col 研究标签列名（可选）
   
   library(metafor)
   data <- as.data.frame(data)
-  if (!is.null(label_col) && label_col %in% names(data))
-    data$study <- as.character(data[[label_col]])
+  if (!is.null(label_col)) {
+    lc <- tolower(label_col)
+    if (lc %in% tolower(names(data))) data$study <- as.character(data[[lc]])
+  }
+  names(data) <- tolower(names(data))
   if (is.null(data$study))
     data$study <- paste0("Study ", seq_len(nrow(data)))
   
@@ -504,9 +578,34 @@ ma_analyze <- function(data, type, measure = NULL, cols = NULL,
                    data = data, measure = "HR")
     } else stop("survival 需提供 loghr+se 或 hr+lower+upper")
     transform <- "exp"
+  } else if (ot == "correlation") {
+    names(data) <- tolower(names(data))
+    if (is.null(data$r) || is.null(data$n)) stop("correlation 需提供 r + n")
+    if (is.null(measure)) measure <- "ZCOR"
+    es <- calculate_effect_size(data, "correlation", measure = measure, cols = cols)
+    transform <- "tanh"
+  } else if (ot %in% c("single_proportion", "proportion")) {
+    ot <- "single_proportion"
+    names(data) <- tolower(names(data))
+    if (is.null(data$events) || is.null(data$n)) stop("single_proportion 需提供 events + n")
+    if (is.null(measure)) measure <- "PLO"
+    es <- calculate_effect_size(data, "single_proportion", measure = measure, cols = cols)
+    transform <- if (measure == "PLO") "plogis" else "none"
+  } else if (ot %in% c("single_mean", "mean")) {
+    ot <- "single_mean"
+    names(data) <- tolower(names(data))
+    if (is.null(data$mean) || is.null(data$sd) || is.null(data$n))
+      stop("single_mean 需提供 mean + sd + n")
+    if (is.null(measure)) measure <- "MN"
+    es <- calculate_effect_size(data, "single_mean", measure = measure, cols = cols)
+    transform <- "none"
   } else {
     stop("Unknown type: ", type)
   }
+  
+  # 保留原始协变量列（precomp/survival 分支的 escalc 不会自动保留）
+  extras <- setdiff(names(data), names(es))
+  if (length(extras) > 0) es <- cbind(es, data[, extras, drop = FALSE])
   
   es$study <- data$study
   res <- run_meta_analysis(es, method = method, random_effects = random, test_type = test)

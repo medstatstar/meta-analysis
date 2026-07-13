@@ -90,6 +90,59 @@
 
 ---
 
+## Type 3b: Rate Ratio (IRR) / 率比数据
+
+**Required columns / 必填列**:
+
+| study | a | b | c | d | year |
+|-------|---|---|---|---|------|
+
+- `a`：处理组事件数；`b`：处理组人时（分母，person-time）
+- `c`：对照组事件数；`d`：对照组人时
+
+**调用**：`ma_analyze(data, type="rate", measure="IRR")`
+
+---
+
+## Type 3c: Correlation / 相关系数
+
+**Required columns / 必填列**:
+
+| study | r | n | year |
+|-------|---|---|------|
+
+- `r`：Pearson 相关系数；`n`：样本量
+
+**调用**：`ma_analyze(data, type="correlation")` → Fisher z 变换，森林/漏斗图自动反变换为 r
+
+---
+
+## Type 3d: Single-Group Proportion / 单组率
+
+**Required columns / 必填列**:
+
+| study | events | n | year |
+|-------|--------|---|------|
+
+- `events`：发生数；`n`：总数
+
+**调用**：`ma_analyze(data, type="single_proportion", measure="PLO")` → logit 变换（默认），图自动反变换为比例；量度 `PR` 为原始比例
+
+---
+
+## Type 3e: Single-Group Mean / 单组均值
+
+**Required columns / 必填列**:
+
+| study | mean | sd | n | year |
+|-------|------|----|---|------|
+
+- `mean`：均值；`sd`：标准差；`n`：样本量
+
+**调用**：`ma_analyze(data, type="single_mean", measure="MN")`
+
+---
+
 ## Type 4: File Upload / 文件上传
 
 **Supported formats / 支持格式**: `.csv`, `.xlsx`, `.xls`
