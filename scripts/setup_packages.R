@@ -61,7 +61,7 @@ for (pkg in all_pkgs) {
       install.packages(pkg, repos = "https://cran.r-project.org", quiet = TRUE)
       cat(" DONE ✓\n")
       results$installed[results$package == pkg] <- TRUE
-      results$version[results$package <- pkg] <- as.character(packageVersion(pkg))
+      results$version[results$package == pkg] <- as.character(packageVersion(pkg))
     }, error = function(e) {
       cat(sprintf(" FAILED ✗ (%s)\n", e$message))
     })

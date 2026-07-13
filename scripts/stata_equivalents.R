@@ -292,8 +292,9 @@ build_V_matrix_CS <- function(study_id, yi, vi, mean_effect = NULL, n_control = 
       for (i in 1:k) {
         for (j in 1:k) {
           if (i != j) {
-            # Compound symmetry 近似
-            V[i, j] <- mu^2 / (2 * 100)
+            # Cov(d_i, d_j) ≈ 1/n_control (standard approximation)
+            n0 <- if (!is.null(n_control)) n_control else max(k * 50, 30)
+            V[i, j] <- 1 / n0
           }
         }
       }

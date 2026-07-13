@@ -53,7 +53,7 @@ get_league_table <- function(netmeta_result,
   #' 生成联赛表（成对比较结果）
   
   random <- netleague(netmeta_result)
-  fixed <- netleague(netma_result, fixed = TRUE
+  fixed <- netleague(netmeta_result, fixed = TRUE)
   
   return(list(
     random = random$random,

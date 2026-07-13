@@ -7,9 +7,6 @@
 
 # ===================== esc 效应量包封装 =====================
 
-library(esc)
-library(metafor)
-
 run_esc_conversions <- function(data,
                                  input_type = "mean_sd",
                                  output_measure = "d",

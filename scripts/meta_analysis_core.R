@@ -266,7 +266,7 @@ run_sensitivity_analysis <- function(es_data, analysis_type = "all") {
   
   if (analysis_type %in% c("all", "quality")) {
     # 按质量分组（如果数据中有质量变量）
-    if ("quality" %inames(es_data)) {
+    if ("quality" %in% names(es_data)) {
       high_q <- es_data[es_data$quality == "low risk" | es_data$quality >= 6, ]
       if (nrow(high_q) >= 3) {
         high_q_model <- rma(yi = yi, vi = vi, data = high_q, method = "REML")
