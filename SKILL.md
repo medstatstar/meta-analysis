@@ -1,16 +1,18 @@
 ---
 name: meta-analysis
 cn_name: 医学Meta分析
+slug: meta-analysis
+displayName: Meta Analysis / 医学Meta分析
+version: 1.5.2
+summary: "基于 R 的全方位 Meta 分析技能：森林图/漏斗图/异质性(I²)/发表偏倚/亚组分析/元回归/网络 Meta/生存 Meta/TSA/单组率/诊断 Meta。所有分析提供可复现 R 代码（以 Python 模板内嵌，安装时由 check_integrity.sh 自动生成 .R 文件）。"
+license: MIT
 description: "Comprehensive R-based meta-analysis skill. Covers RevMan 5.x + Stata metareg/mvmeta + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnosis meta + review workflow. All analysis ships reproducible R code. / 基于R的全方位Meta分析技能。覆盖RevMan全部功能+Stata等价+esc+RVE+贝叶斯NMA(Stan/JAGS)+生存Meta+TSA+单组率Meta+诊断Meta+系统评价流程，所有分析提供可复现R代码。"
 triggers:
   - "meta分析"
   - "meta-analysis"
   - "系统评价"
-  - "systematic review"
   - "森林图"
-  - "forest plot"
   - "漏斗图"
-  - "funnel plot"
   - "异质性"
   - "I²"
   - "发表偏倚"
@@ -30,12 +32,11 @@ triggers:
   - "survmeta"
   - "TSA"
   - "诊断meta"
-  - "PRISMA"
 metadata:
   {
     "openclaw": { "emoji": "📊", "icon": "assets/icon.svg" },
     "authors": ["medstatstar", "phoe-zip"],
-    "version": "1.5.1",
+    "version": "1.5.2",
     "license": "MIT",
     "homepage": "https://github.com/medstatstar/meta-analysis",
     "tags": ["meta-analysis", "systematic-review", "clinical-trials", "R", "biostatistics", "evidence-based-medicine", "forest-plot", "network-meta-analysis", "bayesian", "metafor", "meta", "dmetar", "netmeta", "multinma", "gemtc", "revman", "robumeta", "clubSandwich", "esc", "dosresmeta", "mada", "metagear"],
@@ -65,7 +66,8 @@ Meta分析是循证医学的核心技术，但现有工具使用门槛较高。�
 1. **R env / 检查R**: `Rscript --version` → missing → https://cran.r-project.org/
 2. **Install / 安装策略**: `1️⃣ all now / 全部安装（推荐）` or `2️⃣ on demand / 按需安装`
    - Packages: `metafor meta dmetar netmeta ggplot2 esc clubSandwich robumeta bayesmeta multinma gemtc dosresmeta survmeta mada metagear gridExtra ggforestplot`
-3. **Workspace**: create `meta_analysis/` + `output/`
+   - ⚠️ 安装会连接 CRAN / GitHub 并写入你的 R 库（可能执行包的安装钩子代码）；请在受信任网络下进行，环境受限可选 `2️⃣ 按需安装`。
+3. **Workspace**: 在当前工作区创建 `meta_analysis/` + `output/`（⚠️ 会写入文件，请确保有写入权限且目录无误）。
 4. **Memory**: read `~/.workbuddy/MEMORY.md` for R config
 
 ## Interactive Guide / 交互式引导
@@ -88,7 +90,7 @@ Meta分析是循证医学的核心技术，但现有工具使用门槛较高。�
 [4] Effect Size: Mean→d | t/F/r→d | d↔Hedges'g | d↔logOR | r↔Z | OR↔logOR | Batch(escalc)
 [5] Viz: Forest(5 themes) | Funnel | Bubble | GOSH | Network | League Table | RoB Traffic-light | Power Curve | Drapery
 [6] Quality: RoB 1.0/2.0 | ROBINS-I | GRADE | PRISMA Checklist
-[7] Workflow: PRISMA Flow | Screening GUI | PDF Batch-download | Digitize | NNT Meta
+[7] Workflow: PRISMA Flow | Screening GUI | PDF Batch-download (⚠️ 需联网从外部服务获取全文，请确认版权/授权) | Digitize | NNT Meta
 
 Data formats & full details → `references/interactive_menu.md`
 
@@ -145,9 +147,9 @@ Column names are case-insensitive; override mapping via `cols = list(a="A", b="B
 
 ## Security & Scope / 安全与范围
 
-**Local only / 仅本地**: all R runs on user machine. No data transmitted.
-**Not clinical judgment / 不替代临床判断**: results require context.
-**No DB search / 不执行检索**: literature search not included.
+**运行模型 / Execution model**: R 分析在用户本地机器执行；但本技能在需要时会**从 CRAN / GitHub 安装 R 包（会修改你的 R 库，涉及网络连接与外部代码）**，并可**按你的明确指令从外部服务下载 PDF 全文（涉及网络，请自行确认版权/授权）**。分析产物默认写入当前工作区的 `meta_analysis/` 与 `output/` 目录。
+**不替代临床判断 / Not clinical judgment**: 结果需结合专业背景解读。
+**不检索文献库 / No literature DB search**: 本技能不含文献数据库检索；仅在你提供 DOI/PMID 时按需下载全文。
 
 ## Output / 输出
 
