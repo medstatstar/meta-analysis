@@ -13,7 +13,7 @@ SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPTS="$SKILL_ROOT/scripts"
 TEMPLATE="$SCRIPTS/r_templates.py"
 
-R_FILES=(meta_analysis_core.R effect_size_conversions.R network_meta_analysis.R setup_packages.R stata_equivalents.R)
+R_FILES=(meta_analysis_core.R effect_size_conversions.R network_meta_analysis.R setup_packages.R stata_equivalents.R advanced_functions.R)
 
 # 1) 若 .R 齐全，直接通过
 missing=0

@@ -1,12 +1,12 @@
-# esc / clubSandwich / robumeta 参考手册
+# esc / clubSandwich / robumeta Reference Manual
 
-## 一、esc 效应量包
+## I. esc Effect Size Package
 
-### 1.1 功能概览
+### 1.1 Overview
 
 `esc` 包（Effect Size Calculation）提供从原始统计量到标准效应量的转换，是 meta 分析数据准备阶段的利器。
 
-### 1.2 主要函数
+### 1.2 Main Functions
 
 | 函数 | 输入 | 输出 |
 |------|------|------|
@@ -17,7 +17,7 @@
 | `esc_or()` | OR + SE | d (logOR 变换) |
 | `esc_chisq()` | χ²/n | w (效应量) |
 
-### 1.3 转换路径
+### 1.3 Conversion Paths
 
 ```
 原始数据
@@ -41,16 +41,16 @@ esc_d_to_g <- function(d, n1, n2) {
 
 ---
 
-## 二、robumeta 稳健方差估计
+## II. robumeta Robust Variance Estimation
 
-### 2.1 核心思想
+### 2.1 Core Idea
 
 - **问题**：同一研究产生多个相关效应量，传统元分析假设独立性 → 方差估计偏小
 - **解决**：`robumeta` 基于 Huber-White 三明治方差估计器，仅假设研究间独立
 - **tau²估计**：使用 Fisher-z 小样本校正（Hunter-Schmidt 类）
 - **小样本p值**：使用 Satterthwaite 自由度近似
 
-### 2.2 常用设定
+### 2.2 Common Settings
 
 | Setting | 描述 | 何时用 |
 |---------|------|--------|
@@ -59,7 +59,7 @@ esc_d_to_g <- function(d, n1, n2) {
 | `"Small"` | 强制小样本校正 | < 10 项研究 |
 | `"Fisher"` | Fisher-z 变换版 | 效应量为 OR/HR |
 
-### 2.3 完整工作流
+### 2.3 Complete Workflow
 
 ```r
 library(robumeta)
@@ -85,7 +85,7 @@ cat(sprintf("Satterthwaite df: %.1f\n", fit$dfs))
 cat(sprintf("Robust p-value: %.4f\n", fit$pval))
 ```
 
-### 2.4 元回归（多个协变量）
+### 2.4 Meta-Regression (Multiple Covariates)
 
 ```r
 # 多变量元回归
@@ -101,7 +101,7 @@ fit_mod <- robu(
 anova(fit_mod)
 ```
 
-### 2.5 森林图
+### 2.5 Forest Plot
 
 ```r
 library(ggplot2)
@@ -117,14 +117,14 @@ ggplot(mapping = aes(x = estimate, y = study_id)) +
 
 ---
 
-## 三、clubSandwich + metafor 联合
+## III. clubSandwich + metafor Combined
 
-### 3.1 为什么需要联合
+### 3.1 Why Combine
 
 `rma.mv()` 可拟合正确的层次结构，但渐近 SE 在小样本下过于乐观。  
 `clubSandwich` 提供 **HC0-HC5** 和 **CR0-CR4** 校正，其中 **CR2** 被广泛推荐。
 
-### 3.2 CR 校正类型
+### 3.2 CR Correction Types
 
 | 类型 | 描述 | 小样本恢复 |
 |------|------|-----------|
@@ -134,7 +134,7 @@ ggplot(mapping = aes(x = estimate, y = study_id)) +
 | CR3 | Jackknife | ✅ |
 | CR4 | 高杠杆调整 | ✅ |
 
-### 3.3 完整流程
+### 3.3 Complete Workflow
 
 ```r
 library(metafor)
@@ -179,9 +179,9 @@ V_imputed <- impute.vcov(
 
 ---
 
-## 四、效应量研究内相关的估计
+## IV. Estimation of Within-Study Effect Correlation
 
-### 4.1 从研究报告中获取 ρ
+### 4.1 Obtain ρ from Study Reports
 
 同一研究内多个结局的效应量相关性（ρ）可通过以下方法获取：
 
@@ -190,7 +190,7 @@ V_imputed <- impute.vcov(
 3. **敏感性分析**：ρ = 0.2, 0.4, 0.6, 0.8 多种情况
 4. **estomega**: `robumeta` 可内部估计研究内相关
 
-### 4.2 敏感性分析框架
+### 4.2 Sensitivity Analysis Framework
 
 ```r
 # 不同 rho 下的结果稳定性
@@ -206,16 +206,16 @@ lapply(rho_values, function(r) {
 
 ---
 
-## 五、检查清单
+## V. Checklist
 
-### 使用 robumeta 前的必要性判断
+### Necessity Check Before Using robumeta
 
 - [ ] 是否有研究产生 >1 个效应量？
 - [ ] 研究数量 < 20？（小样本下 RVE 更重要）
 - [ ] 是否计划纳入协变量（元回归）？
 - [ ] 效应量度量是否适合 Fisher-z 变换？（OR/HR 适合，OR/SMD 需考虑）
 
-### 使用 clubSandwich 前的准备
+### Preparation Before Using clubSandwich
 
 - [ ] 已用 `rma.mv()` 拟合多水平模型？
 - [ ] 已构建/估计 V 矩阵（或愿意用 `impute.vcov()`）？
@@ -224,7 +224,7 @@ lapply(rho_values, function(r) {
 
 ---
 
-## 六、推荐使用场景
+## VI. Recommended Use Cases
 
 | 场景 | 推荐包 | R 函数 |
 |------|--------|--------|
@@ -237,7 +237,7 @@ lapply(rho_values, function(r) {
 
 ---
 
-## 七、引用格式
+## VII. Citation Format
 
 1. **esc**: Lüdecke D (2019). esc: Effect Size Computation for Meta-Analysis. R package version 0.5.1.
 

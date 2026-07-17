@@ -121,68 +121,86 @@ run_esc_conversions <- function(data,
 run_esc_transform <- function(yi, vi, 
                                 from_measure = "d",
                                 to_measure = "logOR",
+                                a = 4,
                                 ...) {
-  #' @title 效应量相互转换
+  #' @title 效应量相互转换（标准 Borenstein 2009 公式）
   #' @description 
-  #'   在不同效应量度量之间单向转换
-  #'   支持：d (Hedges' g) ↔ logOR ↔ r (Fisher's z)
-  #'   d → logOR → z 方向使用以下公式：
-  #'   logOR = d * pi / sqrt(3)
-  #'   z = 0.5 * log((1+r)/(1-r))
+  #'   在不同效应量度量之间转换，全部采用 Borenstein, Hedges,
+  #'   Higgins & Rothstein (2009, Ch.7) 的标准公式（含正确的
+  #'   方差传播），不再使用任何粗略近似。
+  #'   支持三种度量：
+  #'     "d"     标准化均差 (Cohen's d / Hedges' g)，yi=d,  vi=Vd
+  #'     "logor" 对数优势比 (log Odds Ratio)，        yi=logOR, vi=VlogOR
+  #'     "cor"   相关系数（以 Fisher's z 存储）,       yi=z,  vi=Vz
+  #'   转换公式：
+  #'     d ↔ logOR : logOR = d·π/√3 ,  VlogOR = Vd·π²/3        (Chinn 2000)
+  #'     d → cor   : r = d/√(d²+a) , Vr = a²·Vd/(d²+a)³ ,
+  #'                 z = atanh(r) ,  Vz = Vr/(1-r²)²
+  #'     cor → d   : r = tanh(z) , Vr = Vz·(1-r²)² ,
+  #'                 d = 2r/√(1-r²) , Vd = 4·Vr/(1-r²)³
+  #'     logOR ↔ cor 经由 d 中转，保证链式一致。
   #' @param yi 效应量
   #' @param vi 抽样方差
+  #' @param a d↔r 转换系数 a=(n1+n2)²/(n1·n2)，等分组时 a=4（默认）
   
   from <- tolower(from_measure)
   to <- tolower(to_measure)
   
-  result <- list()
+  # ---- 内部标准转换 helper（全部返回 list(yi, vi)）----
+  .d_to_logor <- function(d, vd) {
+    list(yi = d * pi / sqrt(3), vi = vd * pi^2 / 3)
+  }
+  .logor_to_d <- function(lor, vlor) {
+    list(yi = lor * sqrt(3) / pi, vi = vlor * 3 / pi^2)
+  }
+  .d_to_z <- function(d, vd) {
+    r  <- d / sqrt(d^2 + a)
+    vr <- a^2 * vd / (d^2 + a)^3
+    z  <- atanh(r)                 # 0.5*log((1+r)/(1-r))
+    vz <- vr / (1 - r^2)^2
+    list(yi = z, vi = vz)
+  }
+  .z_to_d <- function(z, vz) {
+    r  <- tanh(z)
+    vr <- vz * (1 - r^2)^2
+    d  <- 2 * r / sqrt(1 - r^2)
+    vd <- 4 * vr / (1 - r^2)^3
+    list(yi = d, vi = vd)
+  }
   
-  if (from == "d" & to == "logor") {
-    # Hedges' g → log Odds Ratio (Chinn 2000)
-    yi_new <- yi * pi / sqrt(3)
-    vi_new <- vi * pi^2 / 3
+  if (from == to) {
+    out <- list(yi = yi, vi = vi)
+  } else if (from == "d" & to == "logor") {
+    out <- .d_to_logor(yi, vi)
   } else if (from == "logor" & to == "d") {
-    # logOR → Hedges' g
-    yi_new <- yi * sqrt(3) / pi
-    vi_new <- vi * 3 / (pi^2)
+    out <- .logor_to_d(yi, vi)
   } else if (from == "d" & to == "cor") {
-    # Hedges' g → Pearson r (Borenstein 2009)
-    a <- 1  # 等样本的近似
-    r <- yi / sqrt(yi^2 + a)
-    yi_new <- 0.5 * log((1 + r) / (1 - r))  # Fisher's z
-    vi_new <- vi / (1 - r^2)^2
+    out <- .d_to_z(yi, vi)
   } else if (from == "cor" & to == "d") {
-    # Fisher's z → Pearson r → Hedges' g
-    r <- tanh(yi)
-    yi_new <- 2 * r / sqrt(1 - r^2)  # rough conversion
-    vi_new <- 4 * vi / (1 - r^2)^2
+    out <- .z_to_d(yi, vi)
   } else if (from == "logor" & to == "cor") {
-    # logOR → d → r
-    d <- yi * sqrt(3) / pi
-    a <- 1
-    r <- d / sqrt(d^2 + a)
-    yi_new <- 0.5 * log((1 + r) / (1 - r))
-    vi_new <- vi * 3 / pi^2 * (1 / (1 - r^2))^2
+    tmp <- .logor_to_d(yi, vi)     # logOR → d
+    out <- .d_to_z(tmp$yi, tmp$vi) # d → z
   } else if (from == "cor" & to == "logor") {
-    # r → d → logOR
-    d <- tanh(yi) * 2  # rough
-    yi_new <- d * pi / sqrt(3)
-    vi_new <- (2 * vi / (1 - tanh(yi)^2)) * pi^2 / 3
+    tmp <- .z_to_d(yi, vi)         # z → d
+    out <- .d_to_logor(tmp$yi, tmp$vi) # d → logOR
   } else {
-    cat(sprintf("Conversion from %s to %s may not be supported.\n",
+    cat(sprintf("Conversion from %s to %s not supported (use d / logor / cor).\n",
                 from_measure, to_measure))
     return(list(yi = yi, vi = vi))
   }
   
-  result$yi <- yi_new
-  result$vi <- vi_new
-  result$from <- from_measure
-  result$to <- to_measure
+  result <- list(
+    yi   = out$yi,
+    vi   = out$vi,
+    from = from_measure,
+    to   = to_measure
+  )
   
   cat(sprintf("Converted: %s → %s | yi: [%.3f, %.3f] → [%.3f, %.3f]\n",
               from_measure, to_measure,
               min(yi), max(yi),
-              min(yi_new), max(yi_new)))
+              min(out$yi), max(out$yi)))
   
   return(result)
 }
@@ -190,7 +208,7 @@ run_esc_transform <- function(yi, vi,
 
 # ===================== Cohen's d → Hedges' g 校正 =====================
 
-correct_d_to_g <- function(d, total_n, 
+correct_d_to_g <- function(d, total_n, vi = NULL,
                             type = "Hedges_correction") {
   #' @title Cohen's d → Hedges' g 校正
   #' @description Cohen's d 是有偏估计，需校正为 Hedges' g
@@ -198,26 +216,37 @@ correct_d_to_g <- function(d, total_n,
   #'              J(df) ≈ 1 − 3/(4df − 1)
   #' @param d Cohen's d 值（向量）
   #' @param total_n 总样本量 N（用于计算 df）
+  #' @param vi Cohen's d 的抽样方差（向量）。若为 NULL，按等分组近似
+  #'           vi_d ≈ 4/N × (1 + d²/8) 估计（Borenstein 2009）
   #' @param type 校正方法："Hedges_correction"(默认), "Glass_delta"
-  
+
+  # df 与 J 校正因子（两种方法都需要用于报告）
+  df <- total_n - 2
+  J <- 1 - 3 / (4 * df - 1)
+
+  # 若未提供 d 的方差，用等分组近似
+  if (is.null(vi)) {
+    vi <- 4 / total_n * (1 + d^2 / 8)
+    message("vi 未提供，已用等分组近似 vi_d = 4/N*(1 + d^2/8)")
+  }
+
   if (type == "Hedges_correction") {
-    df <- total_n - 2
-    J <- 1 - 3 / (4 * df - 1)
     g <- J * d
     vi_g <- J^2 * vi
-        
   } else if (type == "Glass_delta") {
-    # 使用对照组 SD（不同时使用合并 SD）
+    # 不做无偏校正，直接沿用（Glass' delta 用对照组 SD 定义）
     g <- d
     vi_g <- vi
+  } else {
+    stop("type not supported: ", type)
   }
-  
+
   cat("================================================\n")
   cat(" Cohen's d → Hedges' g correction\n")
   cat(sprintf("  Average J correction: %.4f\n", mean(J)))
   cat(sprintf("  Mean d: %.3f → Mean g: %.3f\n", mean(d), mean(g)))
   cat("================================================\n")
-  
+
   return(list(g = g, vi = vi_g, J = J))
 }
 

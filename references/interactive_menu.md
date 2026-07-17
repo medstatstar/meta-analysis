@@ -162,7 +162,7 @@ Select tool / 选择工具:
 
 ## Dialogue Examples / 对话示例
 
-### Example 1: Single-Group Meta
+### Example 1: Single-Group Meta / 单组率Meta示例
 ```
 User: 我有几个研究的发病率，想合并
 LLM: Got it! What type of single-group data?
@@ -180,7 +180,7 @@ LLM: ✅ 8 studies, random-effects (DL) with logit transform.
      [Forest plot + funnel plot]
 ```
 
-### Example 2: Bayesian NMA
+### Example 2: Bayesian NMA / 贝叶斯NMA示例
 ```
 User: 我想做个贝叶斯NMA，比较有5种药的生存数据
 LLM: Understood. Bayesian NMA with survival outcomes.
@@ -201,7 +201,7 @@ User: [data uploaded]
 LLM: ✅ Running... Stan MCMC (4 chains, 4000 iter)... Results below [NMA plot + league + rank]
 ```
 
-### Example 3: TSA
+### Example 3: TSA / TSA示例
 ```
 User: 我想看下Meta分析需不需要更多研究
 LLM: Trial Sequential Analysis (TSA) - monitors Type I error.
@@ -215,7 +215,7 @@ LLM: ✅ TSA result:
      [TSA plot]
 ```
 
-### Example 4: Systematic Review Workflow
+### Example 4: Systematic Review Workflow / 系统评价流程示例
 ```
 User: 帮我生成PRISMA流程图
 LLM: Sure, please provide:

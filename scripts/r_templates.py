@@ -7,8 +7,9 @@ from r_effect_size_conversions import materialize as _m_esc
 from r_network_meta_analysis import materialize as _m_net
 from r_setup_packages import materialize as _m_setup
 from r_stata_equivalents import materialize as _m_stata
+from r_advanced_functions import materialize as _m_adv
 
-MODULES = [_m_core, _m_esc, _m_net, _m_setup, _m_stata]
+MODULES = [_m_core, _m_esc, _m_net, _m_setup, _m_stata, _m_adv]
 
 
 def materialize_all(scripts_dir=None):

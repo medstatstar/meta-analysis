@@ -1,6 +1,6 @@
 # Complete References / 完整引用
 
-## Core Packages
+## Core Packages / 核心包
 
 | Package | Citation |
 |---------|----------|
@@ -20,7 +20,7 @@
 | **metagear** | R metagear package for systematic review workflow. |
 | **pcmeta** | Proportional cumulative odds meta-analysis for ordered outcomes. |
 
-## Methodological References
+## Methodological References / 方法学文献
 
 - Cochrane Handbook for Systematic Reviews of Interventions (v6.3, 2022)
 - PRISMA 2020: Page MJ, et al. *BMJ*, 372, n71.

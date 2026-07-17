@@ -389,8 +389,23 @@ create_forest_plot <- function(es_data, model_result,
                                xlab = NULL,
                                title = "Forest Plot") {
   #' 出版级森林图（ggplot2，可编辑 SVG）。OR/RR/IRR 自动指数化显示。
+  #' @param style 5 种配色主题："revman"(默认,蓝绿) | "classic"(黑白经典) |
+  #'              "modern"(青橙) | "lancet"(Lancet 深红蓝) | "nejm"(NEJM 蓝金)
   #' @param transform "exp"(参考线=1) 或 "none"(参考线=0)
   library(ggplot2)
+
+  # ---- 5 主题配色（study_col=研究点, pooled_col=合并菱形, pooled_shape）----
+  themes <- list(
+    revman  = list(study = "#2a3950", pooled = "#0f9b81", pshape = 23),
+    classic = list(study = "#000000", pooled = "#000000", pshape = 23),
+    modern  = list(study = "#1f77b4", pooled = "#ff7f0e", pshape = 18),
+    lancet  = list(study = "#00468B", pooled = "#AD002A", pshape = 23),
+    nejm    = list(study = "#0072B5", pooled = "#BC3C29", pshape = 18)
+  )
+  th <- if (!is.null(themes[[style]])) themes[[style]] else themes[["revman"]]
+  col_study  <- th$study
+  col_pooled <- th$pooled
+  pooled_shape <- th$pshape
 
   if (is.null(transform)) transform <- "none"
   f <- switch(transform, exp = exp, tanh = tanh, plogis = plogis, identity)
@@ -420,18 +435,18 @@ create_forest_plot <- function(es_data, model_result,
   p <- ggplot(d, aes(y = ypos)) +
     geom_vline(xintercept = ref, linetype = "dashed", color = "grey50", linewidth = 0.6) +
     geom_errorbar(aes(xmin = lo, xmax = hi, y = ypos), orientation = "y",
-                  width = 0.25, linewidth = 0.5, color = "#2a3950") +
+                  width = 0.25, linewidth = 0.5, color = col_study) +
     geom_point(data = d[d$label != "Pooled", ], aes(x = est, size = w),
-               shape = 15, color = "#2a3950") +
+               shape = 15, color = col_study) +
     scale_size(range = c(2, 6), guide = "none") +
-    geom_point(data = d[d$label == "Pooled", ], aes(x = est), shape = 23,
-               fill = "#0f9b81", color = "#0f9b81", size = 5) +
+    geom_point(data = d[d$label == "Pooled", ], aes(x = est), shape = pooled_shape,
+               fill = col_pooled, color = col_pooled, size = 5) +
     scale_y_continuous(breaks = d$ypos, labels = d$label,
                        limits = c(0.5, k + 1.5)) +
     annotate("text", x = max(d$hi) * 1.03, y = 1,
              label = sprintf("%.2f [%.2f, %.2f]", f(model_result$beta[1]),
                              f(model_result$ci.lb), f(model_result$ci.ub)),
-             hjust = 0, size = 3, fontface = "bold", color = "#0f9b81") +
+             hjust = 0, size = 3, fontface = "bold", color = col_pooled) +
     labs(x = xlab, y = "", title = title) +
     theme_minimal() +
     theme(plot.title = element_text(face = "bold"),

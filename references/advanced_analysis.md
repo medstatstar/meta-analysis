@@ -1,6 +1,6 @@
-# 高级分析方法
+# Advanced Analysis Methods / 高级分析方法
 
-## 目录
+## 目录 / Table of Contents
 
 1. [多水平元分析 (Multilevel Meta-Analysis)](#1-多水平元分析)
 2. [多元元分析 (Multivariate Meta-Analysis)](#2-多元元分析)
@@ -13,11 +13,11 @@
 
 ---
 
-## 1. 多水平元分析
+## 1. Multilevel Meta-Analysis / 多水平元分析
 
 **适用于**：同一研究报告多个结局、多组比较、或研究间存在聚类结构。
 
-### 1.1 三水平模型
+### 1.1 Three-Level Model / 三水平模型
 
 ```r
 library(metafor)
@@ -48,7 +48,7 @@ mlma_het <- rma.mv(
 )
 ```
 
-### 1.2 多臂研究处理
+### 1.2 Multi-Arm Study Handling / 多臂研究处理
 
 ```r
 # 多臂研究（Bolding et al. 处理方法）
@@ -82,7 +82,7 @@ mlma_result <- rma.mv(
 
 ---
 
-## 2. 多元元分析
+## 2. Multivariate Meta-Analysis / 多元元分析
 
 **适用于**：同时分析多个相关结局（如血压的收缩压和舒张压）。
 
@@ -118,7 +118,7 @@ anova(mvma_CS, mvma_UN)  # 检验结构选择
 
 ---
 
-## 3. IPD 元分析
+## 3. IPD Meta-Analysis / IPD 元分析
 
 **适用于**：获得原始个体参与者数据（最理想情况）。
 
@@ -141,7 +141,7 @@ standard_errors <- sapply(ipd_within, function(m) summary(m)$coefficients["treat
 # 合并
 two_step_result <- metagen(
   TE = effect_estimates,
-  seTE = standard_edges,
+  seTE = standard_errors,
   sm = "OR"
 )
 
@@ -155,7 +155,7 @@ one_step_result <- glm(
 
 ---
 
-## 4. 贝叶斯网状 Meta 分析
+## 4. Bayesian Network Meta-Analysis / 贝叶斯网状 Meta 分析
 
 **适用于**：≥3 种干预需要排序，考虑先验信息。
 
@@ -203,7 +203,7 @@ gelman.diag(results)
 plot(results)  # 后验密度图
 ```
 
-### 4.1 贝叶斯 NMA 进阶
+### 4.1 Advanced Bayesian NMA / 贝叶斯 NMA 进阶
 
 ```r
 # 加入协变量调整
@@ -224,7 +224,7 @@ model_adjusted <- mtc.model(
 
 ---
 
-## 5. 元分析中的因果推断
+## 5. Causal Inference in Meta-Analysis / 元分析中的因果推断
 
 **适用于**：目标 trial emulation（在观察性研究 meta 中模拟 RCT）。
 
@@ -252,38 +252,53 @@ weighted_rma <- rma(
 
 ---
 
-## 6. 剂量反应 Meta analysis
+## 6. Dose-Response Meta-Analysis (dosresmeta run_dose_resp) / 剂量反应 Meta 分析（dosresmeta 封装 run_dose_resp）
 
-**适用于**：评估暴露剂量与疾病风险的非线性关系。
+**适用于**：评估暴露剂量与疾病风险的（线性/曲线）关系。
 
-library(dosresmeta)
+> ✅ **优先调用封装** `run_dose_resp()`（在 `advanced_functions.R`）。它已固化两处关键区分与
+> 易错点，避免手写 dosresmeta 时踩坑：
+> 1. **模型形状**（线性/二次曲线）由 `shape` 控制并写入 formula —— **不要**用 `type` 或
+>    虚构的 `degree` 参数来控制形状（dosresmeta 无 `degree`）。
+> 2. dosresmeta 的 `type` 参数**专指二分类的“研究设计”**（`cc`=病例对照 / `ci`=累积发病 /
+>    `ir`=发病率），经 `study_design` 传入（列名或统一字符串）。
+> 3. 协方差近似 `covariance` 合法值：`gl / h / md / smd / user / indep`（**无 "ho"**）。
+>    缺省：二分类 `gl`，连续型 `smd`。
 
-cr_oneslope <- dosresmeta(
-  logOR ~ dose,
-  id = study,
-  type = type,  # "cc" = case-control, "ir" = incidence rate
-  se = se,
-  cases = cases,
-  n = n,
-  data = dose_data,
-  method = "reml",
-  degree = 2    # 多项式阶数（1=线性, 2=二次）
+```r
+source("scripts/advanced_functions.R")
+
+# ---- 二分类结局（logRR/logOR + cases + n + 研究设计 type）----
+data(alcohol_cvd)   # cols: id/author/type/dose/cases/n/logrr/se
+dr_lin <- run_dose_resp(
+  yi = "logrr", dose = "dose", id = "id", data = alcohol_cvd,
+  outcome = "binary", shape = "linear",
+  se = "se", cases = "cases", n = "n",
+  study_design = "type"        # 列名，值为 cc/ci
+)                              # -> gl 协方差近似
+
+dr_quad <- run_dose_resp(       # 二次曲线：logrr ~ dose + I(dose^2)
+  yi = "logrr", dose = "dose", id = "id", data = alcohol_cvd,
+  outcome = "binary", shape = "quadratic",
+  se = "se", cases = "cases", n = "n", study_design = "type"
 )
 
-cr_multislopes <- dosresmeta(
-  logOR ~ dose + I(dose^2),
-  id = study,
-  type = type,
-  se = se,
-  data = dose_data
+# ---- 连续型结局（均数 + sd + n）----
+data(ari)                       # cols: id/author/dose/y/sd/n
+dr_cont <- run_dose_resp(
+  yi = "y", dose = "dose", id = "id", data = ari,
+  outcome = "continuous", shape = "linear",
+  sd = "sd", n = "n"           # -> smd 协方差近似
 )
 
-plot(cr_oneslope)
-summary(cr_oneslope)
+# 返回 list(fit, plot)；plot 为剂量-反应曲线(含 95%CI 带)，参照点取最小剂量
+summary(dr_lin$fit)
+if (!is.null(dr_lin$plot)) print(dr_lin$plot)
+```
 
 ---
 
-## 7. 罕见事件 Meta-Analysis
+## 7. 罕见事件 Meta-Analysis / 罕见事件Meta分析
 
 **适用**：多项研究零事件时传统方法偏倚。
 
@@ -321,7 +336,7 @@ bayes_zero <- bayesmeta(
 
 ---
 
-## 8. 预测区间
+## 8. Prediction Interval / 预测区间
 
 ```r
 # 预测区间 — 衡量新研究可能落入的范围
@@ -354,7 +369,7 @@ forest(result,
 
 ---
 
-## 9. 元分析中的模型诊断
+## 9. Model Diagnostics in Meta-Analysis / 元分析中的模型诊断
 
 ```r
 # 影响分析
@@ -380,36 +395,44 @@ forest(result,
 
 ---
 
-## 10. 样本量规划与功效分析
+## 10. Sample Size Planning & Power Analysis / 样本量规划与功效分析
+
+> **优先调用封装** / Prefer the wrapper: `source("scripts/advanced_functions.R")` →
+> `run_power_curve()`。该函数**自实现无外部依赖**（Valentine/Borenstein 功效公式，
+> 含固定效应与随机效应 I² 校正双曲线），返回 `$data` / `$plot` / `$k_needed` / `$v_study`，
+> 比 `metapower` / `dmetar` 更稳健（避免包缺失/API 变动）。
 
 ```r
-library(metapower)
+source("scripts/advanced_functions.R")
 
-# 前瞻性研究: 需要多少研究?
-mpower_result <- mpower(
-  d = 0.3,           # 预期效应量
-  k = NULL,          # 研究数量
-  n1 = 50,           # 处理组样本量
-  n2 = 50,           # 对照组样本量
-  i2 = 50,           # 异质性水平
-  es_measure = "d"   # 效应量度量
+# 功效曲线: 固定研究间样本量，研究数 k 从 2 到 30 时功效如何变化
+pc <- run_power_curve(
+  effect       = 0.3,     # 预期效应量 (d)
+  n1 = 50, n2 = 50,       # 每研究两组样本量
+  k_range      = 2:30,    # 研究数扫描范围
+  i2           = 0.5,     # 异质性 (0–1)
+  measure      = "d",
+  sig_level    = 0.05,
+  target_power = 0.80
 )
 
-# 反向计算: 给定研究数，多大概率能检测到效应?
-p_power <- power_d(
-  d = 0.3,
-  k = 15,
-  n1 = 50,
-  n2 = 50,
-  i2 = 50
-)
+pc$k_needed          # 达到 80% 功效所需的最少研究数（随机效应，含 I²）
+print(pc$plot)       # ggplot 功效曲线（固定 vs 随机双线 + 目标功效参考线）
+ggsave("power_curve.png", pc$plot, width = 8, height = 5, dpi = 300)
+```
 
-# 计算需要的研庙数量
-required_k <- power_d(
-  d = 0.3,
-  power = 0.80,
-  sig_level = 0.05,
-  i2 = 50,
-  heterogeneity = "fixed"
+### 备选：metapower::mpower()（如需其可视化）
+
+```r
+library(metapower)   # 若缺失: install.packages("metapower")
+
+# 注意真实 API 参数名（非 power_d，此函数不存在）
+mp <- mpower(
+  effect_size = 0.3,   # 预期效应量
+  study_size  = 100,   # 每研究总样本量 (n1+n2)
+  k           = 15,    # 研究数量
+  i2          = 0.5,   # 异质性
+  es_type     = "d"    # d | or | r
 )
+print(mp)            # mp$power 观测功效; plot_mpower(mp) 出图
 ```

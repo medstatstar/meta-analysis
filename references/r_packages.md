@@ -1,8 +1,8 @@
-# R 包功能详解与安装指南
+# R Package Guide & Installation / R 包功能详解与安装指南
 
-## 核心包对比
+## 核心包对比 / Core Package Comparison
 
-### 1. metafor（统计引擎，必装）
+### 1. metafor (Core Engine, Required) / metafor（统计引擎，必装）
 
 **安装**：
 ```r
@@ -45,7 +45,7 @@ install.packages("metafor")
 | `HR` | 风险比 | 生存分析 |
 | `IRR` | 发生率比(对数) | `xi, ti` |
 
-### 2. meta（RevMan 兼容，必装）
+### 2. meta (RevMan Compatible, Required) / meta（RevMan 兼容，必装）
 
 **安装**：
 ```r
@@ -78,7 +78,7 @@ install.packages("meta")
 - 自动计算效应量
 - Cochrane Review 兼容输出
 
-### 3. dmetar（辅助扩展，强烈推荐）
+### 3. dmetar (Helper Extension, Recommended) / dmetar（辅助扩展，强烈推荐）
 
 **安装**：
 ```r
@@ -101,7 +101,7 @@ remotes::install_github("MathiasHarrer/dmetar")
 | `InfluenceAnalysis()` | 影响力分析 | metafor |
 | `功率分析()` | `power.analysis()` | 模拟 |
 
-### 4. netmeta（网状meta，必装）
+### 4. netmeta (Network Meta, Required) / netmeta（网状meta，必装）
 
 **安装**：
 ```r
@@ -121,7 +121,7 @@ install.packages("netmeta")
 | `netposet()` | 干预偏序 |
 | `mnp()` | 多参数 NMA |
 
-### 5. bayesmeta（贝叶斯，可选）
+### 5. bayesmeta (Bayesian, Optional) / bayesmeta（贝叶斯，可选）
 
 **安装**：
 ```r
@@ -136,7 +136,7 @@ install.packages("bayesmeta")
 | `forest.bayesmeta()` | 森林图 |
 | `forestplot.bayesmeta()` | 出版级森林图 |
 
-### 6. 可选增强包
+### 6. Optional Enhancement Packages / 可选增强包
 
 | 包 | 用途 | 安装 |
 |----|------|------|
@@ -152,7 +152,7 @@ install.packages("bayesmeta")
 
 ---
 
-## 安装脚本（一键安装所有推荐包）
+## 安装脚本（一键安装所有推荐包） / Installation Script (One-Click All Recommended)
 
 ```r
 install_meta_packages <- function(advanced = TRUE) {
@@ -184,7 +184,7 @@ install_meta_packages(advanced = TRUE)
 
 ---
 
-## 诊断与故障排除
+## 诊断与故障排除 / Diagnostics & Troubleshooting
 
 | 问题 | 原因 | 解决 |
 |------|------|------|

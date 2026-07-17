@@ -1,8 +1,8 @@
-# Meta-Analysis 技能引用规范
+# Meta-Analysis Skill Citation Guide / Meta-Analysis 技能引用规范
 
-## 核心 R 包引用（完整版）
+## 核心 R 包引用（完整版） / Core R Package Citations (Full)
 
-### 英文期刊引用格式
+### 英文期刊引用格式 / English Journal Citation Format
 
 1. **R**: R Core Team (2024). R: A language and environment for statistical computing. R Foundation for Statistical Computing, Vienna, Austria. https://www.R-project.org/
 
@@ -26,7 +26,7 @@
 
 11. **metasens**: Schwarzer, G., Carpenter, J. R., & Rücker, G. (2023). *Meta-Analysis with R*. Springer. https://link.springer.com/book/10.1007/978-3-319-21416-0
 
-### 中文论文引用格式
+### 中文论文引用格式 / Chinese Paper Citation Format
 
 1. R Core Team. R: A language and environment for statistical computing [Internet]. Vienna, Austria: R Foundation for Statistical Computing; 2024.
 
@@ -44,7 +44,7 @@
 
 14. **clubSandwich**: Pustejovsky, J. (2022). clubSandwich: Cluster-Robust (Sandwich) Variance Estimators with Small-Sample Corrections (Version 0.5.10). https://CRAN.R-project.org/package=clubSandwich
 
-### 推荐综述文献（方法学质量较高）
+### 推荐综述文献（方法学质量较高） / Recommended Review Articles
 
 1. Page, M. J., et al. (2021). The PRISMA 2020 statement: an updated guideline for reporting systematic reviews. *BMJ*, 372, n71.
 

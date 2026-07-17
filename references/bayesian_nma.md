@@ -2,6 +2,19 @@
 
 > two major backends: **multinma (Stan)** and **gemtc (JAGS)**. Both handle consistency/inconsistency modeling.
 
+> ⚠️ **环境限制**：multinma 需 Stan（cmdstanr/rstan 工具链）、gemtc 需 JAGS，**均需外部编译**，
+> 本沙盒无法运行。封装 `run_bayes_nma_multinma()` / `run_bayes_nma_gemtc()` 仅做**语法校验 +
+> 友好提示**，请在**本机**装好 Stan/JAGS 后运行，并以本机安装版本的 `?multinma::nma` /
+> `?gemtc::mtc.model` 实际签名为准。
+>
+> ✅ **优先调用封装**（在 `advanced_functions.R`），参数默认值已按官方文档固化：
+> ```r
+> source("scripts/advanced_functions.R")
+> bn <- run_bayes_nma_multinma(prep, priors, response = "events", distribution = "binomial")
+> bg <- run_bayes_nma_gemtc(data.ab, treatments, studies, type = "consistency",
+>                           link = "logit", likelihood = "binomial", linearModel = "random")
+> ```
+
 ---
 
 ## multinma — Stan Backend (NICE Preferred) / Stan后端
@@ -23,9 +36,8 @@ fit <- nma(
   n = "n",
   study = "study",
   treatment = "treatment",
-  priors = priors,
   distribution = "binomial",
-  prior = priors,
+  priors = priors,          # 仅此一处，勿再传 prior=（重复会报错）
   chains = 4,
   iter = 4000,
   seed = 123
@@ -57,18 +69,22 @@ plot(fit_surv, outcome = "survival")
 
 ### ML-NMR Population Adjustment / 人群校正
 
+> ⚠️ multinma **无** `nlme_nma()` 函数（历史文档误写）。ML-NMR 人群校正仍用 `nma()`，
+> 通过 `regression = ~ 协变量交互` 指定，并需先用 `add_integration()` 对总体协变量做数值积分。
+
 ```r
-fit_mlnmr <- nlme_nma(
+# 1) 对聚合数据的效应修饰协变量做积分点（IPD 研究可跳过）
+prep <- add_integration(prep, covariate = distr(qnorm, mean = age_mean, sd = age_sd))
+
+# 2) 用 nma() + regression 拟合 ML-NMR（非 nlme_nma）
+fit_mlnmr <- nma(
   prep,
-  response = "events",
-  n = "n",
-  study = "study",
-  treatment = "treatment",
-  mlnmr = TRUE,
-  effect = "treatment:covariate",  # treatment-covariate interaction
+  regression = ~ (treatment):covariate,   # 处理-协变量交互（效应修饰）
+  response = "events", n = "n",
+  study = "study", treatment = "treatment",
+  distribution = "binomial",
   priors = priors,
-  chains = 4,
-  iter = 4000
+  chains = 4, iter = 4000
 )
 ```
 
@@ -91,7 +107,7 @@ model <- mtc.model(
   network = net,
   type = "consistency",    # consistency | inconsistency | regression
   link = "logit",          # logit | cloglog | identity | tdistribution
-  likelihood = "binomial", # binomial | normal | poisson | clnegativebin | surivival
+  likelihood = "binomial", # binomial | normal | poisson | clnegativebin | survival
   linearModel = "random",  # random | fixed
   om.scale = 2.5,
   dic = TRUE
@@ -120,7 +136,7 @@ plot(ns)
 
 ## Network Comparison / 网络结果
 
-### League table (both packages)
+### League Table (Both Packages) / 联赛表（两包通用）
 ```r
 # multinma
 league <- league_table(fit)

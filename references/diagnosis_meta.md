@@ -1,49 +1,51 @@
 # Diagnostic Test Meta-Analysis / 诊断准确性Meta分析
 
-## phm() — Parametric Hierarchical Model / 参数层级模型
+> **优先调用封装** / Prefer the wrapper: `source("scripts/advanced_functions.R")` →
+> `run_diagnostic_meta(data, cols=list(TP="TP",FP="FP",FN="FN",TN="TN"))` + `plot_sroc(fit)`。
+> 以下为底层 `mada` API 说明，供需要精细控制时参考。
 
-> For diagnostic test accuracy (sensitivity, specificity, DOR).
+## reitsma() — Bivariate Model / 双变量模型（推荐）
 
-```r
-library(mada)
-
-# Data must be: study, TP, FP, FN, TN
-m <- phm(
-  data = df,
-  precursor = "study",
-  model = "ds",    # bivariate (ds) | linking (l) | index (i) | SROC (s)
-  cor = FALSE      # correlation between logit(sens) and logit(spec)
-)
-summary(m)
-plot(m)
-```
-
-### Model types / 模型类型
-
-| Model | Function | Use |
-|-------|----------|-----|
-| Bivariate | `phm()` default (ds) | Summary sens & spec with correlation |
-| Linking | `phm(model="l")` | Cut-off dependent accuracy |
-| SROC | `rsroc()` | Summary ROC curve |
-| HSROC | `hsroc()` | Hierarchical SROC (threshold + accuracy) |
-
-### SROC curve / SROC曲线
+> Reitsma (2005) bivariate random-effects model — the standard for diagnostic
+> test accuracy (pooled sensitivity, specificity, SROC). / 诊断准确性 Meta 的标准方法。
 
 ```r
 library(mada)
 
-# Fit SROC
-sroc <- rsroc(
-  data = df,
-  study = "study",
-  sens = "sens",
-  spec = "spec",
-  TP = "TP", FP = "FP", FN = "FN", TN = "TN"
-)
+# Data must contain columns: TP, FP, FN, TN (one row per study)
+fit <- reitsma(df)         # 双变量随机效应模型
+summary(fit)               # pooled sens/spec, AUC, correlation
 
-# Plot SROC with confidence region
-plot(sroc)
+# SROC curve with study points + summary point + confidence/prediction region
+plot(fit, sroclwd = 2,
+     main = "SROC — Bivariate (Reitsma) Model")
+points(fpr(df), sens(df), pch = 1)     # 各研究散点
+legend("bottomright", c("Study", "Summary"), pch = c(1, 19))
 ```
+
+### Descriptive stats / 描述性统计
+
+```r
+madad(df)                  # per-study sens/spec + 95% CI, DOR, LR+, LR-
+```
+
+### Summary points & likelihood ratios / 汇总点与似然比
+
+```r
+SummaryPts(fit)            # pooled sens, spec, LR+, LR-, DOR (with CI)
+```
+
+## Model comparison / 模型对照
+
+| Purpose | Function (mada) | Notes |
+|---------|-----------------|-------|
+| Bivariate summary (推荐) | `reitsma(df)` | 汇总 sens/spec + 相关性 + SROC |
+| Descriptive per-study | `madad(df)` | 各研究 sens/spec/DOR/LR ± CI |
+| Summary points / LR | `SummaryPts(fit)` | 从拟合对象提取汇总指标 |
+| Univariate DOR | `madauni(df)` | 单变量 DOR（较少用） |
+
+> ⚠️ 常见误用：`mada::phm()` 是"比例风险"式模型，**不接受** `precursor` / `model="ds"` 等参数；
+> 诊断 Meta 的标准入口是 `reitsma()`。封装 `run_diagnostic_meta()` 已固定为正确调用。
 
 ---
 
@@ -51,7 +53,7 @@ plot(sroc)
 
 | Required | Description |
 |----------|-------------|
-| study | Study identifier |
+| study | Study identifier (可选，用于标注) |
 | TP | True positives |
 | FP | False positives |
 | FN | False negatives |
@@ -66,7 +68,7 @@ plot(sroc)
 - DOR (Diagnostic Odds Ratio) = (TP/FN) / (FP/TN)
 - LR+ = Sens / (1-Spec)
 - LR- = (1-Sens) / Spec
-- AUC(SROC) = area under curve
+- AUC(SROC) = area under summary ROC curve
 
 ---
 

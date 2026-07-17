@@ -112,6 +112,6 @@ NNT = 1 / abs(RD)
 | Incidence | `study, events, person_time` | year, subgroup |
 | Correlation | `study, r, n` | year, subgroup |
 
-## References
+## References / 引用
 - Schwarzer G, et al. (2015). meta R package. https://cran.r-project.org/package=meta
 - IntHout J, et al. (2014). The arcsine difference is the preferred method. *Res Synth Methods*, 5(4), 360-369.

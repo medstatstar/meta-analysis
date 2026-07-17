@@ -1,8 +1,8 @@
-# Stata → R 元分析命令映射表
+# Stata → R Meta-Analysis Command Mapping
 
-## metareg（Stata）→ rma + permutest（R）
+## metareg (Stata) → rma + permutest (R)
 
-### 功能对照
+### Feature Comparison
 
 | Stata metareg 特性 | R 等价实现 | 说明 |
 |---------------------|-----------|------|
@@ -14,7 +14,7 @@
 | REML 估计 | `method = "REML"` | 默认 |
 | ML 估计 | `method = "ML"` | 可选 |
 
-### 完整示例
+### Full Example
 
 **Stata**:
 ```stata
@@ -39,9 +39,9 @@ run_cumulative_metareg(yi = logor, vi = se^2, mods = ~ 1,
 
 ---
 
-## mvmeta（Stata）→ rma.mv（R）
+## mvmeta (Stata) → rma.mv (R)
 
-### 功能对照
+### Feature Comparison
 
 | Stata mvmeta 特性 | R 等价实现 | 说明 |
 |---------------------|-----------|------|
@@ -53,7 +53,7 @@ run_cumulative_metareg(yi = logor, vi = se^2, mods = ~ 1,
 | `mvmeta lb se, wdisplay(Q)` | `run_Q_test_mvmeta(fit)` | Cochran Q 检验 |
 | 模型比较 (LR Test) | `run_lrtest_mvmeta(fit1, fit2)` | 嵌套模型比较 |
 
-### 完整示例
+### Full Example
 
 **Stata**:
 ```stata
@@ -96,7 +96,7 @@ plot_mvmeta_forest(fit_UN, data, study = "study_id_col",
 
 ---
 
-## 其他 Stata 命令的 R 等价
+## Other Stata Commands' R Equivalents
 
 | Stata 命令 | R 等价 | 说明 |
 |-----------|--------|------|
@@ -111,7 +111,7 @@ plot_mvmeta_forest(fit_UN, data, study = "study_id_col",
 
 ---
 
-## Permutation Test 对应（Stata 特有 → R 等价）
+## Permutation Test Correspondence (Stata-Specific → R Equivalent)
 
 Stata 的 `metareg` 默认使用 permutation test，R 的 `metafor` 使用渐近检验。
 本技能通过 `permutest()` 函数实现完全等价：

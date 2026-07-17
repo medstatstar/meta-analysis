@@ -1,38 +1,47 @@
 # TSA & Model Diagnostics / 诊断序贯分析与模型诊断
 
-## tes() — Trial Sequential Analysis / 序贯分析
+## run_tsa() — Trial Sequential Analysis / 试验序贯分析
 
-> Controls type I error in cumulative meta-analysis (like interim monitoring).
+> 在累积 Meta 分析中控制 I 类错误（类似 RCT 期中监测）。
+> ⚠️ **注意**：`meta` 包并**不存在** `tes()` 函数（历史文档误写）。本技能提供**自实现**的
+> `run_tsa()`（Wetterslev 2017 标准公式 + O'Brien-Fleming 监测边界），无需任何外部包。
 
 ```r
-library(metafor)
+source("scripts/advanced_functions.R")
 
-# 1. Run rma first
-res <- rma(yi = yi, vi = vi, method="DL", data=df)
-
-# 2. TSA calculation
-tsa <- tes(
-  res,
-  sd = sd,           # standard deviation of observed effects
-  k = 2,             # groups (2 = binary comparison)
-  alpha = 0.05,
-  power = 0.8,
-  d = 0.2,           # minimal clinically important difference (SMD)
-  outcome = "survival"   # timing
+# es_data 需含 yi(效应量) 与 vi(方差)；labels 为研究标签(按时间排序)
+# ---- 连续型结局（用最小临床重要差 d，SMD 尺度）----
+ts <- run_tsa(
+  es_data, labels,
+  effect_type = "continuous",
+  d      = 0.2,          # 最小临床重要差 (SMD)
+  alpha  = 0.05,
+  power  = 0.80,
+  side   = "two"         # 双侧
 )
 
-# 3. Results
-summary(tsa)
+# ---- 二分类结局（用预期 OR 与两组事件率）----
+ts2 <- run_tsa(
+  es_data, labels,
+  effect_type = "binary",
+  or          = 0.80,    # 预期效应 OR
+  p_con       = 0.10,    # 对照组事件率
+  p_exp       = 0.08,    # 试验组事件率
+  n_per_study = n_vec,   # 各研究样本量(向量)
+  alpha = 0.05, power = 0.80
+)
 
-# 4. TSA plot
-plot(tsa)   # Z-curve with monitoring boundaries
+# 返回值：$RIS(所需信息量) $accrued(已累积) $info_frac $cum_Z(累积Z) 
+#         $crossed(是否越界) $reached_RIS $conclusion(结论文本) $plot(ggplot)
+print(ts$conclusion)
+if (!is.null(ts$plot)) print(ts$plot)   # Z 曲线 + O'Brien-Fleming 边界
 ```
 
 ### TSA interpretation / 解读
-- Z-curve crosses monitoring boundary → firm efficacy (no more studies needed)
-- Z-curve crosses futility boundary → ineffective
-- Required Information Size (RIS) > accrued → more studies needed
-- RIS = externally defined "trial size"
+- 累积 Z 曲线越过监测边界 → 效应确证（无需更多研究）
+- 累积 Z 曲线越过无效边界 → 判定无效
+- 所需信息量 RIS > 已累积样本 → 证据不足，需更多研究
+- RIS = 达到目标把握度所需的“等效试验规模”
 
 ---
 

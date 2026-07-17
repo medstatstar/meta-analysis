@@ -28,12 +28,19 @@ prepare_nma_data <- function(study_data, arm_data,
 }
 
 # --- 2. 频率学派 NMA ---
-run_frequentist_nma <- function(data, 
+run_frequentist_nma <- function(data,
                                 sm = "OR",
                                 reference.group = "placebo",
                                 sep.trt = " vs ",
-                                details.gsubgroup = FALSE) {
+                                common = FALSE,
+                                random = TRUE) {
   #' 运行频率学派网络元分析
+  #' @param data 成对比较长表（需含 TE, seTE, treat1, treat2, study 列）
+  #' @param sm 效应量度量（"OR","RR","MD","SMD","HR" 等）
+  #' @param reference.group 参照组名称
+  #' @param sep.trt 比较标签分隔符
+  #' @param common 是否给出固定效应（common effect）结果
+  #' @param random 是否给出随机效应结果
   
   library(netmeta)
   
@@ -47,7 +54,8 @@ run_frequentist_nma <- function(data,
     sm = sm,
     reference.group = reference.group,
     sep.trt = sep.trt,
-    details.gsubgroup = details.subplots
+    common = common,
+    random = random
   )
   
   return(net)

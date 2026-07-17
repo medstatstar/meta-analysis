@@ -1,14 +1,14 @@
-# RevMan 功能 100% 对应实现表
+# RevMan Feature 100% Mapping Table
 
-## RevMan 5.x → R 代码映射
+## RevMan 5.x → R Code Mapping
 
 本文件列出 RevMan 5.x 中所有可用功能及其对应的 R 实现代码。用户在 RevMan 中熟悉的操作均可通过 R 精确复现。
 
 ---
 
-## 一、Review 创建与数据管理
+## I. Review Creation & Data Management
 
-### 1.1 新建 RevMan Review → 初始化数据框
+### 1.1 New RevMan Review → Initialize Data Frame
 
 ```r
 # RevMan: File → New Review
@@ -24,21 +24,21 @@ meta_data <- data.frame(
 )
 ```
 
-### 1.2 添加比较（Comparison）→ 定义分析结构
+### 1.2 Add Comparison → Define Analysis Structure
 
 ```r
 # RevMan: Add Comparison
 meta_data <- rbind(meta_data, data.frame(...))
 ```
 
-### 1.3 添加结果（Outcome）→ 定义分析变量
+### 1.3 Add Outcome → Define Analysis Variables
 
 ```r
 # RevMan: Add Outcome → Dichotomous/Continuous
 outcome_type <- "Dichotomous"  # 或 "Continuous"
 ```
 
-### 1.4 输入研究数据 → 构建数据框
+### 1.4 Input Study Data → Build Data Frame
 
 ```r
 # RevMan: Input study data
@@ -54,9 +54,9 @@ meta_data <- data.frame(
 
 ---
 
-## 二、分析类型选择
+## II. Analysis Type Selection
 
-### 2.1 二分类数据（Dichotomous）
+### 2.1 Dichotomous Data
 
 ```r
 # RevMan: Analysis → Dichotomous
@@ -88,7 +88,7 @@ peto_result <- metapeto(
 )
 ```
 
-### 2.2 连续型数据（Continuous）
+### 2.2 Continuous Data
 
 ```r
 # RevMan: Analysis → Continuous
@@ -121,7 +121,7 @@ oe_result <- metagen(
 )
 ```
 
-### 2.4 通用倒方差法（Generic Inverse Variance）
+### 2.4 Generic Inverse Variance
 
 ```r
 # RevMan: Analysis → Generic Inverse Variance
@@ -136,9 +136,9 @@ giv_result <- metagen(
 
 ---
 
-## 三、效应量合并模型
+## III. Effect Size Pooling Models
 
-### 3.1 固定效应模型（Fixed Effect）
+### 3.1 Fixed Effect Model
 
 ```r
 # RevMan: Analysis → Fixed Effect
@@ -153,7 +153,7 @@ fe_result <- metabin(
 fe_rma <- rma(yi = yi, vi = vi, method = "FE", data = effect_data)
 ```
 
-### 3.2 随机效应模型（Random Effects）
+### 3.2 Random Effects Model
 
 ```r
 # RevMan: Analysis → Random Effects → DerSimonian-Laird
@@ -170,9 +170,9 @@ reml_rma <- rma(yi = yi, vi = vi, method = "REML", data = effect_data)
 
 ---
 
-## 四、森林图（Forest Plot）
+## IV. Forest Plot
 
-### 4.1 RevMan 默认森林图
+### 4.1 RevMan Default Forest Plot
 
 ```r
 # RevMan: Forest Plot 右侧面板
@@ -181,7 +181,7 @@ library(meta)
 forest(mh_result)
 ```
 
-### 4.2 自定义森林图（添加列）
+### 4.2 Custom Forest Plot (Add Columns)
 
 ```r
 # RevMan: Custom columns in forest plot
@@ -194,7 +194,7 @@ forest(mh_result,
 )
 ```
 
-### 4.3 RevMan 样式 → ggplot 风格
+### 4.3 RevMan Style → ggplot Style
 
 ```r
 # RevMan 风格（类似 RevMan 5 的黑白方块风格）
@@ -214,9 +214,9 @@ ggforestplot::forestplot(
 
 ---
 
-## 五、漏斗图（Funnel Plot）
+## V. Funnel Plot
 
-### 5.1 RevMan 默认漏斗图
+### 5.1 RevMan Default Funnel Plot
 
 ```r
 # RevMan: Funnel plot icon
@@ -224,14 +224,14 @@ ggforestplot::forestplot(
 funnel(mh_result)
 ```
 
-### 5.2 添加轮廓线（Contours）
+### 5.2 Add Contour Lines
 
 ```r
 # Revman: Funnel plot with contour lines
 funnel(mh_result, contour = c(0.9, 0.95, 0.99))
 ```
 
-### 5.3 自定义漏斗图
+### 5.3 Custom Funnel Plot
 
 ```r
 funnel(mh_result,
@@ -245,9 +245,9 @@ funnel(mh_result,
 
 ---
 
-## 六、异质性（Heterogeneity）
+## VI. Heterogeneity
 
-### 6.1 RevMan 输出异质性统计量
+### 6.1 RevMan Heterogeneity Output
 
 ```r
 # RevMan 自动输出: I², tau², Q, df, p-value
@@ -258,7 +258,7 @@ cat(sprintf("Q = %.3f, df = %d, p = %.4f\n",
   mh_result$Q, mh_result$df.Q, mh_result$pval.Q))
 ```
 
-### 6.2 预测区间（Prediction Interval）
+### 6.2 Prediction Interval
 
 ```r
 # RevMan: 仅在 metafor 中可用
@@ -270,9 +270,9 @@ cat(sprintf("Prediction Interval: [%.3f, %.3f]\n",
 
 ---
 
-## 七、亚组分析（Subgroup Analysis）
+## VII. Subgroup Analysis
 
-### 7.1 RevMan 按亚组累积森林图
+### 7.1 RevMan Subgroup Accumulating Forest Plot
 
 ```r
 # Revman: Subgroup → Add subgroup
@@ -287,7 +287,7 @@ metabias_result <- update.meta(mh_result,
 )
 ```
 
-### 7.2 元分析亚组检验（metafor）
+### 7.2 Meta-Analysis Subgroup Test (metafor)
 
 ```r
 # 更精确的亚组分析
@@ -304,9 +304,9 @@ subgroup_wald <- anova(subgroup_rma, btt = 2:length(unique(group)))
 
 ---
 
-## 八、敏感性分析（Sensitivity Analysis）
+## VIII. Sensitivity Analysis
 
-### 8.1 逐一剔除（Leave-One-Out）
+### 8.1 Leave-One-Out
 
 ```r
 # Revman: Sensitivity → Leave one out
@@ -316,7 +316,7 @@ leave1out_results <- leave1out(reml_rma)
 print(leave1out_results)
 ```
 
-### 8.2 按质量筛选
+### 8.2 Filter by Quality
 
 ```r
 # Revman: Sensitivity → High quality only
@@ -324,7 +324,7 @@ high_quality_data <- meta_data[meta_data$rob_score >= 6, ]
 hq_result <- metabin(data = high_quality_data, ...)
 ```
 
-### 8.3 L'Abbé 图
+### 8.3 L'Abbé Plot
 
 ```r
 # Revman: 用于比例数据的散点图
@@ -333,9 +333,9 @@ labbe(mh_result)
 
 ---
 
-## 九、发表偏倚（Publication Bias）
+## IX. Publication Bias
 
-### 9.1 RevMan 偏倚风险检验
+### 9.1 RevMan Bias Risk Test
 
 ```r
 # Revman: Tests for funnel plot asymmetry → Egger/Begg
@@ -344,7 +344,7 @@ metabias(mh_result, method = "egger")
 metabias(mh_result, method = "begg")
 ```
 
-### 9.2 剪补法（Trim and Fill）
+### 9.2 Trim and Fill
 
 ```r
 # Revman: Performance → Trim-and-Fill
@@ -355,7 +355,7 @@ forest(tf_result)
 
 ---
 
-## 十、GRADE 证据质量评估
+## X. GRADE Evidence Quality Assessment
 
 ```r
 # Revman: GRADEpro assessment criteria
@@ -380,9 +380,9 @@ assess_grade_evidence <- function(analysis_result, risk_of_bias,
 
 ---
 
-## 十一、网络 Meta 分析
+## XI. Network Meta-Analysis
 
-### 11.1 创建网络结构
+### 11.1 Create Network Structure
 
 ```r
 # Revman: Network Meta-Analysis (NMA)
@@ -402,7 +402,7 @@ nma_result <- netmeta(
 )
 ```
 
-### 11.2 联赛表（League Table）
+### 11.2 League Table
 
 ```r
 # Revman: League table
@@ -411,7 +411,7 @@ league_table$random
 league_table$fixed
 ```
 
-### 11.3 干预排序
+### 11.3 Intervention Ranking
 
 ```r
 # Revman: 干预效果排序
@@ -422,9 +422,9 @@ plot(rank_results)
 
 ---
 
-## 十二、RevMan 文件导出
+## XII. RevMan File Export
 
-### 12.1 导出为 RevMan 5 文件
+### 12.1 Export to RevMan 5 File
 
 ```r
 # Revman: File → Export → RevMan 5 file
@@ -443,7 +443,7 @@ saveRDS(list(
 
 ---
 
-## 关键差异
+## Key Differences
 
 | 特性 | RevMan | R (本技能) |
 |------|--------|-----------|
