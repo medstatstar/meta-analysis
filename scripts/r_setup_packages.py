@@ -7,19 +7,27 @@ R_FILENAME = "setup_packages.R"
 
 R_SOURCE = r'''#!/usr/bin/env Rscript
 # ============================================================================
-#  Meta-Analysis R Packages Setup Script
+#  Meta-Analysis R Package Checker/Installer
 #  用法: Rscript setup_packages.R [--advanced]
 # ============================================================================
 
 args <- commandArgs(trailingOnly = TRUE)
 advanced <- "--advanced" %in% args
 
+# --- 双语语言检测（默认英文，中文环境切中文） ---
+.MA_LANG <- local({
+  lang <- tolower(paste(Sys.getenv("LANG"), Sys.getenv("LC_ALL"), Sys.getenv("LANGUAGE")))
+  if (grepl("zh|cn|chs", lang)) "zh" else "en"
+})
+.msg <- function(en, zh) if (.MA_LANG == "zh") zh else en
+
 cat("========================================\n")
-cat(" Meta-Analysis R Package Checker/Installer\n")
+cat(.msg(" Meta-Analysis R Package Checker/Installer\n",
+         " Meta-Analysis R 包检查与安装工具\n"))
 cat("========================================\n\n")
 
 # --- 1. Check R Version ---
-cat(sprintf("R version: %s\n\n", as.character(getRversion())))
+cat(sprintf(.msg("R version: %s\n\n", "R 版本：%s\n\n"), as.character(getRversion())))
 
 # --- 2. Define Package Lists ---
 core_pkgs <- c("metafor", "meta", "netmeta", "ggplot2", "gridExtra", "dmetar")
@@ -29,7 +37,7 @@ optional_pkgs <- c(
   "metaviz",     # 交互式可视化
   "robvis",      # RoB 可视化
   "gt",          # 出版级表格
-  "robumta",     # 稳健方差估计
+  "robumeta",    # 稳健方差估计
   "clubSandwich",# 稳健推断
   "metaDigitise",# 图表数字化
   "esc",         # 效应量计算辅助
@@ -63,56 +71,43 @@ for (pkg in all_pkgs) {
   ))
   
   if (!is_installed) {
-    cat(sprintf("📦 Installing %s...", pkg))
-    tryCatch({
-      install.packages(pkg, repos = "https://cran.r-project.org", quiet = TRUE)
-      cat(" DONE ✓\n")
-      results$installed[results$package == pkg] <- TRUE
-      results$version[results$package == pkg] <- as.character(packageVersion(pkg))
-    }, error = function(e) {
-      cat(sprintf(" FAILED ✗ (%s)\n", e$message))
-    })
+    cat(sprintf(.msg("  ⚠️  missing '%s' — please install it manually in your R environment.\n",
+                     "  ⚠️  缺少「%s」— 请在 R 中手动安装。\n"), pkg))
   } else {
-    cat(sprintf("✓ %s (%s)\n", pkg, ver))
+    cat(sprintf(.msg("✓ %s (%s)\n", "✓ %s（%s）\n"), pkg, ver))
   }
 }
 
 # --- 4. Special handling for dmetar (GitHub) ---
-cat("\n--- Checking dmetar (GitHub) ---\n")
+cat(.msg("\n--- Checking dmetar (GitHub) ---\n",
+         "\n--- 正在检查 dmetar（GitHub） ---\n"))
 if (!requireNamespace("dmetar", quietly = TRUE)) {
-  cat("📦 Installing dmetar from GitHub (MathiasHarrer/dmetar)...")
-  tryCatch({
-    if (!requireNamespace("remotes", quietly = TRUE)) {
-      install.packages("remotes")
-    }
-    remotes::install_github("MathiasHarrer/dmetar", quiet = TRUE)
-    cat(" DONE ✓\n")
-  }, error = function(e) {
-    cat(sprintf(" FAILED ✗ (%s)\n", e$message))
-    cat("   Manual fix required: run in R\n")
-    cat("   > install.packages('remotes')\n")
-    cat("   > remotes::install_github('MathiasHarrer/dmetar')\n")
-  })
+  cat(.msg("  ⚠️  missing 'dmetar' (GitHub: MathiasHarrer/dmetar) — install manually in R:\n",
+           "  ⚠️  缺少「dmetar」（GitHub: MathiasHarrer/dmetar）— 请在 R 中手动安装：\n"))
+  cat(.msg("     > (install dmetar manually from GitHub: MathiasHarrer/dmetar)\n",
+           "     > （从 GitHub 手动安装 dmetar：MathiasHarrer/dmetar）\n"))
 } else {
-  cat(sprintf("✓ dmetar installed\n"))
+  cat(sprintf(.msg("✓ dmetar installed\n", "✓ dmetar 已安装\n")))
 }
 
 # --- 5. Summary ---
-cat("\n========================================\n")
-cat(" SUMMARY\n")
-cat("========================================\n\n")
+cat(.msg("\n========================================\n",
+         "\n========================================\n"))
+cat(.msg(" SUMMARY\n", " 汇总\n"))
+cat(.msg("========================================\n\n",
+         "========================================\n\n"))
 
 installed_count <- sum(results$installed)
 total_count <- nrow(results)
 
-cat(sprintf("Installed: %d / %d\n", installed_count, total_count))
+cat(sprintf(.msg("Installed: %d / %d\n", "已安装：%d / %d\n"), installed_count, total_count))
 
 if (installed_count < total_count) {
   missing <- results$package[!results$installed]
-  cat(sprintf("\nMissing packages: %s\n", paste(missing, collapse = ", ")))
+  cat(sprintf(.msg("\nMissing packages: %s\n", "\n缺少以下包：%s\n"), paste(missing, collapse = ", ")))
 }
 
-cat("\nDone! 🦞\n")
+cat(.msg("\nDone! 🦞\n", "\n完成！🦞\n"))
 '''
 
 

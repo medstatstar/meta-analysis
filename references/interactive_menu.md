@@ -132,6 +132,7 @@ Select tool / 选择工具:
   1. PRISMA flow diagram / PRISMA流程图 → Auto-generate flow diagram from screening counts
   2. Literature screening GUI / 文献筛选   → Title/Abstract screen with AI assistance
   3. PDF batch download / 批量下载         → Retrieve full-text PDFs from DOI/PMID lists
+     ⚠️ Network retrieval: contacts external services. Requires explicit user confirmation of the target DOI/PMID list, must respect copyright/authorization, and only use allowed sources. Nothing is fetched without opt-in.
   4. Graph digitize / 图形数字化             → Extract numeric data from scatter/bar plots
   5. Missing value imputation / 缺失值插补   → Multiple imputation for unreported statistics
   6. Reference management / 文献管理         → BibTeX/EndNote export

@@ -424,7 +424,7 @@ ggsave("power_curve.png", pc$plot, width = 8, height = 5, dpi = 300)
 ### 备选：metapower::mpower()（如需其可视化）
 
 ```r
-library(metapower)   # 若缺失: install.packages("metapower")
+library(metapower)   # 若缺失，请手动安装 metapower 包
 
 # 注意真实 API 参数名（非 power_d，此函数不存在）
 mp <- mpower(

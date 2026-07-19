@@ -1,13 +1,12 @@
 # R Package Guide & Installation / R 包功能详解与安装指南
 
+> ⚠️ 本技能**不会自动安装**任何 R 包。所有依赖均需用户在自己的 R 环境中**手动安装**。下文仅说明各包用途与所需清单。
+
 ## 核心包对比 / Core Package Comparison
 
 ### 1. metafor (Core Engine, Required) / metafor（统计引擎，必装）
 
-**安装**：
-```r
-install.packages("metafor")
-```
+**安装**：手动在 R 控制台安装 `metafor` 包（本技能不自动安装）。
 
 **核心函数**：
 
@@ -47,10 +46,7 @@ install.packages("metafor")
 
 ### 2. meta (RevMan Compatible, Required) / meta（RevMan 兼容，必装）
 
-**安装**：
-```r
-install.packages("meta")
-```
+**安装**：手动在 R 控制台安装 `meta` 包（本技能不自动安装）。
 
 **核心函数**：
 
@@ -80,12 +76,7 @@ install.packages("meta")
 
 ### 3. dmetar (Helper Extension, Recommended) / dmetar（辅助扩展，强烈推荐）
 
-**安装**：
-```r
-# 从 GitHub 安装最新版本
-if (!require("remotes")) install.packages("remotes")
-remotes::install_github("MathiasHarrer/dmetar")
-```
+**安装**：手动从 GitHub (MathiasHarrer/dmetar) 安装（需先装 `remotes`）。本技能不自动安装；缺失时脚本仅提示手动安装。
 
 **核心函数**：
 
@@ -103,10 +94,7 @@ remotes::install_github("MathiasHarrer/dmetar")
 
 ### 4. netmeta (Network Meta, Required) / netmeta（网状meta，必装）
 
-**安装**：
-```r
-install.packages("netmeta")
-```
+**安装**：手动在 R 控制台安装 `netmeta` 包（本技能不自动安装）。
 
 **核心函数**：
 
@@ -123,10 +111,7 @@ install.packages("netmeta")
 
 ### 5. bayesmeta (Bayesian, Optional) / bayesmeta（贝叶斯，可选）
 
-**安装**：
-```r
-install.packages("bayesmeta")
-```
+**安装**：手动在 R 控制台安装 `bayesmeta` 包（本技能不自动安装）。
 
 **核心函数**：
 
@@ -138,49 +123,32 @@ install.packages("bayesmeta")
 
 ### 6. Optional Enhancement Packages / 可选增强包
 
-| 包 | 用途 | 安装 |
+| 包 | 用途 | 来源 |
 |----|------|------|
-| `metasens` | 敏感性分析（上限/下限法） | `install.packages("metasens")` |
-| `ggplot2` | 高级图形 | `install.packages("ggplot2")` |
-| `gridExtra` | 多图组合 | `install.packages("gridExtra")` |
-| `robumta` | 稳健方差估计 | `install.packages("robumta")` |
-| `clubSandwich` | 稳健推断 | `install.packages("clubSandwich")` |
-| `metaviz` | 交互式可视化 | `install.packages("metaviz")` |
-| `metaDigitise` | 图表数字化 | `install.packages("metaDigitise")` |
-| `robvis` | RoB 可视化 | `install.packages("robvis")` |
-| `gt` | 出版级表格 | `install.packages("gt")` |
+| `metasens` | 敏感性分析（上限/下限法） | CRAN 手动安装 |
+| `ggplot2` | 高级图形 | CRAN 手动安装 |
+| `gridExtra` | 多图组合 | CRAN 手动安装 |
+| `robumta` | 稳健方差估计 | CRAN 手动安装 |
+| `clubSandwich` | 稳健推断 | CRAN 手动安装 |
+| `metaviz` | 交互式可视化 | CRAN 手动安装 |
+| `metaDigitise` | 图表数字化 | CRAN 手动安装 |
+| `robvis` | RoB 可视化 | CRAN 手动安装 |
+| `gt` | 出版级表格 | CRAN 手动安装 |
 
 ---
 
-## 安装脚本（一键安装所有推荐包） / Installation Script (One-Click All Recommended)
+## 安装说明 / Installation Notes
 
-```r
-install_meta_packages <- function(advanced = TRUE) {
-  core_pkgs <- c("metafor", "meta", "netmeta", "ggplot2", "gridExtra")
-  if (advanced) {
-    core_pkgs <- c(core_pkgs, "metasens", "bayesmeta", "metaviz", "robvis", "gt")
-  }
-  
-  for (pkg in core_pkgs) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      install.packages(pkg, repos = "https://cran.r-project.org")
-    }
-  }
-  
-  # dmetar from GitHub
-  if (!requireNamespace("dmetar", quietly = TRUE)) {
-    if (!requireNamespace("remotes", quietly = TRUE)) {
-      install.packages("remotes")
-    }
-    remotes::install_github("MathiasHarrer/dmetar")
-  }
-  
-  message("All packages installed successfully!")
-}
+本技能**不自动安装**任何 R 包。所有依赖请用户在自己的 R 环境中手动安装。
 
-# 执行
-install_meta_packages(advanced = TRUE)
-```
+**推荐安装清单**：
+- 核心（必装）：`metafor`、`meta`、`netmeta`、`svglite`
+- 推荐：`dmetar`（GitHub: MathiasHarrer/dmetar）、`bayesmeta`
+- 可选增强：`metasens`、`ggplot2`、`gridExtra`、`robumta`、`clubSandwich`、`metaviz`、`metaDigitise`、`robvis`、`gt`
+
+**辅助脚本**：可运行 `Rscript scripts/setup_packages.R`，脚本会检测缺失包并**仅打印**安装清单（不会自动下载或安装）。
+
+> ⚠️ 所有安装均为用户手动操作。本技能在任何运行路径下都不会调用包安装函数。
 
 ---
 
