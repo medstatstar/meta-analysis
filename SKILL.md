@@ -83,7 +83,7 @@ All factual/assertive claims must cite source: specific `ref-*.md` section (e.g.
    - Packages: `metafor meta dmetar netmeta ggplot2 esc clubSandwich robumeta bayesmeta multinma gemtc dosresmeta survmeta mada metagear gridExtra ggforestplot svglite`
    - ⚠️ Manual install connects to CRAN; use trusted network.
 3. **Workspace**: Create `meta_analysis/` + `output/` in current directory (⚠️ will write files).
-4. **Memory**: read `~/.workbuddy/MEMORY.md` for R config.
+4. **Memory**: read `~/.workbuddy/MEMORY.md` for R config (only R-related config keys; unrelated personal content is ignored and never sent anywhere).
 
 ## Interactive Guide
 

@@ -20,9 +20,9 @@ Below are 6 real conversational examples ordered from simple to advanced. Each s
 
 ### Example 1 · Two-group binary meta (most common)
 **You say:**
-> 合并以下 5 项二分类研究的 OR：
-> 研究A: 实验组 30/100, 对照组 20/100
-> 研究B: 实验组 45/120, 对照组 30/100
+> Combine the OR across these 5 binary studies:
+> Study A: experimental 30/100, control 20/100
+> Study B: experimental 45/120, control 30/100
 > ...
 
 **Assistant replies (sketch):**
@@ -112,86 +112,88 @@ Tests are grouped by **analysis purpose** (7 categories below). Each row gives t
 ### ① Pairwise Meta-Analysis
 | Scenario | Try saying in chat |
 |:---|:---|
-| Binary (OR/RR/RD) | "合并这 5 项二分类研究的 OR" |
-| Continuous (SMD/MD) | "合并 6 项连续型研究的 SMD" |
-| Pre-calculated (yi+CI) | "我有 5 个研究的效应量和 CI，直接画森林图" |
-| Survival (HR) | "合并 8 项研究的 HR" |
-| Correlation (r→Zr) | "把这 4 个相关系数做 Fisher z 转换后合并" |
-| Single-group rate/mean | "合并这几个研究的发病率" |
-| Generic inverse-variance | "我有 yi 和 vi，直接做 Meta" |
+| Binary (OR/RR/RD) | "Combine the OR across these 5 binary studies" |
+| Continuous (SMD/MD) | "Pool the SMD of these 6 continuous studies" |
+| Pre-calculated (yi+CI) | "I have effect sizes and CIs for 5 studies — draw the forest plot directly" |
+| Survival (HR) | "Pool the HR across these 8 studies" |
+| Correlation (r→Zr) | "Convert these 4 correlations via Fisher z then pool" |
+| Single-group rate/mean | "Pool the incidence rates across these studies" |
+| Generic inverse-variance | "I have yi and vi — run the meta directly" |
 
 ### ② Heterogeneity & Bias
 | Scenario | Try saying in chat |
 |:---|:---|
-| Heterogeneity assessment | "我做了 Meta，I² 很高，帮我看下异质性" |
-| Subgroup analysis | "按地区做亚组分析" |
-| Meta-regression | "做元回归，看发表年份和样本量的影响" |
-| Egger test | "检查发表偏倚，做 Egger 检验" |
-| Begg test | "Begg 秩相关检验" |
-| Trim-and-fill | "用剪补法校正发表偏倚" |
-| Selection model | "用 selection model 评估发表偏倚" |
-| Sensitivity analysis | "做 leave-one-out 敏感性分析" |
-| Cumulative meta | "按发表年份做累积 Meta" |
-| GOSH plot | "画 GOSH 图看异质性模式" |
-| Baujat diagnosis | "做 Baujat 图，看哪个研究贡献最大异质性" |
-| Drapery plot | "画 Drapery 图评估 α 稳健性" |
+| Heterogeneity assessment | "I ran a meta, I² is very high — help me assess heterogeneity" |
+| Subgroup analysis | "Run subgroup analysis by region" |
+| Meta-regression | "Run meta-regression on publication year and sample size" |
+| Egger test | "Check publication bias, run Egger's test" |
+| Begg test | "Begg rank-correlation test" |
+| Trim-and-fill | "Correct publication bias with trim-and-fill" |
+| Selection model | "Assess publication bias with a selection model" |
+| Sensitivity analysis | "Run leave-one-out sensitivity analysis" |
+| Cumulative meta | "Run cumulative meta by publication year" |
+| GOSH plot | "Plot a GOSH graph to see heterogeneity patterns" |
+| Baujat diagnosis | "Make a Baujat plot to see which study contributes most heterogeneity" |
+| Drapery plot | "Plot a Drapery graph to assess α robustness" |
 
 ### ③ Advanced Models
 | Scenario | Try saying in chat |
 |:---|:---|
-| Frequentist NMA | "做网络 Meta，4 种干预，用 netmeta" |
-| Bayesian NMA (Stan) | "做贝叶斯网络 Meta，Stan 后端" |
-| Bayesian NMA (JAGS) | "做贝叶斯网络 Meta，JAGS 后端" |
-| Multilevel meta | "做 3 水平 Meta，研究内多个效应" |
-| Multivariate meta | "合并多个相关结局的 Meta" |
-| IPD meta | "我有患者个体数据，做 IPD Meta" |
-| Dose-response | "做剂量反应 Meta，dosresmeta" |
-| Survival meta | "合并生存数据，survmeta" |
-| Trial sequential analysis | "做 TSA，看还需要多少研究" |
-| Bootstrap meta | "用 Bootstrap 做非参数 DL 估计" |
+| Frequentist NMA | "Run network meta with 4 interventions, use netmeta" |
+| Bayesian NMA (Stan) | "Run Bayesian network meta, Stan backend" |
+| Bayesian NMA (JAGS) | "Run Bayesian network meta, JAGS backend" |
+| Multilevel meta | "Run 3-level meta with multiple effects within studies" |
+| Multivariate meta | "Pool a meta with multiple correlated outcomes" |
+| IPD meta | "I have individual patient data — run IPD meta" |
+| Dose-response | "Run dose-response meta, dosresmeta" |
+| Survival meta | "Pool survival data, survmeta" |
+| Trial sequential analysis | "Run TSA — see how many more studies are needed" |
+| Bootstrap meta | "Use Bootstrap for nonparametric DL estimation" |
 
 ### ④ Effect Size & Conversion
 | Scenario | Try saying in chat |
 |:---|:---|
-| Mean/SD→d | "把均值标准差转成 Cohen's d" |
-| t/F→d | "把 t 值转成 d" |
-| r→Fisher z | "把相关系数转成 Fisher z" |
-| d↔logOR | "把 d 转成 logOR" |
-| OR↔logOR | "把 OR 转成 logOR" |
-| Batch convert | "批量把 SMD 转成 logOR" |
-| NNT | "计算 NNT" |
+| Mean/SD→d | "Convert mean and SD to Cohen's d" |
+| t/F→d | "Convert a t value to d" |
+| r→Fisher z | "Convert a correlation to Fisher z" |
+| d↔logOR | "Convert d to logOR" |
+| OR↔logOR | "Convert OR to logOR" |
+| Batch convert | "Batch convert SMD to logOR" |
+| NNT | "Calculate NNT" |
 
 ### ⑤ Visualization
 | Scenario | Try saying in chat |
 |:---|:---|
-| Forest plot | "画森林图，lancet 主题" |
-| Funnel plot | "画漏斗图，带轮廓增强" |
-| Bubble plot | "画元回归气泡图" |
-| GOSH plot | "画 GOSH 图" |
-| Network plot | "画网络 Meta 的网络图" |
-| League table | "画 NMA 联赛表" |
-| RoB traffic-light | "画偏倚风险交通灯图" |
-| Power curve | "画功效曲线" |
-| Drapery plot | "画 Drapery 图" |
-| Inconsistency heatmap | "画 NMA 不一致性热图" |
+| Forest plot | "Draw a forest plot, lancet theme" |
+| Funnel plot | "Draw a funnel plot with contour enhancement" |
+| Bubble plot | "Draw a meta-regression bubble plot" |
+| GOSH plot | "Plot a GOSH graph" |
+| Network plot | "Draw the network meta graph" |
+| League table | "Draw the NMA league table" |
+| RoB traffic-light | "Draw a risk-of-bias traffic-light plot" |
+| Power curve | "Draw a power curve" |
+| Drapery plot | "Plot a Drapery graph" |
+| Inconsistency heatmap | "Plot an NMA inconsistency heatmap" |
 
 ### ⑥ Study Quality
 | Scenario | Try saying in chat |
 |:---|:---|
-| RoB 2.0 | "用 RoB 2.0 评估偏倚风险" |
-| RoB 1.0 | "用 Cochrane RoB 1.0 评估" |
-| ROBINS-I | "非随机研究，用 ROBINS-I" |
-| GRADE | "做 GRADE 证据质量评价" |
-| PRISMA checklist | "PRISMA 检查表" |
+| RoB 2.0 | "Assess risk of bias with RoB 2.0" |
+| RoB 1.0 | "Assess with Cochrane RoB 1.0" |
+| ROBINS-I | "Non-randomized study — use ROBINS-I" |
+| GRADE | "Do a GRADE evidence-quality assessment" |
+| PRISMA checklist | "PRISMA checklist" |
 
 ### ⑦ Systematic Review Workflow
 | Scenario | Try saying in chat |
 |:---|:---|
-| PRISMA flow | "帮我生成 PRISMA 流程图" |
-| Literature screening | "标题摘要筛选，AI 辅助" |
-| PDF batch download | "从 DOI 列表批量下载全文（需确认）" |
-| Graph digitize | "从散点图提取数据" |
-| Missing value imputation | "缺失标准差的插补" |
+| PRISMA flow | "Help me generate a PRISMA flow diagram" |
+| Literature screening | "Title/abstract screening, AI-assisted" |
+| PDF batch download | "Batch download full texts from a DOI list (needs confirmation)" |
+| Graph digitize | "Extract data from a scatter plot" |
+| Missing value imputation | "Impute missing standard deviations" |
+
+> ⚠️ **PDF batch download** connects to external networks and writes files to your local disk. Run it only on explicit user instruction, and respect copyright and access controls.
 
 ---
 
@@ -204,20 +206,20 @@ A: Yes. Most analyses need only 3 items — effect size (or rate / HR) + α + po
 A: By default it's **per group**; paired / crossover designs report per-sequence, and survival often reports total events needed. The output always labels this clearly.
 
 **Q: It only shows code, not the number. How do I get the actual result?**
-A: Just add **"please compute directly"** or **"execute"** in the chat — the assistant will really run R and give you the number. This is the default safe design: see the code first, compute once you're sure.
+A: Just add **"please compute directly"** or **"execute"** in the chat — the assistant will really run R and give you the number. This is the default safe design: see the code first, compute once you're sure. Execution only happens on this explicit, high-friction instruction — the skill never runs R on its own or from casual mentions of these words.
 
 **Q: I want the reproducible R code for submission or audit — how do I ask?**
 A: Say **"give me the full R code"**. The code is also shown in safe preview by default, so you can copy, modify, and re-run it yourself.
 
 **Q: On a Chinese system, is the output in Chinese?**
-A: Yes. By default the output language follows your OS language setting — Chinese on a Chinese-OS, English otherwise. You can force-switch anytime via a prompt (e.g. "用中文回复" / "switch to English").
+A: Yes. By default the output language follows your OS language setting — Chinese on a Chinese-OS, English otherwise. This default requires no extra permission and only affects display language; you can force-switch anytime via a prompt (e.g. "用中文回复" / "switch to English").
 
 **Q: My data is in SPSS/Excel/Stata format — what do I do?**
 A: Say **"help me convert my SPSS/Excel data to CSV"** — the assistant will recommend installing `@skill:statdata-transfer` for 50+ format conversions.
 
 ---
 
-## 4. Safe Preview (安全预览)
+## 4. Safe Preview
 
 - **Default behavior:** The skill only **generates and shows the R code, but does not execute it** — you can inspect the logic first, then let it run once you're confident.
 - **Trigger real computation:** In chat say **"please compute directly"** or **"execute"** → the assistant really runs R and gives the number.
@@ -233,16 +235,7 @@ CLI examples, bidirectional solving, curve mode, core formulas, system requireme
 
 ---
 
-**Version**: v1.7 | **License**: MIT | **Authors**: medstatstar, phoe-zip
+**Version**: v1.8.0 | **License**: MIT | **Authors**: medstatstar, phoe-zip
 
 For feature requests, bug reports, or other feedback, please contact the author directly at medstatstar@gmail.com (Wintone Zhang / 张文彤).
 
----
-
-## Confidentiality Notice
-
-> **meta-analysis** is a standalone R-based meta-analysis skill. It runs fully locally, processes only user-provided summary statistics (not patient-level data), and does not upload any user data. It is **not** part of the `ct-` clinical-trial skill series.
->
-> The `ct-` series consists of 16+ specialized domain skills covering the new-drug clinical trial lifecycle. Some `ct-` skills (Tier C / D) involve strictly confidential clinical-trial data and are designated for internal enterprise use only — they are not publicly released at present.
->
-> 📧 Contact: medstatstar@gmail.com (Wintone Zhang / 张文彤)

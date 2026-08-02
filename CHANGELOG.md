@@ -24,6 +24,14 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ### Fixed / 修复
 - Removed stale `README_ZH.md` references across SKILL.md, README.md, README_zh-CN.md.
+- **English README untranslated Chinese**: translated all residual Chinese in `README.md` (Example 1 "You say", Scenario Index "Try saying" tables, §4 title) to English; synced version string to `1.8.0` in both READMEs.
+- **Security-audit doc alignment** (SkillSpector 10 Medium/Low findings — all documentation-consistency, no malicious code):
+  - Removed the `Confidentiality Notice` block from `README.md` — eliminates the "summary stats only" vs "supports IPD patient-level data" trust-boundary contradiction, and also complies with the earlier user instruction that non-`ct-` skills omit confidentiality statements (the zh-CN README never had it).
+  - Added PDF-batch-download warnings (network access / local write / copyright) in both READMEs (§7).
+  - Clarified the high-friction trigger rule in both READMEs' FAQ: code runs only when you explicitly say "execute"/"请直接计算"; casual mentions do not trigger execution.
+  - Clarified the language-switch note: default follows OS locale and only affects display language, no extra authorization needed.
+  - Tightened `SKILL.md` Memory-read scope note: "(R config keys only; no personal info is read or sent)".
+- **ClawHub display-name fix**: republished with a clean top-level directory name `meta-analysis` so the ClawHub page title shows the correct skill name instead of the previous temp publish-folder name "Meta Analysis Strip V180".
 
 ---
 
