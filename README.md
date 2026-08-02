@@ -1,6 +1,10 @@
 # meta-analysis
 
-[🇨🇳 中文 (Chinese)](./README_ZH.md)
+[🇨🇳 中文 (Chinese)](./README_zh-CN.md)
+
+<div align="center">
+  <img src="assets/icon.svg" width="120" height="120" alt="meta-analysis logo"/>
+</div>
 
 > An R-based, conversation-driven Meta-Analysis skill for WorkBuddy. Covers 100% of RevMan 5.x functionality, Stata `metareg`/`mvmeta` equivalents, effect-size conversions (`esc`), and cluster-robust variance estimation (`clubSandwich`/`robumeta`) — all with publication-ready, editable SVG graphics.
 
@@ -116,34 +120,54 @@ inkscape forest_plot.svg --export-type=png --export-dpi=600 --export-filename=fo
 
 ```
 meta-analysis/
-├── SKILL.md                       # Main skill definition (bilingual, EN-first)
-├── README.md / README_ZH.md      # This file
+├── SKILL.md                       # Main skill definition (English body, ct-base aligned)
+├── AGENTS.md                      # Self-improvement + agent rules (English, ct-base aligned)
+├── CHANGELOG.md                   # Version / fix log
+├── README.md / README_zh-CN.md    # This file
 ├── LICENSE                        # MIT
 ├── requirements.txt              # R package list
 ├── assets/
-│   └── icon.svg                   # Skill logo
+│   ├── icon.svg                   # Skill logo (ct-base visual base)
+│   └── icon.png                   # Bitmap version
 ├── scripts/
-│   ├── setup_packages.R          # Env check + package installer
-│   ├── meta_analysis_core.R      # Core engine (escalc/rma/forest/funnel)
-│   ├── effect_size_conversions.R # esc wrappers, d↔g, RVE
-│   ├── stata_equivalents.R       # metareg / mvmeta equivalents
-│   └── network_meta_analysis.R   # netmeta / gemtc / multinma
+│   ├── i18n.py                    # Bilingual helper (from ct-base)
+│   ├── r_libs.py                  # R invocation + validation + sanitization (from ct-base)
+│   ├── r_templates.py             # R code template generator
+│   ├── r_meta_analysis_core.py    # Core engine templates
+│   ├── r_effect_size_conversions.py
+│   ├── r_network_meta_analysis.py
+│   ├── r_stata_equivalents.py
+│   ├── r_advanced_functions.py
+│   ├── r_setup_packages.py
+│   ├── check_integrity.sh         # Integrity self-check (auto-generate .R)
+│   ├── setup_packages.R           # Env check + package installer
+│   ├── meta_analysis_core.R       # Core engine (escalc/rma/forest/funnel)
+│   ├── effect_size_conversions.R  # esc wrappers, d↔g, RVE
+│   ├── stata_equivalents.R        # metareg / mvmeta equivalents
+│   ├── network_meta_analysis.R    # netmeta / gemtc / multinma
+│   └── advanced_functions.R       # Advanced functions
 └── references/
-    ├── interactive_menu.md        # Full menu tree + data-format guide
-    ├── data_templates.md          # Per-type CSV templates + validation
-    ├── revman_complete.md         # 1:1 RevMan → R code mappings
-    ├── stata_to_r_mapping.md      # Stata metareg/mvmeta → R equivalents
-    ├── advanced_analysis.md       # Multivariate / multilevel / IPD / dose-response
-    ├── single_group_meta.md       # metaprop/metamean/metainc/metacor
-    ├── survival_meta.md           # survmeta / KM pseudo-IPD
-    ├── tsa_diagnostics.md         # tes / Baujat / Drapery / selection
-    ├── diagnosis_meta.md          # mada bivariate / SROC
-    ├── bayesian_nma.md            # multinma / gemtc workflows
-    ├── esc_robust_meta.md         # esc conversions + RVE (robumeta/clubSandwich)
-    ├── review_workflow.md         # metagear PRISMA / screening / digitize
-    ├── r_packages.md              # Package inventory
-    ├── citations.md               # Methodological references
-    └── purpose_zh.md              # Chinese Purpose text mirror
+│   ├── language_policy.md         # Bilingual policy (from ct-base)
+│   ├── report_template.md         # Report skeleton (from ct-base)
+│   ├── units.md                   # Atomic task unit index (pipeline)
+│   ├── interactive_menu.md        # Full menu tree + data format guide
+│   ├── data_templates.md          # Per-type CSV templates + validation
+│   ├── revman_complete.md         # 1:1 RevMan → R code mappings
+│   ├── stata_to_r_mapping.md      # Stata metareg/mvmeta → R equivalents
+│   ├── advanced_analysis.md       # Multivariate / multilevel / IPD / dose-response
+│   ├── single_group_meta.md       # metaprop/metamean/metainc/metacor
+│   ├── survival_meta.md           # survmeta / KM pseudo-IPD
+│   ├── tsa_diagnostics.md         # tes / Baujat / Drapery / selection
+│   ├── diagnosis_meta.md          # mada bivariate / SROC
+│   ├── bayesian_nma.md            # multinma / gemtc workflows
+│   ├── esc_robust_meta.md         # esc conversions + RVE (robumeta/clubSandwich)
+│   ├── review_workflow.md         # metagear PRISMA / screening / digitize
+│   ├── r_packages.md              # Package inventory
+│   ├── citations.md               # Methodological references
+│   ├── references.md              # Reference list
+│   ├── advanced_api.md            # Reusable API reference
+│   ├── svg_editing.md             # SVG editing tools & journal format conversion
+│   └── purpose_zh.md              # Chinese Purpose text mirror
 ```
 
 ## Important Notes
@@ -163,3 +187,19 @@ meta-analysis/
 ## License
 
 MIT License. See `LICENSE` file for details.
+
+---
+
+## Contact / 联系作者
+
+For feature requests, bug reports, or other feedback, please contact the author directly at medstatstar@gmail.com (Wintone Zhang / 张文彤).
+
+---
+
+## Confidentiality Notice
+
+> **meta-analysis** is a standalone R-based meta-analysis skill. It runs fully locally, processes only user-provided summary statistics (not patient-level data), and does not upload any user data. It is **not** part of the `ct-` clinical-trial skill series.
+>
+> The `ct-` series consists of 16+ specialized domain skills covering the new-drug clinical trial lifecycle. Some `ct-` skills (Tier C / D) involve strictly confidential clinical-trial data and are designated for internal enterprise use only — they are not publicly released at present.
+>
+> 📧 Contact: medstatstar@gmail.com (Wintone Zhang / 张文彤)

@@ -2,6 +2,10 @@
 
 [🇬🇧 English (英文)](./README.md)
 
+<div align="center">
+  <img src="assets/icon.svg" width="120" height="120" alt="meta-analysis 图标"/>
+</div>
+
 > 基于 R 语言的对话式 Meta 分析 WorkBuddy 技能。覆盖 RevMan 5.x 全部功能、Stata `metareg`/`mvmeta` 等价实现、效应量转换（`esc`）、聚类稳健方差估计（`clubSandwich`/`robumeta`），并提供可直接编辑的出版级 SVG 矢量图。
 
 ## 概述
@@ -116,19 +120,36 @@ inkscape forest_plot.svg --export-type=png --export-dpi=600 --export-filename=fo
 
 ```
 meta-analysis/
-├── SKILL.md                       # 技能主定义（中英双语，英文在前）
-├── README.md / README_ZH.md      # 本文件
+├── SKILL.md                       # 技能主定义（英文正文，ct-base 对齐）
+├── AGENTS.md                      # 自改进约定（英文，ct-base 对齐）
+├── CHANGELOG.md                   # 版本 / 整改记录
+├── README.md / README_zh-CN.md      # 本文件
 ├── LICENSE                        # MIT
 ├── requirements.txt              # R 包清单
 ├── assets/
-│   └── icon.svg                   # 技能 Logo
+│   ├── icon.svg                   # 技能 Logo（ct-base 视觉底座）
+│   └── icon.png                   # 位图版
 ├── scripts/
+│   ├── i18n.py                    # 中英切换 helper（来自 ct-base）
+│   ├── r_libs.py                  # R 调用 + 校验 + 脱敏（来自 ct-base）
+│   ├── r_templates.py             # R 代码模板生成器
+│   ├── r_meta_analysis_core.py    # 核心引擎模板
+│   ├── r_effect_size_conversions.py
+│   ├── r_network_meta_analysis.py
+│   ├── r_stata_equivalents.py
+│   ├── r_advanced_functions.py
+│   ├── r_setup_packages.py
+│   ├── check_integrity.sh         # 完整性自检（自动生成 .R）
 │   ├── setup_packages.R          # 环境检测 + 包安装器
 │   ├── meta_analysis_core.R      # 核心引擎（escalc/rma/forest/funnel）
 │   ├── effect_size_conversions.R # esc 封装、d↔g、RVE
 │   ├── stata_equivalents.R       # metareg / mvmeta 等价实现
-│   └── network_meta_analysis.R   # netmeta / gemtc / multinma
+│   ├── network_meta_analysis.R   # netmeta / gemtc / multinma
+│   └── advanced_functions.R       # 高级函数
 └── references/
+    ├── language_policy.md         # 双语策略（来自 ct-base）
+    ├── report_template.md         # 报告骨架（来自 ct-base）
+    ├── units.md                   # 原子任务单元索引（pipeline）
     ├── interactive_menu.md        # 完整菜单树 + 数据格式指引
     ├── data_templates.md          # 分类型 CSV 模板 + 校验
     ├── revman_complete.md         # RevMan → R 1:1 代码映射
@@ -143,6 +164,9 @@ meta-analysis/
     ├── review_workflow.md         # metagear PRISMA / 筛选 / 数字化
     ├── r_packages.md              # 包清单
     ├── citations.md               # 方法学引用
+    ├── references.md              # 引用列表
+    ├── advanced_api.md            # 复用接口（强制）+ 重依赖封装
+    ├── svg_editing.md             # SVG 编辑工具与期刊格式转换
     └── purpose_zh.md              # 中文 Purpose 文本镜像
 ```
 
@@ -163,3 +187,19 @@ meta-analysis/
 ## License
 
 MIT License. See `LICENSE` file for details.
+
+---
+
+## 联系作者
+
+如有功能改进建议、Bug 报告或其他反馈，请直接联系作者：medstatstar@gmail.com（张文彤 / Wintone Zhang）。
+
+---
+
+## 保密声明
+
+> **meta-analysis** 是一个独立的 R 语言 Meta 分析技能。完全本地运行，仅处理用户提供的汇总统计数据（非受试者级数据），不上传任何用户数据。它**不属于** `ct-` 临床试验技能系列。
+>
+> `ct-` 系列由 16 余个专用行业技能构成，覆盖新药临床试验全流程。其中部分技能（C/D 级）涉及药企严格保密的临床试验数据，仅限企业内部使用，目前不对外公开发布。
+>
+> 📧 联系方式：medstatstar@gmail.com（张文彤 / Wintone Zhang）
