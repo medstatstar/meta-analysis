@@ -43,6 +43,13 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [1.8.3] — 2026-08-02
+
+### Fixed / 修复
+- **IPD trust-boundary contradiction (SkillSpector finding)**: rewrote `AGENTS.md` §4 security red-line — the old line stated "no patient-level data" while the skill advertises IPD meta. New wording clarifies that **all data you provide, including IPD, is processed locally from your own files and never uploaded or sent anywhere**; IPD is fully supported and handled the same local-only way. This closes the real source of the "summary stats vs IPD" divergence finding (the earlier `README.md` Confidentiality Notice removal addressed a duplicate copy of the same phrase).
+
+---
+
 ## [1.7.0] — 2026-08-01
 
 ### Added / 新增

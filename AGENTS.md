@@ -29,7 +29,7 @@
 ### 4. Security Red Line / 安全红线
 - **Fully local analysis**: all computation runs in user's local R environment.
 - **No auto-install**: R packages are NOT auto-installed; missing packages are listed and user installs manually.
-- **No confidential data exfiltration**: this skill processes user-provided summary statistics (2×2 tables, effect sizes + SEs) — no patient-level data.
+- **No confidential data exfiltration**: all data you provide — including individual patient data (IPD) for IPD meta — is processed **locally from your own files and is never uploaded or sent anywhere**. Summary statistics (2×2 tables, effect sizes + SEs) are the common case; IPD is fully supported and handled the same local-only way. No network egress of your data occurs at any point.
 - **Network only on explicit opt-in**: PDF full-text download from DOI/PMID requires explicit user confirmation.
 - `permissions` block declared in SKILL.md top-level.
 - Output sanitization via `r_libs.sanitize_output()`.
