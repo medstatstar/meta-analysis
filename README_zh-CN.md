@@ -237,7 +237,7 @@ CLI 调用示例、双向求解模式、曲线模式、核心公式推导、系�
 
 ---
 
-**版本**: v1.8.0 | **许可**: MIT | **作者**: medstatstar, phoe-zip
+**版本**: v1.8.3 | **许可**: MIT | **作者**: medstatstar, phoe-zip
 
 如有功能改进建议、Bug 报告或其他反馈，请直接联系作者：medstatstar@gmail.com（张文彤 / Wintone Zhang）。
 
