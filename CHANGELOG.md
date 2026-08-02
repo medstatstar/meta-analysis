@@ -35,6 +35,14 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [1.8.1] — 2026-08-02
+
+### Fixed / 修复
+- **ClawHub display-name fix**: republished with a clean top-level directory name `meta-analysis`, correcting the ClawHub page title that wrongly showed "Meta Analysis Strip V180" (caused by the previous temp publish-folder name, which ClawHub used as the display name fallback).
+- **Carries the v1.8.0 GitHub documentation-alignment to the marketplaces**: English README residual Chinese fully translated; `Confidentiality Notice` removed (resolves IPD-vs-summary-stats trust-boundary contradiction, complies with the non-`ct` no-confidentiality rule); added PDF-batch-download warnings, high-friction trigger clarification, and language-switch note in both READMEs; tightened `SKILL.md` Memory-read scope note.
+
+---
+
 ## [1.7.0] — 2026-08-01
 
 ### Added / 新增
