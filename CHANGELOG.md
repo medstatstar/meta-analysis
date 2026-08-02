@@ -4,7 +4,7 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
-## [Unreleased] — 2026-08-02
+## [1.8.0] — 2026-08-02
 
 ### Added / 新增
 - **ct-base alignment**: comprehensive alignment with `ct-base` BASE.md specification.
@@ -20,6 +20,7 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 - **SKILL.md**: frontmatter enriched with `required_commands: [Rscript, python]`. Body remains English-only agent-facing.
 - **README files**: renamed `README_ZH.md` → `README_zh-CN.md` per ct-base naming convention.
 - **Language detection**: migrated to `i18n.py`'s unified `is_chinese_os()` (covers env vars + Windows API + Python locale fallback).
+- **User menus & README (UI polish)**: SKILL.md Triage §5.2 now explicitly lists the "③ Can't decide? → explain the differences between these choices" routing-menu entry; README Complex popup-menu / Vague grill-me examples made more human-friendly so carbon-based users find it easier to use.
 
 ### Fixed / 修复
 - Removed stale `README_ZH.md` references across SKILL.md, README.md, README_zh-CN.md.

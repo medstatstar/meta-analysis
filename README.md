@@ -3,7 +3,7 @@
 [🇨🇳 中文 (Chinese)](./README_zh-CN.md) | [🇺🇸 English (Current)](#)
 
 <div align="center">
-  <img src="assets/icon.svg" width="120" height="120" alt="meta-analysis logo"/>
+  <img src="assets/icon.svg" width="240" height="240" alt="meta-analysis logo"/>
 </div>
 
 > **Easy-to-use R-based Meta-Analysis for Clinical Researchers**

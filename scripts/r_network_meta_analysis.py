@@ -23,7 +23,8 @@ prepare_nma_data <- function(study_data, arm_data,
                              outcome_type = "binomial",
                              link = "logit") {
   library(netmeta)
-  arm_data$treatment <- as.factor(arm_data$treatment)
+  if (!is.null(arm_data) && "treatment" %in% names(arm_data))
+    arm_data$treatment <- as.factor(arm_data$treatment)
   return(arm_data)
 }
 
@@ -35,10 +36,26 @@ run_frequentist_nma <- function(data,
                                 common = FALSE,
                                 random = TRUE) {
   library(netmeta)
-  net <- netmeta(
-    TE = TE, seTE = seTE, treat1 = treat1, treat2 = treat2, studlab = study,
-    data = data, sm = sm, reference.group = reference.group,
-    sep.trt = sep.trt, common = common, random = random)
+  net <- tryCatch({
+    netmeta(
+      TE = TE, seTE = seTE, treat1 = treat1, treat2 = treat2, studlab = study,
+      data = data, sm = sm, reference.group = reference.group,
+      sep.trt = sep.trt, common = common, random = random)
+  }, error = function(e) {
+    msg <- conditionMessage(e)
+    if (grepl("separate sub-networks|not connected|disconnected|inconsistent",
+              msg, ignore.case = TRUE)) {
+      stop(.msg(
+        paste0("Network is disconnected: separate sub-networks detected. ",
+               "A connected network requires every treatment to be linked to ",
+               "another through at least one study. Please merge the sub-networks ",
+               "or add bridging studies. Original error: ", msg),
+        paste0("网络不连通：检测到相互独立的子网络。连通网络要求每个干预措施 ",
+               "至少通过一项研究与其他干预相连。请合并子网络或补充桥接研究。",
+               "原始错误：", msg)))
+    }
+    stop(msg)
+  })
   return(net)
 }
 
@@ -70,8 +87,12 @@ plot_network <- function(netmeta_result,
                          node_size = NULL,
                          edge_width = NULL,
                          plastic = FALSE,
-                         thickness = "seTE") {
+                         thickness = "equal") {
   library(netmeta)
+  valid_thickness <- c("number.of.studies", "se.common", "se.random",
+                       "w.common", "w.random", "equal", "se.fixed", "w.fixed")
+  if (!thickness %in% valid_thickness)
+    thickness <- "equal"
   netgraph(netmeta_result,
            node.size = if(is.null(node_size)) "evidence" else node_size,
            plastic = plastic, thickness = thickness)

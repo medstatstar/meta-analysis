@@ -11,6 +11,13 @@ R_SOURCE = r'''# ===============================================================
 #  用户可直接调用或修改参数
 # ============================================================================
 
+# --- 0. 双语 helper（文件级定义，使本脚本自包含，不依赖外部 .msg） ---
+.MA_LANG <- local({
+  lang <- tolower(paste(Sys.getenv("LANG"), Sys.getenv("LC_ALL"), Sys.getenv("LANGUAGE")))
+  if (grepl("zh|cn|chs", lang)) "zh" else "en"
+})
+.msg <- function(en, zh) if (.MA_LANG == "zh") zh else en
+
 # --- 0. 环境准备 ---
 prepare_meta_environment <- function(advanced = TRUE) {
   #' 检查所需的 R 包是否已安装（不自动安装；缺失时仅提示用户手动安装）
@@ -186,17 +193,17 @@ analyze_publication_bias <- function(es_data, model_result) {
   library(metafor)
   results <- list()
   if (nrow(es_data) >= 3) {
-    egg <- regtest(model_result)
-    results$egger <- list(z = egg$zval, p = egg$pval)
+    egg <- tryCatch(regtest(model_result), error = function(e) NULL)
+    if (!is.null(egg)) results$egger <- list(z = egg$zval, p = egg$pval)
   }
   if (nrow(es_data) >= 3) {
-    beg <- ranktest(model_result)
-    results$begg <- list(z = beg$zval, p = beg$pval)
+    beg <- tryCatch(ranktest(model_result), error = function(e) NULL)
+    if (!is.null(beg)) results$begg <- list(z = beg$zval, p = beg$pval)
   }
   if (nrow(es_data) >= 5) {
-    tf <- trimfill(model_result)
-    results$trimfill <- list(k0 = tf$k0, pooled_est = tf$beta[1],
-                             ci_lb = tf$ci.lb, ci_ub = tf$ci.ub)
+    tf <- tryCatch(trimfill(model_result), error = function(e) NULL)
+    if (!is.null(tf)) results$trimfill <- list(k0 = tf$k0, pooled_est = tf$beta[1],
+                                               ci_lb = tf$ci.lb, ci_ub = tf$ci.ub)
   }
   return(results)
 }
@@ -204,6 +211,11 @@ analyze_publication_bias <- function(es_data, model_result) {
 # --- 5. 亚组分析 ---
 run_subgroup_analysis <- function(es_data, group_var) {
   library(metafor)
+  .MA_LANG <- local({
+    lang <- tolower(paste(Sys.getenv("LANG"), Sys.getenv("LC_ALL"), Sys.getenv("LANGUAGE")))
+    if (grepl("zh|cn|chs", lang)) "zh" else "en"
+  })
+  .msg <- function(en, zh) if (.MA_LANG == "zh") zh else en
   if (!group_var %in% names(es_data))
     stop(.msg("group_var not found: ", "未找到 group_var："), group_var)
   es_data[[group_var]] <- as.factor(es_data[[group_var]])
@@ -215,18 +227,44 @@ run_subgroup_analysis <- function(es_data, group_var) {
                ci_lb = m$ci.lb, ci_ub = m$ci.ub, I2 = m$I2)
   })
   subgroup_effects <- do.call(rbind, sub)
-  model <- rma(yi = yi, vi = vi, mods = as.formula(paste("~", group_var)),
-               data = es_data, method = "REML", test = "knha")
-  wald_test <- anova(model, btt = 2:length(levels))
+  
+  if (length(levels) < 2) {
+    cat(.msg("Note: Only one subgroup — between-group test skipped.\n",
+             "注意：仅一个亚组，组间比较检验已跳过。\n"))
+    model <- tryCatch(
+      rma(yi = yi, vi = vi, data = es_data, method = "REML", test = "knha"),
+      error = function(e) NULL
+    )
+    between_group_Q <- NA
+    between_group_p <- NA
+  } else {
+    model <- rma(yi = yi, vi = vi, mods = es_data[[group_var]],
+                 data = es_data, method = "REML", test = "knha")
+    wald_test <- anova(model, btt = 2:length(levels))
+    between_group_Q <- wald_test$QM
+    between_group_p <- wald_test$QMp
+  }
   return(list(model = model, subgroup_effects = subgroup_effects,
-              between_group_Q = wald_test$QM, between_group_p = wald_test$QMp))
+              between_group_Q = between_group_Q, between_group_p = between_group_p))
 }
 
 # --- 6. 元回归 ---
 run_meta_regression <- function(es_data, covariates) {
   library(metafor)
   library(ggplot2)
-  formula_str <- paste("yi ~", paste(covariates, collapse = " + "))
+  .MA_LANG <- local({
+    lang <- tolower(paste(Sys.getenv("LANG"), Sys.getenv("LC_ALL"), Sys.getenv("LANGUAGE")))
+    if (grepl("zh|cn|chs", lang)) "zh" else "en"
+  })
+  .msg <- function(en, zh) if (.MA_LANG == "zh") zh else en
+  if (length(covariates) == 0)
+    stop(.msg("At least one covariate is required for meta-regression.",
+              "元回归至少需要提供一个协变量。"))
+  bt <- function(n) {
+    parts <- strsplit(n, ":")[[1]]
+    paste0("`", parts, "`", collapse = ":")
+  }
+  formula_str <- paste("yi ~", paste(sapply(covariates, bt), collapse = " + "))
   formula <- as.formula(formula_str)
   model <- rma(formula, vi = vi, data = es_data, method = "REML", test = "knha")
   bubble_plot <- NULL
@@ -253,12 +291,25 @@ run_sensitivity_analysis <- function(es_data, analysis_type = "all") {
   results <- list()
   if (analysis_type %in% c("all", "leave1out")) {
     loo <- leave1out(model_reml)
-    results$leave1out <- data.frame(study = es_data$study, estimate = loo$estimate,
-                                    se = loo$se, ci_lb = loo$ci.lb, ci_ub = loo$ci_ub, I2 = loo$I2)
+    loo_df <- data.frame(study = as.character(es_data$study),
+                         estimate = as.numeric(loo$estimate),
+                         se = as.numeric(loo$se),
+                         ci_lb = as.numeric(loo$ci.lb),
+                         ci_ub = as.numeric(loo$ci.ub),
+                         I2 = as.numeric(loo$I2),
+                         stringsAsFactors = FALSE)
+    results$leave1out <- loo_df
   }
   if (analysis_type %in% c("all", "quality")) {
     if ("quality" %in% names(es_data)) {
-      high_q <- es_data[es_data$quality == "low risk" | es_data$quality >= 6, ]
+      q_ok <- if (is.numeric(es_data$quality)) {
+        es_data$quality >= 6
+      } else if (is.character(es_data$quality) || is.factor(es_data$quality)) {
+        es_data$quality == "low risk"
+      } else {
+        rep(FALSE, nrow(es_data))
+      }
+      high_q <- es_data[q_ok, , drop = FALSE]
       if (nrow(high_q) >= 3) {
         high_q_model <- rma(yi = yi, vi = vi, data = high_q, method = "REML")
         results$high_quality <- high_q_model
@@ -277,7 +328,8 @@ run_sensitivity_analysis <- function(es_data, analysis_type = "all") {
       CI_LB = sapply(models, function(m) m$ci.lb),
       CI_UB = sapply(models, function(m) m$ci.ub),
       tau2 = sapply(models, function(m) m$tau2),
-      I2 = sapply(models, function(m) m$I2))
+      I2 = sapply(models, function(m) m$I2),
+      stringsAsFactors = FALSE)
     results$model_comparison <- model_summary
   }
   if (analysis_type %in% c("all", "cumul")) {
@@ -290,8 +342,10 @@ run_sensitivity_analysis <- function(es_data, analysis_type = "all") {
       cum_ub  <- c(cum_ub, cm$ci.ub)
       cum_I2  <- c(cum_I2, cm$I2)
     }
-    results$cumul <- data.frame(study = es_data$study, estimate = cum_est,
-                                ci_lb = cum_lb, ci_ub = cum_ub, I2 = cum_I2)
+    cum_df <- data.frame(study = as.character(es_data$study), estimate = cum_est,
+                          ci_lb = cum_lb, ci_ub = cum_ub, I2 = cum_I2,
+                          stringsAsFactors = FALSE)
+    results$cumul <- cum_df
   }
   return(results)
 }
@@ -309,6 +363,10 @@ create_forest_plot <- function(es_data, model_result, style = "revman",
   th <- if (!is.null(themes[[style]])) themes[[style]] else themes[["revman"]]
   col_study  <- th$study; col_pooled <- th$pooled; pooled_shape <- th$pshape
   if (is.null(transform)) transform <- "none"
+  valid_transforms <- c("none", "exp", "tanh", "plogis")
+  if (!transform %in% valid_transforms)
+    stop(.msg(sprintf("Unsupported transform '%s'. Valid: none / exp / tanh / plogis", transform),
+              sprintf("不支持的 transform '%s'。可选值：none / exp / tanh / plogis", transform)))
   f <- switch(transform, exp = exp, tanh = tanh, plogis = plogis, identity)
   ref <- switch(transform, exp = 1, tanh = 0, plogis = 0.5, identity = 0)
   od <- order(es_data$yi, decreasing = TRUE)
@@ -354,6 +412,10 @@ create_funnel_plot <- function(model_result, style = "classic",
   library(ggplot2)
   library(metafor)
   if (is.null(transform)) transform <- "none"
+  valid_transforms <- c("none", "exp", "tanh", "plogis")
+  if (!transform %in% valid_transforms)
+    stop(.msg(sprintf("Unsupported transform '%s'. Valid: none / exp / tanh / plogis", transform),
+              sprintf("不支持的 transform '%s'。可选值：none / exp / tanh / plogis", transform)))
   f <- switch(transform, exp = exp, tanh = tanh, plogis = plogis, identity)
   yi <- model_result$yi; se <- sqrt(model_result$vi)
   pooled <- model_result$beta[1]

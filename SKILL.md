@@ -3,7 +3,7 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: 医学Meta分析 / Meta Analysis
-version: 1.7
+version: 1.8.0
 summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
 license: MIT
 description: "基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。所有分析提供可复现 R 代码。 / Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta. All analyses ship reproducible R code."
@@ -62,7 +62,7 @@ On first user message, classify into one of three:
 | Classification | Condition | Action |
 |---|---|---|
 | **Simple** | Single, specific intent (e.g., "pool OR from these 5 studies") | Reply directly, no menu |
-| **Complex** | Multi-decision / multi-parameter (e.g., "network meta with 3 interventions, subgroup, check inconsistency") | Present level-1 menu with "need more explanation" entry |
+| **Complex** | Multi-decision / multi-parameter (e.g., "network meta with 3 interventions, subgroup, check inconsistency") | Present level-1 routing menu incl. "③ Can't decide? → explain the differences between these choices" entry; full menu → references/interactive_menu.md |
 | **Vague** | Unclear what user wants (e.g., "I need meta-analysis help") | Grill-me style branch questions, 1–3 per round |
 
 If unsure between Simple and Complex → give short reply + optional expansion hint.
@@ -71,7 +71,7 @@ If unsure between Simple and Complex → give short reply + optional expansion h
 
 All factual/assertive claims must cite source: specific `ref-*.md` section (e.g., `§3.6`) or official guideline. If a claim has no verifiable source → mark `⚠️ official verify` and ask user to confirm against official text.
 
-## Initialization / 初始化
+## Initialization
 
 0. **Integrity check**: R source code is embedded as Python templates (scripts/r_*.py + r_templates.py) to comply with marketplace restrictions on .R files. On first use, run:
    ```bash
@@ -153,11 +153,11 @@ Data formats & full details → `references/interactive_menu.md`
 
 Output figures as editable SVG; editing + journal format conversion → `references/svg_editing.md`.
 
-## Units / 原子任务单元
+## Units
 
 See `references/units.md` for the full 5-field schema (input / output / dependency / AI autonomy / consumer units).
 
-## References / 参考
+## References
 
 | File | Content |
 |------|---------|

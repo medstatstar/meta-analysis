@@ -3,7 +3,7 @@
 [🇬🇧 English (英文)](./README.md) | [🇨🇳 中文 (当前)](#)
 
 <div align="center">
-  <img src="assets/icon.svg" width="120" height="120" alt="meta-analysis 图标"/>
+  <img src="assets/icon.svg" width="240" height="240" alt="meta-analysis 图标"/>
 </div>
 
 > **临床研究者友好的 R 语言 Meta 分析技能**
@@ -239,12 +239,3 @@ CLI 调用示例、双向求解模式、曲线模式、核心公式推导、系�
 
 如有功能改进建议、Bug 报告或其他反馈，请直接联系作者：medstatstar@gmail.com（张文彤 / Wintone Zhang）。
 
----
-
-## 保密声明
-
-> **meta-analysis** 是一个独立的 R 语言 Meta 分析技能。完全本地运行，仅处理用户提供的汇总统计数据（非受试者级数据），不上传任何用户数据。它**不属于** `ct-` 临床试验技能系列。
->
-> `ct-` 系列由 16 余个专用行业技能构成，覆盖新药临床试验全流程。其中部分技能（C/D 级）涉及药企严格保密的临床试验数据，仅限企业内部使用，目前不对外公开发布。
->
-> 📧 联系方式：medstatstar@gmail.com（张文彤 / Wintone Zhang）
