@@ -1,196 +1,239 @@
 # meta-analysis
 
-[🇨🇳 中文 (Chinese)](./README_zh-CN.md)
+[🇨🇳 中文 (Chinese)](./README_zh-CN.md) | [🇺🇸 English (Current)](#)
 
 <div align="center">
   <img src="assets/icon.svg" width="120" height="120" alt="meta-analysis logo"/>
 </div>
 
-> An R-based, conversation-driven Meta-Analysis skill for WorkBuddy. Covers 100% of RevMan 5.x functionality, Stata `metareg`/`mvmeta` equivalents, effect-size conversions (`esc`), and cluster-robust variance estimation (`clubSandwich`/`robumeta`) — all with publication-ready, editable SVG graphics.
-
-## Overview
-
-`meta-analysis` turns natural-language requests into fully reproducible R workflows. Tell it what you want ("pool the OR", "draw a forest plot subgrouped by region", "network meta-analysis with 3 interventions") and it will: check the R environment, guide you through data input, run the right model, and emit editable vector figures plus a structured results summary.
-
-Everything runs **locally** — no user data is uploaded to any server.
-
-## Key Features
-
-| Capability | Implementation (R packages) | Coverage |
-|------------|------------------------------|----------|
-| **Effect-size computation** | `metafor`, `meta` | 8 types auto-detected: OR/RR/RD (dichotomous), SMD/MD (continuous), HR (survival), r→Fisher's z (correlation), single-group rate/mean |
-| **Fixed / Random / Mixed models** | `rma()`, `metabin()`, `metacont()` | DL, REML, ML, PM, Hartung–Knapp, FE |
-| **Forest / Funnel / GOSH plots** | `metafor`, `ggplot2` | Publication-ready SVG (minimal/lancet/jama/revman/custom themes) |
-| **Heterogeneity** | `metafor` | I², Cochran's Q, τ², H², Prediction Interval |
-| **Publication bias** | `metafor`, `meta` | Egger regression, Begg rank, Trim-and-fill, selection models, fail-safe N |
-| **Subgroup analysis** | `metafor`, `meta` | `mods = ~ factor(group) - 1`, between-group Q |
-| **Meta-regression** | `metafor` | Uni/multivariate, continuous/categorical/interaction + bubble plot |
-| **Network Meta-Analysis** | `netmeta`, `gemtc`, `multinma` | Consistency (node-split), SUCRA, league table, Bayesian (JAGS/Stan) |
-| **Bayesian Meta-Analysis** | `bayesmeta`, `multinma`, `gemtc` | MCMC posterior, prior diagnostics |
-| **Sensitivity analysis** | `metafor`, `dmetar` | Leave-one-out, cumulative, GOSH (all-subsets) |
-| **Survival Meta** | `survmeta`, `ipdmeta` | Aggregate HR + KM pseudo-IPD reconstruction |
-| **Single-group / Diagnostic** | `meta` (`metaprop`/`metamean`/`metainc`/`metacor`), `mada` | Proportion, mean, incidence, correlation, bivariate SROC |
-| **Trial Sequential Analysis** | `metafor::tes()` | Type-I-error control, required-info size |
-| **Power analysis** | `dmetar`, `meta` | Prospective sample-size planning |
-| **Risk-of-Bias (RoB 1.0/2.0, ROBINS-I)** | `robvis`, `dmetar` | Traffic-light + weighted bar plots |
-| **Effect-size conversion** | `esc` | d ↔ g ↔ logOR ↔ r ↔ Fisher's z, batch + Hedges' g correction |
-| **Cluster-robust variance estimation** | `robumeta`, `clubSandwich` | RVE + CR2 small-sample SE (dependent/multi-arm data) |
-| **Multivariate / Multilevel** | `rma.mv()`, `robumeta` | UN/CS/AR1 + compound-symmetry V-matrix |
-| **Stata equivalents** | `metafor`, `robumeta` | `metareg` → `rma`+permutation; `mvmeta` → `rma.mv`+6 covariance structs |
-| **Systematic-review workflow** | `metagear` | PRISMA flow, screening GUI, PDF batch, digitize, impute |
-
-## RevMan Compatibility
-
-The skill implements 1:1 code mappings for all RevMan 5.x analysis types (binary, continuous, generic inverse-variance, single-arm, OD ratios, etc.). Users familiar with RevMan can migrate to fully reproducible, editable R output without re-learning statistics.
-
-## Stata Equivalents
-
-| Stata command | R equivalent | Notes |
-|---------------|--------------|-------|
-| `metan` | `metabin()` / `metacont()` | Same models, richer output |
-| `metareg` | `rma(..., mods = ~ x)` + permutation test | Adds Knapp–Hartung SEs |
-| `mvmeta` | `rma.mv()` with `V` matrix | 6 covariance structures (UN/CS/AR1/…) |
-| `metabias` | `regtest()` / `ranktest()` | Egger / Begg |
-| `metaninf` | `leave1out()` | Influence diagnostics |
-
-## Interactive Workflow
-
-On first activation the skill presents a 7-category menu; if your initial message already contains enough detail it skips straight to analysis:
-
-1. **Pairwise Meta** — binary / continuous / pre-computed / survival / correlation / single-group
-2. **Heterogeneity & Bias** — I²/Q/τ², subgroup, meta-regression, Egger/Begg/Trim-fill, sensitivity, GOSH, Baujat, Drapery
-3. **Advanced Models** — NMA, Bayesian NMA (Stan/JAGS), multilevel, multivariate, IPD, dose-response, survival, TSA, bootstrap
-4. **Effect Size & Conversion** — mean/SD→d, t/F/r→d, d↔g, d↔logOR, r↔Fisher's z, OR↔logOR, batch, NNT
-5. **Visualization** — forest (5 themes), funnel, bubble, GOSH, network, league table, RoB traffic-light, power curve, Drapery, inconsistency heatmap
-6. **Study Quality** — RoB 1.0/2.0, ROBINS-I, GRADE, PRISMA checklist, AMSTAR-2
-7. **Systematic Review Workflow** — PRISMA flow, screening GUI, PDF batch, digitize, impute, reference management
-
-## Installation
-
-1. Install **R 4.0+** (https://cran.r-project.org/).
-2. Place the skill folder at `~/.workbuddy/skills/meta-analysis/`.
-3. On first run the skill auto-detects and installs missing R packages (you choose *install all now* or *on demand*).
-
-If your raw data is in a non-standard format (SPSS/Stata/SAS/Excel/Parquet/…), the skill recommends installing **`statdata-transfer`** to convert it into the required CSV columns before analysis.
-
-## Usage
-
-```
-# In WorkBuddy chat:
-"run a meta-analysis with the following data..."
-"pool the OR using a random-effects model"
-"draw a forest plot, subgroup by region"
-"network meta-analysis with 3 interventions (A vs B, A vs placebo)"
-"meta-regression: effect size ~ publication year + sample size"
-"check publication bias: Egger test + trim-and-fill"
-"node-split test for NMA inconsistency"
-"convert Cohen's d to logOR"
-```
-
-## Output
-
-- `analysis_complete.R` — fully reproducible R script
-- Forest plot (`.svg` + `.png`)
-- Funnel plot, standard & contour-enhanced (`.svg` + `.png`)
-- `results_summary.md` — structured results (effect, CI, I², τ², p-values)
-- CSV data backup
-- R Markdown / HTML report (optional)
-
-## Editing the SVG Graphics
-
-The figures are emitted as editable SVG. Recommended tools:
-
-| Tool | Type | Notes |
-|------|------|-------|
-| **Microsoft PowerPoint** (2016+) | Office | Drag the `.svg` in, right-click → *Convert to Shape* / *Ungroup* to edit text/colors directly |
-| **Inkscape** | Free / Open-source | Full vector editing; CLI export: `inkscape in.svg --export-type=pdf --export-filename=out.pdf` |
-| **Adobe Illustrator** | Paid | Journal-grade fine-tuning; native SVG/EPS |
-| **Affinity Designer** | Paid (one-time) | Lightweight AI alternative |
-| **Boxy SVG** | Free/Paid web app | Quick color/text/dimension tweaks |
-
-For journal submission (TIFF/EPS/PDF), convert with Inkscape:
-
-```bash
-inkscape forest_plot.svg --export-type=eps --export-filename=forest_plot.eps
-inkscape forest_plot.svg --export-type=pdf --export-filename=forest_plot.pdf
-inkscape forest_plot.svg --export-type=png --export-dpi=600 --export-filename=forest_plot.tiff
-```
-
-## Directory Structure
-
-```
-meta-analysis/
-├── SKILL.md                       # Main skill definition (English body, ct-base aligned)
-├── AGENTS.md                      # Self-improvement + agent rules (English, ct-base aligned)
-├── CHANGELOG.md                   # Version / fix log
-├── README.md / README_zh-CN.md    # This file
-├── LICENSE                        # MIT
-├── requirements.txt              # R package list
-├── assets/
-│   ├── icon.svg                   # Skill logo (ct-base visual base)
-│   └── icon.png                   # Bitmap version
-├── scripts/
-│   ├── i18n.py                    # Bilingual helper (from ct-base)
-│   ├── r_libs.py                  # R invocation + validation + sanitization (from ct-base)
-│   ├── r_templates.py             # R code template generator
-│   ├── r_meta_analysis_core.py    # Core engine templates
-│   ├── r_effect_size_conversions.py
-│   ├── r_network_meta_analysis.py
-│   ├── r_stata_equivalents.py
-│   ├── r_advanced_functions.py
-│   ├── r_setup_packages.py
-│   ├── check_integrity.sh         # Integrity self-check (auto-generate .R)
-│   ├── setup_packages.R           # Env check + package installer
-│   ├── meta_analysis_core.R       # Core engine (escalc/rma/forest/funnel)
-│   ├── effect_size_conversions.R  # esc wrappers, d↔g, RVE
-│   ├── stata_equivalents.R        # metareg / mvmeta equivalents
-│   ├── network_meta_analysis.R    # netmeta / gemtc / multinma
-│   └── advanced_functions.R       # Advanced functions
-└── references/
-│   ├── language_policy.md         # Bilingual policy (from ct-base)
-│   ├── report_template.md         # Report skeleton (from ct-base)
-│   ├── units.md                   # Atomic task unit index (pipeline)
-│   ├── interactive_menu.md        # Full menu tree + data format guide
-│   ├── data_templates.md          # Per-type CSV templates + validation
-│   ├── revman_complete.md         # 1:1 RevMan → R code mappings
-│   ├── stata_to_r_mapping.md      # Stata metareg/mvmeta → R equivalents
-│   ├── advanced_analysis.md       # Multivariate / multilevel / IPD / dose-response
-│   ├── single_group_meta.md       # metaprop/metamean/metainc/metacor
-│   ├── survival_meta.md           # survmeta / KM pseudo-IPD
-│   ├── tsa_diagnostics.md         # tes / Baujat / Drapery / selection
-│   ├── diagnosis_meta.md          # mada bivariate / SROC
-│   ├── bayesian_nma.md            # multinma / gemtc workflows
-│   ├── esc_robust_meta.md         # esc conversions + RVE (robumeta/clubSandwich)
-│   ├── review_workflow.md         # metagear PRISMA / screening / digitize
-│   ├── r_packages.md              # Package inventory
-│   ├── citations.md               # Methodological references
-│   ├── references.md              # Reference list
-│   ├── advanced_api.md            # Reusable API reference
-│   ├── svg_editing.md             # SVG editing tools & journal format conversion
-│   └── purpose_zh.md              # Chinese Purpose text mirror
-```
-
-## Important Notes
-
-- R **4.0+** is required; the skill verifies this on startup.
-- All analysis runs in your local R environment — **no user data is uploaded**.
-- Statistical output requires interpretation in context; the skill does not replace statistical or clinical judgment.
-
-## References
-
-- Harrer, M., Cuijpers, P., Furukawa, T. A., & Ebert, D. D. (2021). *Doing Meta-Analysis with R: A Hands-On Guide*. Chapman and Hall/CRC.
-- Viechtbauer, W. (2010). Conducting meta-analyses in R with the metafor package. *J Stat Softw*, 36(3), 1–48.
-- Balduzzi, S., Rücker, G., & Schwarzer, G. (2019). How to perform a meta-analysis with R: a practical tutorial. *Evid Based Ment Health*, 22(4), 153–160.
-- Rücker, G., et al. (2016). netmeta: Network Meta-Analysis using Frequentist Methods. *BMC Med Res Methodol*, 16, 1–8.
-- Salanti, G. (2012). Network meta-analysis in mental health. *Evid Based Ment Health*, 15(1), 16–20.
-
-## License
-
-MIT License. See `LICENSE` file for details.
+> **Easy-to-use R-based Meta-Analysis for Clinical Researchers**
+>
+> You don't't need to code or memorize commands — just describe your meta-analysis needs in **plain language inside a chat**, and the skill runs the full analysis for you. Powered by R and 15+ professional R packages (metafor, meta, netmeta, gemtc, etc.), it returns results in Chinese or English depending on your OS language setting (you can force-switch via a prompt at any time). The generated R code is shown in **SAFE PREVIEW** (not executed) by default — it only computes once you confirm.
 
 ---
 
-## Contact / 联系作者
+## 1. How to Use It in a Chat (the Core)
+
+meta-analysis is a **conversational skill**: you simply tell the assistant what you want in natural language — no commands, no parameter names to remember. As a WorkBuddy skill it **auto-loads with no extra installation**.
+
+Below are 6 real conversational examples ordered from simple to advanced. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
+
+### Example 1 · Two-group binary meta (most common)
+**You say:**
+> 合并以下 5 项二分类研究的 OR：
+> 研究A: 实验组 30/100, 对照组 20/100
+> 研究B: 实验组 45/120, 对照组 30/100
+> ...
+
+**Assistant replies (sketch):**
+> ✅ 5 studies, random-effects (DL), OR = 1.52 (95%CI: 1.18–1.96), I² = 34%
+> (Safe preview: R code shown below but not executed.)
+
+**📌 Get the actual number:** Say **"please compute directly"** — the assistant runs R and gives the real result (see Section 4, "Safe Preview").
+
+### Example 2 · Effect size conversion
+**You say:**
+> Convert Cohen's d = 0.8 to logOR
+
+**Assistant replies (sketch):**
+> ✅ d = 0.8 → logOR ≈ 1.45 (SE ≈ 0.38), based on logOR = d × π/√3
+
+### Example 3 · Heterogeneity + subgroup
+**You say:**
+> I did a continuous meta with 8 studies, SMD pooled, but I² is high — I want to subgroup by region
+
+**Assistant replies (sketch):**
+> ✅ 8 studies, SMD = 0.42 (95%CI: 0.15–0.69), I² = 78%
+> Subgroup by region:
+> - Asia (k=4): SMD = 0.55, I² = 45%
+> - Euro-US (k=4): SMD = 0.28, I² = 62%
+> - Between-group Q = 4.12, p = 0.04
+
+### Example 4 · Complex: Network meta with multiple decisions (popup menu)
+**You say:**
+> I want to do a network meta with 4 interventions, but I haven't decided whether to use frequentist or Bayesian, and I'm not sure if I should include dose-response
+
+**Assistant replies (sketch):**
+> 4 interventions clear. Two key choices to clarify:
+>
+> **① Which analysis framework?**
+> - (a) Frequentist — `netmeta`, inverse-variance based, good for consistent networks
+> - (b) Bayesian — `multinma` (Stan) or `gemtc` (JAGS), better for survival data / dose-response
+>
+> **② Include dose-response?**
+> - (a) No — pure pairwise comparison network
+> - (b) Yes — needs dose-effect parameters, Bayesian framework preferred
+>
+> **③ Can't decide?** → Say "explain the differences between these choices in detail" and the assistant explains first, then lets you decide
+
+**📌 Note:** When you've **named the test type but are stuck on "which option / design family"**, the assistant **pops a routing menu** to confirm step by step — instead of deciding for you or dumping the full 49-test menu. The menu also offers an "explain the differences" option — when you're unsure, it explains before you decide.
+
+### Example 5 · Vague: Not sure which model (grill-me)
+**You say:**
+> I want to do a meta-analysis but I'm not sure which model to use — help me figure it out
+
+**Assistant replies (sketch):**
+> Sure — let's pin down your needs first; a few key questions will locate the right model:
+> 1. What type is your **primary endpoint**? — continuous (e.g. SMD) / binary (e.g. OR) / survival (HR) / single-group rate / other?
+> 2. Is it a **two-group comparison or multi-group network**?
+> 3. Any **special dependency structure**? — multi-arm / multi-outcome / IPD / none
+>
+> (After you answer, the assistant keeps probing until the model is locked, then computes — no full menu dumped on you.)
+
+**📌 Note:** When you say "not sure which model", the assistant uses **branch-by-branch probing** to clarify your needs, instead of dumping the full menu.
+
+### Example 6 · Systematic review workflow
+**You say:**
+> Help me generate a PRISMA flow diagram
+
+**Assistant replies (sketch):**
+> Sure, please provide:
+> - Records identified: ___
+> - Records screened: ___
+> - Records excluded: ___
+> - Full-text assessed: ___
+> - Full-text excluded (+ reasons): ___
+> - Studies included: ___
+>
+> User: 520, 380, 140, 80, 52(20 no data, 18 wrong pop, 14 wrong design), 28
+>
+> ✅ PRISMA flow diagram generated! [SVG output]
+
+> 💡 **Tip:** Most analyses need only three things — effect size (or rate / HR) + α + power. Anything you omit is filled with sensible defaults. It's fine to be incomplete — the assistant will tell you what's missing.
+
+---
+
+## 2. What You Can Do — Scenario Index
+
+Tests are grouped by **analysis purpose** (7 categories below). Each row gives the typical **clinical scenario** and a line you can **copy verbatim** under "Try saying". The same test may be reached from multiple entry points.
+
+> The underlying R packages (metafor / meta / netmeta …) are listed in Section 5 "Advanced Reference"; ordinary users don't need to care.
+
+### ① Pairwise Meta-Analysis
+| Scenario | Try saying in chat |
+|:---|:---|
+| Binary (OR/RR/RD) | "合并这 5 项二分类研究的 OR" |
+| Continuous (SMD/MD) | "合并 6 项连续型研究的 SMD" |
+| Pre-calculated (yi+CI) | "我有 5 个研究的效应量和 CI，直接画森林图" |
+| Survival (HR) | "合并 8 项研究的 HR" |
+| Correlation (r→Zr) | "把这 4 个相关系数做 Fisher z 转换后合并" |
+| Single-group rate/mean | "合并这几个研究的发病率" |
+| Generic inverse-variance | "我有 yi 和 vi，直接做 Meta" |
+
+### ② Heterogeneity & Bias
+| Scenario | Try saying in chat |
+|:---|:---|
+| Heterogeneity assessment | "我做了 Meta，I² 很高，帮我看下异质性" |
+| Subgroup analysis | "按地区做亚组分析" |
+| Meta-regression | "做元回归，看发表年份和样本量的影响" |
+| Egger test | "检查发表偏倚，做 Egger 检验" |
+| Begg test | "Begg 秩相关检验" |
+| Trim-and-fill | "用剪补法校正发表偏倚" |
+| Selection model | "用 selection model 评估发表偏倚" |
+| Sensitivity analysis | "做 leave-one-out 敏感性分析" |
+| Cumulative meta | "按发表年份做累积 Meta" |
+| GOSH plot | "画 GOSH 图看异质性模式" |
+| Baujat diagnosis | "做 Baujat 图，看哪个研究贡献最大异质性" |
+| Drapery plot | "画 Drapery 图评估 α 稳健性" |
+
+### ③ Advanced Models
+| Scenario | Try saying in chat |
+|:---|:---|
+| Frequentist NMA | "做网络 Meta，4 种干预，用 netmeta" |
+| Bayesian NMA (Stan) | "做贝叶斯网络 Meta，Stan 后端" |
+| Bayesian NMA (JAGS) | "做贝叶斯网络 Meta，JAGS 后端" |
+| Multilevel meta | "做 3 水平 Meta，研究内多个效应" |
+| Multivariate meta | "合并多个相关结局的 Meta" |
+| IPD meta | "我有患者个体数据，做 IPD Meta" |
+| Dose-response | "做剂量反应 Meta，dosresmeta" |
+| Survival meta | "合并生存数据，survmeta" |
+| Trial sequential analysis | "做 TSA，看还需要多少研究" |
+| Bootstrap meta | "用 Bootstrap 做非参数 DL 估计" |
+
+### ④ Effect Size & Conversion
+| Scenario | Try saying in chat |
+|:---|:---|
+| Mean/SD→d | "把均值标准差转成 Cohen's d" |
+| t/F→d | "把 t 值转成 d" |
+| r→Fisher z | "把相关系数转成 Fisher z" |
+| d↔logOR | "把 d 转成 logOR" |
+| OR↔logOR | "把 OR 转成 logOR" |
+| Batch convert | "批量把 SMD 转成 logOR" |
+| NNT | "计算 NNT" |
+
+### ⑤ Visualization
+| Scenario | Try saying in chat |
+|:---|:---|
+| Forest plot | "画森林图，lancet 主题" |
+| Funnel plot | "画漏斗图，带轮廓增强" |
+| Bubble plot | "画元回归气泡图" |
+| GOSH plot | "画 GOSH 图" |
+| Network plot | "画网络 Meta 的网络图" |
+| League table | "画 NMA 联赛表" |
+| RoB traffic-light | "画偏倚风险交通灯图" |
+| Power curve | "画功效曲线" |
+| Drapery plot | "画 Drapery 图" |
+| Inconsistency heatmap | "画 NMA 不一致性热图" |
+
+### ⑥ Study Quality
+| Scenario | Try saying in chat |
+|:---|:---|
+| RoB 2.0 | "用 RoB 2.0 评估偏倚风险" |
+| RoB 1.0 | "用 Cochrane RoB 1.0 评估" |
+| ROBINS-I | "非随机研究，用 ROBINS-I" |
+| GRADE | "做 GRADE 证据质量评价" |
+| PRISMA checklist | "PRISMA 检查表" |
+
+### ⑦ Systematic Review Workflow
+| Scenario | Try saying in chat |
+|:---|:---|
+| PRISMA flow | "帮我生成 PRISMA 流程图" |
+| Literature screening | "标题摘要筛选，AI 辅助" |
+| PDF batch download | "从 DOI 列表批量下载全文（需确认）" |
+| Graph digitize | "从散点图提取数据" |
+| Missing value imputation | "缺失标准差的插补" |
+
+---
+
+## 3. First-Time FAQ
+
+**Q: I only gave effect size and study count, no other parameters — will it still compute?**
+A: Yes. Most analyses need only 3 items — effect size (or rate / HR) + α + power. Omitted parts (two-sided α=0.05, 1:1 randomization, follow-up) are filled with sensible defaults; if something truly required is missing, the assistant will ask.
+
+**Q: Is the n in the result per group or total?**
+A: By default it's **per group**; paired / crossover designs report per-sequence, and survival often reports total events needed. The output always labels this clearly.
+
+**Q: It only shows code, not the number. How do I get the actual result?**
+A: Just add **"please compute directly"** or **"execute"** in the chat — the assistant will really run R and give you the number. This is the default safe design: see the code first, compute once you're sure.
+
+**Q: I want the reproducible R code for submission or audit — how do I ask?**
+A: Say **"give me the full R code"**. The code is also shown in safe preview by default, so you can copy, modify, and re-run it yourself.
+
+**Q: On a Chinese system, is the output in Chinese?**
+A: Yes. By default the output language follows your OS language setting — Chinese on a Chinese-OS, English otherwise. You can force-switch anytime via a prompt (e.g. "用中文回复" / "switch to English").
+
+**Q: My data is in SPSS/Excel/Stata format — what do I do?**
+A: Say **"help me convert my SPSS/Excel data to CSV"** — the assistant will recommend installing `@skill:statdata-transfer` for 50+ format conversions.
+
+---
+
+## 4. Safe Preview (安全预览)
+
+- **Default behavior:** The skill only **generates and shows the R code, but does not execute it** — you can inspect the logic first, then let it run once you're confident.
+- **Trigger real computation:** In chat say **"please compute directly"** or **"execute"** → the assistant really runs R and gives the number.
+- **Just see the code:** Say **"show code"** or **"preview only"** → only code, no result.
+- **All computations are local** — no data is uploaded.
+- **Output is for reference only** — validate before journal submission or regulatory use.
+
+---
+
+## 5. Advanced Reference (moved to a separate file)
+
+CLI examples, bidirectional solving, curve mode, core formulas, system requirements, common errors, full file structure, and references for developers have been moved to **[references/ADVANCED.md](references/ADVANCED.md)**. Ordinary users don't need it; see Sections 1-4 for daily use.
+
+---
+
+**Version**: v1.7 | **License**: MIT | **Authors**: medstatstar, phoe-zip
 
 For feature requests, bug reports, or other feedback, please contact the author directly at medstatstar@gmail.com (Wintone Zhang / 张文彤).
 

@@ -161,7 +161,9 @@ See `references/units.md` for the full 5-field schema (input / output / dependen
 
 | File | Content |
 |------|---------|
-| `interactive_menu.md` | Full Level 2 menus + data formats + dialogue examples |
+| `interactive_menu.md` | How to use in a chat (user-friendly guide, 5 conversation examples) |
+| `ADVANCED.md` | Advanced reference (CLI, formulas, troubleshooting, full file structure) |
+| `ADVANCED_zh-CN.md` | Advanced reference (Chinese version) |
 | `revman_complete.md` | RevMan→R 1:1 code mapping |
 | `stata_to_r_mapping.md` | Stata metareg/mvmeta→R equivalents |
 | `esc_robust_meta.md` | Effect size conversions + RVE reference |

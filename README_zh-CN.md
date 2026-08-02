@@ -1,196 +1,241 @@
 # meta-analysis 技能
 
-[🇬🇧 English (英文)](./README.md)
+[🇬🇧 English (英文)](./README.md) | [🇨🇳 中文 (当前)](#)
 
 <div align="center">
   <img src="assets/icon.svg" width="120" height="120" alt="meta-analysis 图标"/>
 </div>
 
-> 基于 R 语言的对话式 Meta 分析 WorkBuddy 技能。覆盖 RevMan 5.x 全部功能、Stata `metareg`/`mvmeta` 等价实现、效应量转换（`esc`）、聚类稳健方差估计（`clubSandwich`/`robumeta`），并提供可直接编辑的出版级 SVG 矢量图。
-
-## 概述
-
-`meta-analysis` 把自然语言请求转化为完全可复现的 R 工作流。只需告诉它你想做什么（"合并 OR"、"画森林图并按地区亚组"、"做含 3 种干预措施的网络 Meta"），技能会：检测 R 环境 → 引导数据录入 → 运行对应模型 → 输出可编辑矢量图与结构化结果摘要。
-
-所有分析均在**本地**运行——不上传任何用户数据。
-
-## 🎯 核心能力
-
-| 功能模块 | 实现方式（R 包） |
-|---------|------------------|
-| **效应量计算** | `metafor`, `meta` — 自动识别 8 种：OR/RR/RD（二分类）、SMD/MD（连续）、HR（生存）、r→Fisher's z（相关）、单组率/均值 |
-| **随机/固定/混合效应模型** | `rma()` / `metabin()` / `metacont()` — 支持 DL/REML/ML/PM/Hartung–Knapp/FE |
-| **森林图 / 漏斗图 / GOSH 图** | `metafor`, `ggplot2` — 出版级 SVG（minimal/lancet/jama/revman/custom 主题） |
-| **异质性评估** | `metafor` — I²、Cochran's Q、τ²、H²、预测区间（PI） |
-| **发表偏倚检验** | `metafor`, `meta` — Egger 回归、Begg 秩相关、剪补法、选择模型、失安全系数 |
-| **亚组分析** | `metafor`, `meta` — `mods = ~ factor(group) - 1`，自动输出组间异质性 |
-| **元回归** | `metafor` — 单/多变量，连续/分类/交互项 + bubble plot |
-| **网络 Meta 分析** | `netmeta`, `gemtc`, `multinma` — 一致性（节点拆分）、SUCRA、联赛表、贝叶斯（JAGS/Stan） |
-| **贝叶斯 Meta 分析** | `bayesmeta`, `multinma`, `gemtc` — MCMC 后验分布 + 先验诊断 |
-| **敏感性分析** | `metafor`, `dmetar` — Leave-one-out、累积元分析、GOSH 图（所有子集诊断） |
-| **生存 Meta** | `survmeta`, `ipdmeta` — 合并 HR + KM 曲线伪个体数据（pseudo-IPD）重建 |
-| **单组 / 诊断 Meta** | `meta`（`metaprop`/`metamean`/`metainc`/`metacor`）、`mada` — 比例/均值/发生率/相关、双变量 SROC |
-| **试验序贯分析（TSA）** | `metafor::tes()` — 控制 I 类错误、所需信息量 |
-| **功效分析** | `dmetar`, `meta` — 前瞻性样本量规划 |
-| **偏倚风险（RoB 1.0/2.0/ROBINS-I）** | `robvis`, `dmetar` — 交通灯图 + 加权条形图 |
-| **效应量转换（esc）** | d ↔ g ↔ logOR ↔ r ↔ Fisher's z 双向批量转换 + Hedges' g 校正 |
-| **聚类稳健方差估计** | RVE（`robumeta`）+ CR2 标准误校正（`clubSandwich`）— 处理多结局/多臂依赖数据 |
-| **多元 / 多水平 Meta** | `rma.mv()`, `robumeta` — UN/CS/AR1 + 复合对称 V 矩阵 |
-| **Stata 等价实现** | `metareg`（→ `rma` + 置换检验）、`mvmeta`（→ `rma.mv` + 6 种协方差结构） |
-| **系统评价流程** | `metagear` — PRISMA 流程图、筛选 GUI、PDF 批量、图形数字化、缺失值插补 |
-
-## 📐 RevMan 对标
-
-RevMan 5.x 全部分析类型（二分类、连续型、通用逆方差、单臂、比值比等）均已实现 1:1 代码映射。熟悉 RevMan 的用户可无缝迁移到完全可复现、可编辑的 R 输出，无需重新学习统计方法。
-
-## 🔁 Stata 等价对照
-
-| Stata 命令 | R 等价实现 | 说明 |
-|-----------|-----------|------|
-| `metan` | `metabin()` / `metacont()` | 同模型，输出更丰富 |
-| `metareg` | `rma(..., mods = ~ x)` + 置换检验 | 增加 Knapp–Hartung 标准误 |
-| `mvmeta` | `rma.mv()` + `V` 矩阵 | 6 种协方差结构（UN/CS/AR1/…） |
-| `metabias` | `regtest()` / `ranktest()` | Egger / Begg |
-| `metaninf` | `leave1out()` | 影响度诊断 |
-
-## 🧭 交互式工作流
-
-技能首次激活时呈现 7 大类菜单；若你的首条消息已包含足够信息，则跳过菜单直接分析：
-
-1. **两组 Meta 分析** — 二分类 / 连续型 / 预计算 / 生存 / 相关 / 单组
-2. **异质性与偏倚** — I²/Q/τ²、亚组、元回归、Egger/Begg/剪补、敏感性、GOSH、Baujat、Drapery
-3. **高级模型** — NMA、贝叶斯 NMA（Stan/JAGS）、多水平、多元、IPD、剂量反应、生存、TSA、Bootstrap
-4. **效应量与转换** — 均值/SD→d、t/F/r→d、d↔g、d↔logOR、r↔Fisher's z、OR↔logOR、批量、NNT
-5. **可视化** — 森林图（5 主题）、漏斗图、气泡图、GOSH、网络图、联赛表、RoB 交通灯、功效曲线、Drapery、不一致性热图
-6. **研究质量** — RoB 1.0/2.0、ROBINS-I、GRADE、PRISMA 检查表、AMSTAR-2
-7. **系统评价流程** — PRISMA 流程图、筛选 GUI、PDF 批量、图形数字化、插补、文献管理
-
-## 📦 安装
-
-1. 确保已安装 **R 4.0+**（Windows 推荐：https://cran.r-project.org/bin/windows/base/）。
-2. 将技能目录放置在 `~/.workbuddy/skills/meta-analysis/`。
-3. 首次启动时技能自动检测并安装缺失的 R 包（可选择"全部安装"或"按需安装"）。
-
-若原始数据为非标准格式（SPSS/Stata/SAS/Excel/Parquet/…），技能会建议安装 **`statdata-transfer`** 将其转换为所需 CSV 列后再分析。
-
-## 🚀 使用示例
-
-```text
-"合并以下 5 项二分类研究的 OR 与 95%CI，并画森林图"
-"用随机效应模型合并 5 项研究的 OR"
-"画森林图，按地区做亚组分析"
-"做网络Meta分析，有 3 种干预措施（A vs B，A vs 安慰剂）"
-"做元回归：因变量为效应量，自变量为发表年份和样本量"
-"检查发表偏倚：Egger 检验 + 剪补法"
-"网状 Meta 一致性用节点拆分法"
-"把 Cohen's d 转成 logOR"
-```
-
-## 📊 输出物
-
-每次分析自动生成：
-- **`analysis_complete.R`**：完整可复现的 R 脚本
-- **森林图**（.svg + .png）
-- **漏斗图**（标准版 + 轮廓增强版，.svg + .png）
-- **`results_summary.md`**：结构化结果摘要（效应量、CI、I²、τ²、p 值）
-- **数据 CSV 备份**
-- **R Markdown / HTML 报告**（可选）
-
-## 🎨 SVG 图形编辑
-
-图形以可编辑 SVG 输出，推荐工具：
-
-| 工具 | 类型 | 说明 |
-|------|------|------|
-| **Microsoft PowerPoint（2016+）** | Office | 直接拖入 `.svg`，右键 → **转换为形状** / **取消组合** 即可编辑文字与配色 |
-| **Inkscape** | 免费/开源 | 完整矢量编辑；命令行导出：`inkscape in.svg --export-type=pdf --export-filename=out.pdf` |
-| **Adobe Illustrator** | 付费 | 出版级精修，原生支持 SVG/EPS |
-| **Affinity Designer** | 付费（一次性） | 轻量 AI 替代品 |
-| **Boxy SVG** | 免费/付费 在线 | 快速改色/文字/尺寸 |
-
-投稿格式转换（TIFF/EPS/PDF）可用 Inkscape：
-
-```bash
-inkscape forest_plot.svg --export-type=eps --export-filename=forest_plot.eps
-inkscape forest_plot.svg --export-type=pdf --export-filename=forest_plot.pdf
-inkscape forest_plot.svg --export-type=png --export-dpi=600 --export-filename=forest_plot.tiff
-```
-
-## 📁 目录结构
-
-```
-meta-analysis/
-├── SKILL.md                       # 技能主定义（英文正文，ct-base 对齐）
-├── AGENTS.md                      # 自改进约定（英文，ct-base 对齐）
-├── CHANGELOG.md                   # 版本 / 整改记录
-├── README.md / README_zh-CN.md      # 本文件
-├── LICENSE                        # MIT
-├── requirements.txt              # R 包清单
-├── assets/
-│   ├── icon.svg                   # 技能 Logo（ct-base 视觉底座）
-│   └── icon.png                   # 位图版
-├── scripts/
-│   ├── i18n.py                    # 中英切换 helper（来自 ct-base）
-│   ├── r_libs.py                  # R 调用 + 校验 + 脱敏（来自 ct-base）
-│   ├── r_templates.py             # R 代码模板生成器
-│   ├── r_meta_analysis_core.py    # 核心引擎模板
-│   ├── r_effect_size_conversions.py
-│   ├── r_network_meta_analysis.py
-│   ├── r_stata_equivalents.py
-│   ├── r_advanced_functions.py
-│   ├── r_setup_packages.py
-│   ├── check_integrity.sh         # 完整性自检（自动生成 .R）
-│   ├── setup_packages.R          # 环境检测 + 包安装器
-│   ├── meta_analysis_core.R      # 核心引擎（escalc/rma/forest/funnel）
-│   ├── effect_size_conversions.R # esc 封装、d↔g、RVE
-│   ├── stata_equivalents.R       # metareg / mvmeta 等价实现
-│   ├── network_meta_analysis.R   # netmeta / gemtc / multinma
-│   └── advanced_functions.R       # 高级函数
-└── references/
-    ├── language_policy.md         # 双语策略（来自 ct-base）
-    ├── report_template.md         # 报告骨架（来自 ct-base）
-    ├── units.md                   # 原子任务单元索引（pipeline）
-    ├── interactive_menu.md        # 完整菜单树 + 数据格式指引
-    ├── data_templates.md          # 分类型 CSV 模板 + 校验
-    ├── revman_complete.md         # RevMan → R 1:1 代码映射
-    ├── stata_to_r_mapping.md      # Stata metareg/mvmeta → R 等价实现
-    ├── advanced_analysis.md       # 多元/多水平/IPD/剂量反应
-    ├── single_group_meta.md       # metaprop/metamean/metainc/metacor
-    ├── survival_meta.md           # survmeta / KM 伪个体数据
-    ├── tsa_diagnostics.md         # tes / Baujat / Drapery / 选择模型
-    ├── diagnosis_meta.md          # mada 双变量 / SROC
-    ├── bayesian_nma.md            # multinma / gemtc 工作流
-    ├── esc_robust_meta.md         # esc 转换 + RVE（robumeta/clubSandwich）
-    ├── review_workflow.md         # metagear PRISMA / 筛选 / 数字化
-    ├── r_packages.md              # 包清单
-    ├── citations.md               # 方法学引用
-    ├── references.md              # 引用列表
-    ├── advanced_api.md            # 复用接口（强制）+ 重依赖封装
-    ├── svg_editing.md             # SVG 编辑工具与期刊格式转换
-    └── purpose_zh.md              # 中文 Purpose 文本镜像
-```
-
-## 🔴 注意事项
-
-- R 环境必须 **4.0+**，技能启动时自动检测
-- 所有分析依赖本地 R 环境，**不上传任何用户数据**
-- 统计结果需结合专业背景解读，技能不替代统计/临床判断
-
-## 📚 引用
-
-- Harrer M, Cuijpers P, Furukawa TA, Ebert DD. (2021). *Doing Meta-Analysis with R: A Hands-On Guide*. CRC Press.
-- Viechtbauer W. (2010). Conducting meta-analyses in R with the metafor package. *J Stat Softw*, 36(3), 1–48.
-- Balduzzi S, Rücker G, Schwarzer G. (2019). How to perform a meta-analysis with R: a practical tutorial. *Evid Based Ment Health*, 22(4), 153–160.
-- Rücker G, et al. (2016). netmeta: Network Meta-Analysis using Frequentist Methods. *BMC Med Res Methodol*, 16, 1–8.
-- Salanti G. (2012). Network meta-analysis in mental health. *Evid Based Ment Health*, 15(1), 16–20.
-
-## License
-
-MIT License. See `LICENSE` file for details.
+> **临床研究者友好的 R 语言 Meta 分析技能**
+>
+> 无需编程、无需记忆命令——在对话中用**自然语言**描述你的 Meta 分析需求，技能自动完成全套分析。底层基于 R 与 15+ 专业 R 包（metafor、meta、netmeta、gemtc 等），输出语言随操作系统语言自动切换（中文系统出中文，否则出英文；可随时强制切换）。默认采用**安全预览**模式——只展示生成的 R 代码、不执行；确认无误后说出触发词即可真正计算。
 
 ---
 
-## 联系作者
+## 1. 对话中使用（核心）
+
+meta-analysis 是**对话式技能**：用自然语言告诉助手你要做什么——无需命令、无需记忆参数名。作为 WorkBuddy 技能，**自动加载、无需额外安装**。
+
+以下 6 个真实对话示例，从简单到高级排列。每个示例含 **「你说」** 和 **「助手回复（示意）」**，以及如何触发真实计算。
+
+### 示例 1 · 两组二分类 Meta（最常见）
+**你说：**
+> 合并以下 5 项二分类研究的 OR：
+> 研究A: 实验组 30/100, 对照组 20/100
+> 研究B: 实验组 45/120, 对照组 30/120
+> ...
+
+**助手回复（示意）：**
+> ✅ 5 项研究，随机效应模型 (DL)，OR = 1.52 (95%CI: 1.18–1.96), I² = 34%
+> （安全预览：下方 R 代码已生成，未执行。）
+
+**📌 获取真实结果：** 说 **「请直接计算」** —— 助手真正运行 R 并给出数字（详见第 4 节「安全预览」）。
+
+### 示例 2 · 效应量转换
+**你说：**
+> 把 Cohen's d = 0.8 转成 logOR
+
+**助手回复（示意）：**
+> ✅ d = 0.8 → logOR ≈ 1.45 (SE ≈ 0.38)，基于公式 logOR = d × π/√3
+
+### 示例 3 · 异质性 + 亚组
+**你说：**
+> 我做了 8 项研究的连续型 Meta，SMD 合并，但 I² 比较高，想按地区做亚组
+
+**助手回复（示意）：**
+> ✅ 8 项研究，SMD = 0.42 (95%CI: 0.15–0.69), I² = 78%
+> 亚组分析（地区）：
+> - 亚洲 (k=4): SMD = 0.55, I² = 45%
+> - 欧美 (k=4): SMD = 0.28, I² = 62%
+> - 组间 Q = 4.12, p = 0.04
+
+### 示例 4 · Complex：网络 Meta 含多个决策（弹出路由菜单）
+**你说：**
+> 我想做个网络 Meta，有 4 种干预措施，但还没决定用频率学派还是贝叶斯，也不知道要不要做剂量反应
+
+**助手回复（示意）：**
+> 4 种干预已明确。还有 2 个关键选择，我来帮你理清：
+>
+> **① 你倾向哪种分析框架？**
+> - (a) 频率学派 — `netmeta`，基于倒方差法，适合一致性网络
+> - (b) 贝叶斯 — `multinma` (Stan) 或 `gemtc` (JAGS)，适合含生存数据 / 剂量反应
+>
+> **② 要不要纳入剂量反应？**
+> - (a) 不做 — 纯两两比较网络
+> - (b) 做 — 需要剂量-效应参数，贝叶斯框架更合适
+>
+> **③ 拿不准？** → 说「详细解释这些选择的差异」，我先讲清再让你决定
+
+**📌 说明：** 当你已点名能力但卡在「哪个选项 / 设计族」时，助手**弹出路由菜单**逐步确认，而非替你拍板或甩全量菜单。菜单含「详细解释差异」入口——拿不准时先讲清再决定。
+
+### 示例 5 · Vague：不确定用哪种模型（grill-me）
+**你说：**
+> 我想做个 Meta 分析，但不确定该用哪种模型，能帮我梳理一下吗？
+
+**助手回复（示意）：**
+> 好的，我们先把你的需求理清楚。每轮问 1–3 个聚焦问题，每个带推荐默认：
+>
+> **第 1 轮（3 题）：**
+> 1. 你的结局类型是？— 二分类(OR/RR) / 连续型(SMD/MD) / 生存(HR) / 单组率 / 其他
+> 2. 数据是两组比较还是多组网络？— 两组 / 多组网络 / 不确定
+> 3. 有没有特殊的依赖结构？— 多臂研究 / 多结局 / 个体数据(IPD) / 都没有
+>
+> （回答后继续追问，直到锁定模型 — 不会甩全量菜单）
+
+**📌 说明：** 当你说「不确定用哪种」时，助手用 **grill-me 逐分支追问** 理清需求，而非甩全量菜单或替你选。
+
+### 示例 6 · 系统评价流程
+**你说：**
+> 帮我生成 PRISMA 流程图
+
+**助手回复（示意）：**
+> 请提供：
+> - 检索记录数：___
+> - 筛选记录数：___
+> - 排除记录数：___
+> - 全文评估数：___
+> - 全文排除数（+排除原因）：___
+> - 纳入研究数：___
+>
+> 用户：520, 380, 140, 80, 52(20 无数据, 18 人群不符, 14 设计不符), 28
+>
+> ✅ PRISMA 流程图已生成！[SVG 输出]
+
+> 💡 **提示：** 大多数分析只需 3 项——效应量（或率/HR）+ α + 把握度。省略部分会用合理默认值填充；若确实缺少必要参数，助手会追问。
+
+---
+
+## 2. 能做什么——场景索引
+
+按**分析目的**分组（7 大类）。每行给典型临床场景 + 可直接抄写的自然语言。同一分析可能从多个入口到达。
+
+> 底层 R 包名（metafor / meta / netmeta …）见第 5 节「进阶参考」；普通用户无需关心。
+
+### ① 两组 Meta 分析
+| 场景 | 试试这样说 |
+|:---|:---|
+| 二分类 (OR/RR/RD) | "合并这 5 项二分类研究的 OR" |
+| 连续型 (SMD/MD) | "合并 6 项连续型研究的 SMD" |
+| 预计算 (yi+CI) | "我有 5 个研究的效应量和 CI，直接画森林图" |
+| 生存 (HR) | "合并 8 项研究的 HR" |
+| 相关 (r→Zr) | "把这 4 个相关系数做 Fisher z 转换后合并" |
+| 单组率/均值 | "合并这几个研究的发病率" |
+| 通用逆方差 | "我有 yi 和 vi，直接做 Meta" |
+
+### ② 异质性与发表偏倚
+| 场景 | 试试这样说 |
+|:---|:---|
+| 异质性评估 | "我做了 Meta，I² 很高，帮我看下异质性" |
+| 亚组分析 | "按地区做亚组分析" |
+| 元回归 | "做元回归，看发表年份和样本量的影响" |
+| Egger 检验 | "检查发表偏倚，做 Egger 检验" |
+| Begg 检验 | "Begg 秩相关检验" |
+| 剪补法 | "用剪补法校正发表偏倚" |
+| 选择模型 | "用 selection model 评估发表偏倚" |
+| 敏感性分析 | "做 leave-one-out 敏感性分析" |
+| 累积 Meta | "按发表年份做累积 Meta" |
+| GOSH 图 | "画 GOSH 图看异质性模式" |
+| Baujat 诊断 | "做 Baujat 图，看哪个研究贡献最大异质性" |
+| Drapery 图 | "画 Drapery 图评估 α 稳健性" |
+
+### ③ 高级模型
+| 场景 | 试试这样说 |
+|:---|:---|
+| 频率学派 NMA | "做网络 Meta，4 种干预，用 netmeta" |
+| 贝叶斯 NMA (Stan) | "做贝叶斯网络 Meta，Stan 后端" |
+| 贝叶斯 NMA (JAGS) | "做贝叶斯网络 Meta，JAGS 后端" |
+| 多水平 Meta | "做 3 水平 Meta，研究内多个效应" |
+| 多变量 Meta | "合并多个相关结局的 Meta" |
+| IPD Meta | "我有患者个体数据，做 IPD Meta" |
+| 剂量反应 | "做剂量反应 Meta，dosresmeta" |
+| 生存 Meta | "合并生存数据，survmeta" |
+| 试验序贯分析 | "做 TSA，看还需要多少研究" |
+| Bootstrap Meta | "用 Bootstrap 做非参数 DL 估计" |
+
+### ④ 效应量与转换
+| 场景 | 试试这样说 |
+|:---|:---|
+| 均值/SD→d | "把均值标准差转成 Cohen's d" |
+| t/F→d | "把 t 值转成 d" |
+| r→Fisher z | "把相关系数转成 Fisher z" |
+| d↔logOR | "把 d 转成 logOR" |
+| OR↔logOR | "把 OR 转成 logOR" |
+| 批量转换 | "批量把 SMD 转成 logOR" |
+| NNT | "计算 NNT" |
+
+### ⑤ 可视化
+| 场景 | 试试这样说 |
+|:---|:---|
+| 森林图 | "画森林图，lancet 主题" |
+| 漏斗图 | "画漏斗图，带轮廓增强" |
+| 气泡图 | "画元回归气泡图" |
+| GOSH 图 | "画 GOSH 图" |
+| 网络图 | "画网络 Meta 的网络图" |
+| 联赛表 | "画 NMA 联赛表" |
+| RoB 交通灯图 | "画偏倚风险交通灯图" |
+| 功效曲线 | "画功效曲线" |
+| Drapery 图 | "画 Drapery 图" |
+| 不一致性热图 | "画 NMA 不一致性热图" |
+
+### ⑥ 研究质量
+| 场景 | 试试这样说 |
+|:---|:---|
+| RoB 2.0 | "用 RoB 2.0 评估偏倚风险" |
+| RoB 1.0 | "用 Cochrane RoB 1.0 评估" |
+| ROBINS-I | "非随机研究，用 ROBINS-I" |
+| GRADE | "做 GRADE 证据质量评价" |
+| PRISMA 检查表 | "PRISMA 检查表" |
+
+### ⑦ 系统评价流程
+| 场景 | 试试这样说 |
+|:---|:---|
+| PRISMA 流程图 | "帮我生成 PRISMA 流程图" |
+| 文献筛选 | "标题摘要筛选，AI 辅助" |
+| PDF 批量下载 | "从 DOI 列表批量下载全文（需确认）" |
+| 图形数字化 | "从散点图提取数据" |
+| 缺失值插补 | "缺失标准差的插补" |
+
+---
+
+## 3. 首次使用 FAQ
+
+**Q: 我只给了效应量和研究数量，其他参数没给——能算吗？**
+A: 可以。大多数分析只需 3 项——效应量（或率/HR）+ α + 把握度。省略部分（双侧 α=0.05、1:1 随机、随访）会用合理默认值填充；若确实缺少必要参数，助手会追问。
+
+**Q: 结果里的 n 是每组还是总样本量？**
+A: 默认是**每组**；配对/交叉设计报告每序列，生存分析常报告所需总事件数。输出会明确标注，不会混淆。
+
+**Q: 只显示了代码，没出数字，怎么拿到真结果？**
+A: 在对话中说 **"请直接计算"** 或 **"执行"** —— 助手会真正运行 R 并给出数字。这是默认的安全设计：先看代码，确认无误再计算。
+
+**Q: 想要可复现的 R 代码用于投稿或稽查，怎么要？**
+A: 说 **"给我完整 R 代码"**。安全预览模式默认就展示代码，你可以自行复制、修改、重跑。
+
+**Q: 中文系统下输出是中文吗？**
+A: 是的。默认输出语言随 OS 语言设定——中文系统出中文，否则出英文。可随时通过提示词强制切换（如「用中文回复」/「switch to English」）。
+
+**Q: 数据格式不对怎么办？**
+A: 说 **"帮我把 SPSS/Excel 数据转成 CSV"**，助手会推荐安装 `@skill:statdata-transfer` 做 50+ 格式转换。
+
+---
+
+## 4. 安全预览（Safe Preview）
+
+- **默认行为：** 技能只**生成并展示 R 代码、不执行**——你可以先审查逻辑，确认无误后再让它运行。
+- **触发真实计算：** 在对话中说 **"请直接计算"** 或 **"执行"** → 助手真正运行 R 并给出数字。
+- **只看代码：** 说 **"展示代码"** 或 **"仅预览"** → 只给代码不给结果。
+- **所有计算均在本地**——不上传任何用户数据。
+- **输出结果仅供参考**，投稿或申报前请结合专业背景复核。
+
+---
+
+## 5. 进阶参考（已迁移到独立文件）
+
+CLI 调用示例、双向求解模式、曲线模式、核心公式推导、系统/环境要求、常见错误排查、完整文件结构树、参考文献等开发者内容已迁移至 **[references/ADVANCED_zh-CN.md](references/ADVANCED_zh-CN.md)**。普通用户无需阅读，第 1–4 节已覆盖日常使用。
+
+---
+
+**版本**: v1.7 | **许可**: MIT | **作者**: medstatstar, phoe-zip
 
 如有功能改进建议、Bug 报告或其他反馈，请直接联系作者：medstatstar@gmail.com（张文彤 / Wintone Zhang）。
 
