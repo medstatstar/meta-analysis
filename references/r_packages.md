@@ -74,23 +74,26 @@
 - 自动计算效应量
 - Cochrane Review 兼容输出
 
-### 3. dmetar (Helper Extension, Recommended) / dmetar（辅助扩展，强烈推荐）
+### 3. dmetar — 已移除非必需依赖 / dmetar — removed as non-essential
 
-**安装**：手动从 GitHub (MathiasHarrer/dmetar) 安装（需先装 `remotes`）。本技能不自动安装；缺失时脚本仅提示手动安装。
+> **变更说明**：dmetar 体积大（依赖整套 easystats 生态 + metafor/meta/netmeta/robvis/ggplot2），
+> 且本技能核心统计全部由底层包实现，故**不再依赖** dmetar，缺失时也不再提示安装。
+> 原 dmetar 便捷封装函数的底层等价替代（无需安装 dmetar）：
 
-**核心函数**：
-
-| 函数 | 功能 | 依赖 |
+| dmetar 函数 | 底层替代 | 实现 |
 |------|------|------|
-| `RiskOfBias()` | RoB 2.0 可视化 | robvis |
-| `TreatmentCoding()` | 网络 meta 编码 | netmeta |
-| `SingleArmMissing()` | 单臂缺失数据处理 | meta |
-| `MultiLevelMeta()` | 多水平元分析 | metafor |
-| `GOSH_plot()` | GOSH 图 | metafor |
-| `SubgroupAnalysis()` | 亚组分析自动化 | meta |
-| `BubblePlot()` | 气泡图美化 | metafor |
-| `InfluenceAnalysis()` | 影响力分析 | metafor |
-| `功率分析()` | `power.analysis()` | 模拟 |
+| `GOSH_plot()` | `metafor::gosh()` | `g <- gosh(res); plot(g)` |
+| `InfluenceAnalysis()` | `metafor::influence()` | `plot(influence(res))` |
+| `SubgroupAnalysis()` | `metafor::rma(mods=)` / `meta::metareg()` | 亚组分析 |
+| `BubblePlot()` | `metafor::bubble()` | `bubble(res, mods=~cov)` |
+| `MultiLevelMeta()` | `metafor::rma.mv()` | 多水平 Meta |
+| `RiskOfBias()` (RoB 2.0) | `robvis` 包 | `robvis::rob_traffic_light(df, "ROB2")` |
+| `TreatmentCoding()` | `netmeta::netmeta()` | 直接吃长表数据框 |
+| `SingleArmMissing()` | `meta::metaprop()` | 单臂率；缺失用 `mice` |
+| `power.analysis()` | `metapower` / 自写模拟 | 见 advanced_analysis.md |
+
+> 仅需 RoB 交通灯图与功效分析两个常用便捷功能时，装两个轻量包即可：
+> `install.packages(c("robvis", "metapower"))`
 
 ### 4. netmeta (Network Meta, Required) / netmeta（网状meta，必装）
 
@@ -123,17 +126,21 @@
 
 ### 6. Optional Enhancement Packages / 可选增强包
 
+> **变更说明**：`survmeta`（CRAN 已下架）不再依赖，生存 HR 合并改由 `run_surv_meta()` 内部调用 `metafor::rma.uni` 逆方差法实现；`ggforestplot` 不再依赖，出版级森林图改由 `forestploter` 承接；`multinma` 从核心依赖降级为可选后端（需手动装 Stan 工具链），贝叶斯 NMA 主后端为 `gemtc`(JAGS)。
+
 | 包 | 用途 | 来源 |
 |----|------|------|
+| `forestploter` | 出版级森林图（替代 ggforestplot；R4.6 适配） | CRAN 手动安装 |
 | `metasens` | 敏感性分析（上限/下限法） | CRAN 手动安装 |
 | `ggplot2` | 高级图形 | CRAN 手动安装 |
 | `gridExtra` | 多图组合 | CRAN 手动安装 |
-| `robumta` | 稳健方差估计 | CRAN 手动安装 |
+| `robumeta` | 稳健方差估计 | CRAN 手动安装 |
 | `clubSandwich` | 稳健推断 | CRAN 手动安装 |
 | `metaviz` | 交互式可视化 | CRAN 手动安装 |
 | `metaDigitise` | 图表数字化 | CRAN 手动安装 |
 | `robvis` | RoB 可视化 | CRAN 手动安装 |
 | `gt` | 出版级表格 | CRAN 手动安装 |
+| `multinma` | 贝叶斯 NMA（Stan，可选后端；需手动装 Stan 工具链） | CRAN 手动安装 |
 
 ---
 
@@ -143,10 +150,10 @@
 
 **推荐安装清单**：
 - 核心（必装）：`metafor`、`meta`、`netmeta`、`svglite`
-- 推荐：`dmetar`（GitHub: MathiasHarrer/dmetar）、`bayesmeta`
-- 可选增强：`metasens`、`ggplot2`、`gridExtra`、`robumta`、`clubSandwich`、`metaviz`、`metaDigitise`、`robvis`、`gt`
+- 推荐：`bayesmeta`（贝叶斯）、`forestploter`（出版级森林图）、`robvis` + `metapower`（替代原 dmetar 的 RoB 图 / 功效分析）
+- 可选增强：`metasens`、`ggplot2`、`gridExtra`、`robumeta`、`clubSandwich`、`metaviz`、`metaDigitise`、`robvis`、`gt`
 
-**辅助脚本**：可运行 `Rscript scripts/setup_packages.R`，脚本会检测缺失包并**仅打印**安装清单（不会自动下载或安装）。
+**辅助脚本**：可运行 `Rscript src/r_engine/setup_packages.R`，脚本会检测缺失包并**仅打印**安装清单（不会自动下载或安装）。
 
 > ⚠️ 所有安装均为用户手动操作。本技能在任何运行路径下都不会调用包安装函数。
 
@@ -159,7 +166,6 @@
 | `rma()` 奇异拟合 | 研究数 < 3 或异质性极大 | 检查数据，考虑 Peto 法或减少协变量 |
 | `metacont()` NA 值 | 输入数据缺失 | 用 `na.omit()` 清洗或插补 |
 | `netmeta()` 网络不连通 | 干预措施间缺少连接 | 验证干预编码，添加共同对照组 |
-| `dmetar` GitHub 失败 | 网络问题 | `options(timeout=600)` 后重试 |
 | I² = 100% | 真实异质性或模型问题 | 检查数据单位一致性 |
 | 漏斗图不对称 | 发表偏倚 | 用 `trimfill()` 校正 |
 | `bayesmeta` 收敛失败 | 先验过于分散 | 缩小 half-normal 先验尺度 |

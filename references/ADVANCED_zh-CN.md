@@ -12,16 +12,16 @@
 ```bash
 cd meta-analysis
 # 从模板生成 R 脚本（不执行）
-python scripts/r_templates.py
+python src/r_engine/r_templates.py
 
 # 检查环境
-bash scripts/check_integrity.sh
+bash src/r_engine/check_integrity.sh
 
 # 查看包安装命令
-Rscript scripts/setup_packages.R
+Rscript src/r_engine/setup_packages.R
 
 # 运行特定分析（示例：二分类 Meta）
-Rscript scripts/meta_analysis_core.R --help
+Rscript src/r_engine/meta_analysis_core.R --help
 ```
 
 ### 直接调用 R
@@ -97,18 +97,18 @@ y_i ~ Normal(θ_i, σ_i²)
 | meta | ≥5.0 | Metabin, metacont, metaprop 等 |
 | netmeta | ≥2.0 | 频率学派 NMA |
 | bayesmeta | ≥3.0 | 贝叶斯两组 Meta |
-| multinma | ≥0.8 | 贝叶斯 NMA (Stan) |
+| multinma | ≥0.8 | 贝叶斯 NMA (Stan，可选后端) |
 | gemtc | ≥2.0 | 贝叶斯 NMA (JAGS) |
 | esc | ≥0.5 | 效应量转换 |
 | clubSandwich | ≥0.5 | CR2 稳健标准误 |
 | robumeta | ≥2.0 | RVE 处理依赖效应 |
 | dosresmeta | ≥2.0 | 剂量反应 Meta |
-| survmeta | ≥2.0 | 生存 Meta |
+| ~~survmeta~~ | — | 已下架，改用 metafor 逆方差合并 logHR |
 | mada | ≥1.0 | 诊断 Meta |
 | metagear | ≥1.0 | 系统评价流程 |
 | ggplot2 | ≥3.0 | 可视化 |
 | gridExtra | ≥2.0 | 多面板图 |
-| ggforestplot | ≥1.3 | 出版级森林图 |
+| forestploter | ≥1.1 | 出版级森林图（替代 ggforestplot） |
 | svglite | ≥2.0 | 可编辑 SVG 导出 |
 
 ### Python（仅 helper）
@@ -174,10 +174,10 @@ meta-analysis/
 │   ├── stata_to_r_mapping.md      # Stata metareg/mvmeta → R 等价
 │   ├── advanced_analysis.md       # 多元/多水平/IPD/剂量反应
 │   ├── single_group_meta.md       # metaprop/metamean/metainc/metacor
-│   ├── survival_meta.md           # survmeta + KM 伪个体数据
+│   ├── survival_meta.md           # metafor + KM 伪个体数据
 │   ├── tsa_diagnostics.md         # TSA + Baujat + Drapery + 选择模型
 │   ├── diagnosis_meta.md          # mada 双变量 + SROC
-│   ├── bayesian_nma.md            # multinma / gemtc 工作流
+│   ├── bayesian_nma.md            # gemtc (主) / multinma (可选) 工作流
 │   ├── esc_robust_meta.md         # esc 转换 + RVE
 │   ├── review_workflow.md         # metagear PRISMA / 筛选 / 数字化
 │   ├── r_packages.md              # 包清单

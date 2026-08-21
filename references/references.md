@@ -34,8 +34,8 @@
 - [advanced_analysis.md](./advanced_analysis.md) — Multilevel/IPD/Bayesian
 - [interactive_menu.md](./interactive_menu.md) — Full menu tree
 - [single_group_meta.md](./single_group_meta.md) — metaprop/metamean/metacor
-- [bayesian_nma.md](./bayesian_nma.md) — multinma + gemtc
-- [survival_meta.md](./survival_meta.md) — survmeta + KM reconstruction
+- [bayesian_nma.md](./bayesian_nma.md) — gemtc (主) / multinma (可选)
+- [survival_meta.md](./survival_meta.md) — metafor + KM reconstruction
 - [tsa_diagnostics.md](./tsa_diagnostics.md) — TSA + Baujat + Drapery
 - [diagnosis_meta.md](./diagnosis_meta.md) — mada::phm
 - [review_workflow.md](./review_workflow.md) — metagear PRISMA tools

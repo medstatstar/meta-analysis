@@ -199,17 +199,24 @@ forest(mh_result,
 ```r
 # RevMan 风格（类似 RevMan 5 的黑白方块风格）
 library(ggplot2)
-library(dmetar)
 
-# 使用 ggforestplot
-ggforestplot::forestplot(
-  df = effect_data,
-  estimate = logOR,
-  se = se,
-  logodds = TRUE,
-  colour = "black",
-  shape = "diamond"
+# 使用 forestploter（出版级森林图，替代 ggforestplot；CRAN 可用、R4.6 适配）
+library(forestploter)
+# 构造 CI 文本列（forestploter 按列布局，支持多列 CI）
+effect_data$`HR (95% CI)` <- sprintf("%.2f (%.2f-%.2f)",
+  exp(effect_data$logOR),
+  exp(effect_data$logOR - 1.96 * effect_data$se),
+  exp(effect_data$logOR + 1.96 * effect_data$se))
+p <- forest(effect_data,
+  est = logOR,
+  lower = logOR - 1.96 * effect_data$se,
+  upper = logOR + 1.96 * effect_data$se,
+  ci_column = "HR (95% CI)",
+  ref_line = 0,
+  xlab = "log(OR)",
+  theme = theme_forest()
 )
+plot(p)
 ```
 
 ---
@@ -433,7 +440,7 @@ plot(rank_results)
 # 保存为 CSV 供 RevMan 导入
 write.csv(meta_data, "revman_export.csv", row.names = FALSE)
 
-# 保存 dmetar 格式
+# 保存为通用 RDS 格式（不依赖任何外部包）
 saveRDS(list(
   comparison = "Intervention vs Control",
   outcome = "Primary Outcome",

@@ -26,7 +26,7 @@ metareg logor, wsse(se) cumulative graph
 
 **R（本技能）**:
 ```r
-source("scripts/stata_equivalents.R")
+source("src/r_engine/stata_equivalents.R")
 
 # 基础元回归 + permutation
 run_metareg_R(yi = logor, vi = se^2, mods = ~ year,
@@ -65,7 +65,7 @@ lrtest
 
 **R（本技能）**:
 ```r
-source("scripts/stata_equivalents.R")
+source("src/r_engine/stata_equivalents.R")
 
 # 准备 V 矩阵（多臂研究）
 V_list <- build_V_matrix_CS(study_id = data$study,
@@ -103,7 +103,7 @@ plot_mvmeta_forest(fit_UN, data, study = "study_id_col",
 | `metan` | `metafor::rma()` / `meta::metabin()` | 标准 meta 分析 |
 | `metabias` | `metafor::regtest()` / `metafor::trimfill()` | 发表偏倚 |
 | `metafunnel` | `metafor::funnel()` | 漏斗图 |
-| `cumul` (Stata) (累积 meta) | `metacr` (dmetar) / `cumul.meta()` | 累积 meta |
+| `cumul` (Stata) (累积 meta) | `cumul` (meta) / `cumul.meta()` | 累积 meta |
 | `metan` (Labbe plot) | `metafor::labbe()` | Labbe 图 |
 | `ipdmetan` (IPD) | `ipdmeta` 包 | IPD meta |
 | `metrim` (Trim-and-Fill) | `metafor::trimfill()` | 剪补法 |

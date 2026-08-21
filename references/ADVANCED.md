@@ -8,20 +8,16 @@
 
 ## 1. CLI Invocation Examples / CLI 调用示例
 
-### Meta-analysis via Python helper
+### Meta-analysis via Coze workflow (R engine lives there)
 ```bash
-cd meta-analysis
-# Generate R script from templates (no execution)
-python scripts/r_templates.py
+# From the skill side: self-test connectivity to the coze endpoint
+python adapters/coze_client.py
 
-# Check environment
-bash scripts/check_integrity.sh
+# Inside the coze project: inspect/review required R packages
+Rscript src/r_engine/setup_packages.R
 
-# View package install commands
-Rscript scripts/setup_packages.R
-
-# Run a specific analysis (example: binary meta)
-Rscript scripts/meta_analysis_core.R --help
+# Inside the coze project: run the dispatcher directly (task routed by JSON input)
+Rscript src/r_engine/run_task.R --input input.json --output output.json
 ```
 
 ### Direct R invocation
@@ -97,18 +93,18 @@ y_i ~ Normal(θ_i, σ_i²)
 | meta | ≥5.0 | Metabin, metacont, metaprop, etc. |
 | netmeta | ≥2.0 | Frequentist NMA |
 | bayesmeta | ≥3.0 | Bayesian pairwise meta |
-| multinma | ≥0.8 | Bayesian NMA (Stan) |
+| multinma | ≥0.8 | Bayesian NMA (Stan, 可选后端) |
 | gemtc | ≥2.0 | Bayesian NMA (JAGS) |
 | esc | ≥0.5 | Effect size conversions |
 | clubSandwich | ≥0.5 | CR2 robust SE |
 | robumeta | ≥2.0 | RVE for dependent effects |
 | dosresmeta | ≥2.0 | Dose-response meta |
-| survmeta | ≥2.0 | Survival meta |
+| ~~survmeta~~ | — | 已下架，改用 metafor 逆方差合并 logHR |
 | mada | ≥1.0 | Diagnostic meta |
 | metagear | ≥1.0 | Systematic review workflow |
 | ggplot2 | ≥3.0 | Visualization |
 | gridExtra | ≥2.0 | Multi-panel plots |
-| ggforestplot | ≥1.3 | Publication-ready forest plots |
+| forestploter | ≥1.1 | Publication-ready forest plots (替代 ggforestplot) |
 | svglite | ≥2.0 | Editable SVG export |
 
 ### Python (helper only)
@@ -152,17 +148,12 @@ meta-analysis/
 │   └── icon.png                   # Bitmap version
 ├── scripts/
 │   ├── i18n.py                    # ct-base shared: bilingual helper
-│   ├── r_libs.py                  # ct-base shared: R invocation + validation + sanitization
-│   ├── r_templates.py             # R code template generator (.py → .R)
-│   ├── r_meta_analysis_core.py    # Core engine templates
-│   ├── r_effect_size_conversions.py
-│   ├── r_network_meta_analysis.py
-│   ├── r_stata_equivalents.py
-│   ├── r_advanced_functions.py
-│   ├── r_setup_packages.py
-│   ├── check_integrity.sh         # Integrity self-check
-│   └── *.R                        # Generated R scripts (via check_integrity.sh)
+│   └── generate_topic_report.py  # Topic-selection report generator (pure Python)
+├── adapters/
+│   ├── coze_client.py             # Coze workflow outbound client (envelope + parse)
+│   └── README.md                  # Adapter docs
 ├── references/
+│   ├── (R engine lives in the coze project: src/r_engine/ — see coze_contract.md)
 │   ├── interactive_menu.md        # How to use in a chat (user-friendly guide)
 │   ├── ADVANCED.md                # This file (developer reference)
 │   ├── ADVANCED_zh-CN.md          # Chinese developer reference
@@ -174,10 +165,10 @@ meta-analysis/
 │   ├── stata_to_r_mapping.md      # Stata metareg/mvmeta → R equivalents
 │   ├── advanced_analysis.md       # Multilevel/IPD/Bayesian/Dose-Resp/Power
 │   ├── single_group_meta.md       # metaprop/metamean/metainc/metacor
-│   ├── survival_meta.md           # survmeta + KM pseudo-IPD
+│   ├── survival_meta.md           # metafor + KM pseudo-IPD
 │   ├── tsa_diagnostics.md         # TSA + Baujat + Drapery + selection
 │   ├── diagnosis_meta.md          # mada bivariate + SROC
-│   ├── bayesian_nma.md            # multinma / gemtc workflows
+│   ├── bayesian_nma.md            # gemtc (主) / multinma (可选) workflows
 │   ├── esc_robust_meta.md         # esc conversions + RVE
 │   ├── review_workflow.md         # metagear PRISMA / screening / digitize
 │   ├── r_packages.md              # Package inventory

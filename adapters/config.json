@@ -1,0 +1,5 @@
+{
+  "auto_approve_endpoints": [
+    "https://ct-meta.coze.site/run"
+  ]
+}

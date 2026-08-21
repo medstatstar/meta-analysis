@@ -1,0 +1,24 @@
+{
+  "task": "nma",
+  "data": {
+    "source": "inline",
+    "rows": [
+      {"study": "S1", "treat1": "A", "treat2": "B", "TE": 0.20, "seTE": 0.15},
+      {"study": "S2", "treat1": "A", "treat2": "B", "TE": 0.18, "seTE": 0.12},
+      {"study": "S3", "treat1": "A", "treat2": "C", "TE": 0.35, "seTE": 0.18},
+      {"study": "S4", "treat1": "A", "treat2": "C", "TE": 0.40, "seTE": 0.20},
+      {"study": "S5", "treat1": "B", "treat2": "C", "TE": 0.15, "seTE": 0.14},
+      {"study": "S6", "treat1": "B", "treat2": "C", "TE": 0.10, "seTE": 0.13},
+      {"study": "S7", "treat1": "A", "treat2": "B", "TE": 0.22, "seTE": 0.16},
+      {"study": "S8", "treat1": "A", "treat2": "C", "TE": 0.30, "seTE": 0.17},
+      {"study": "S9", "treat1": "B", "treat2": "C", "TE": 0.12, "seTE": 0.11}
+    ],
+    "colmap": {
+      "study": "study",
+      "treat1": "treat1", "treat2": "treat2",
+      "TE": "TE", "seTE": "seTE"
+    }
+  },
+  "params": {"reference_group": null, "sm": "OR"},
+  "figure": {"format": "svg", "plots": ["netgraph", "netleague"], "theme": "revman", "width": 7, "height": 5}
+}

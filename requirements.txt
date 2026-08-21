@@ -1,36 +1,34 @@
 # Meta-Analysis Skill — R Package Requirements
-# All packages are auto-installed on first skill activation
+# Single source of truth: mirrors SKILL.md "Packages" line (15 core packages).
+# Packages are NOT auto-installed; user installs manually (see r_engine/setup_packages.R).
 # R version required: >= 4.0
 
-# Core meta-analysis
+# --- Statistical engine (core) ---
 metafor          # Statistical engine (rma, rma.mv, escalc, forest, funnel)
 meta             # RevMan-compatible (metabin, metacont, metagen, funnel, forest)
-dmetar           # Companion to "Doing Meta-Analysis in-R" (GOSH, RoB, power)
-netmeta          # Network meta-analysis (NMA)
-bayesmeta        # Bayesian meta-analysis
+netmeta          # Network meta-analysis (NMA, frequentist)
+bayesmeta        # Bayesian pairwise random-effects meta
 
-# Effect size conversion
-esc              # Effect size computation (esc_mean_sd, esc_t, esc_or)
+# --- Effect size & robust inference ---
+esc              # Effect size conversion (mean->d, d<->g, OR<->logOR, r<->Z)
+robumeta         # Robust variance estimation (RVE) for dependent effect sizes
+clubSandwich     # Cluster-robust SE, small-sample correction (CR2/HC3)
 
-# Cluster-robust variance estimation
-robumeta         # Robust variance estimation for dependent effect sizes
-clubSandwich     # Cluster-robust SE with small-sample corrections (CR2, HC3)
+# --- Advanced modules ---
+gemtc            # Bayesian NMA (JAGS backend) — REQUIRES system JAGS preinstalled
+dosresmeta       # Dose-response meta
+mada             # Diagnostic test accuracy meta (bivariate / SROC)
+metagear         # Systematic review workflow (PRISMA, screening)
 
-# Data manipulation
-tidyverse        # Data wrangling (dplyr, tidyr, readr)
-readxl           # Excel import
-haven            # SPSS/Stata import
-
-# Publication-ready graphics
-ggplot2          # Grammar of graphics
+# --- Graphics / output ---
+ggplot2          # Grammar of graphics (base for all plots)
 gridExtra        # Arrange multiple plots
+forestploter     # Publication-ready forest plots (replaces ggforestplot; R4.6 compatible)
+svglite          # SVG vector device — coze/local returns editable SVG
 
-# Risk of bias
-robvis           # Risk of bias visualization (RoB 2.0 traffic light)
-
-# Reporting
-rmarkdown        # Dynamic reports
-knitr            # Report rendering
-
-# Optional/GitHub-only (auto-fallback to CRAN)
-# (none)
+# --- Optional (NOT in core 15; install on demand) ---
+# robvis     # RoB 2.0 traffic-light plot (replaces dmetar's RiskOfBias)
+# metapower  # Power analysis (replaces dmetar::power.analysis)
+# multinma   # Optional 2nd Bayesian NMA backend (Stan); omit if memory-limited
+# readxl     # Excel import — NOT needed: coze input is JSON/CSV (confirmed 2026-08-17)
+# haven      # SPSS/Stata import — NOT needed: coze input is JSON/CSV (confirmed 2026-08-17)

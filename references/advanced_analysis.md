@@ -266,7 +266,7 @@ weighted_rma <- rma(
 >    缺省：二分类 `gl`，连续型 `smd`。
 
 ```r
-source("scripts/advanced_functions.R")
+source("src/r_engine/advanced_functions.R")
 
 # ---- 二分类结局（logRR/logOR + cases + n + 研究设计 type）----
 data(alcohol_cvd)   # cols: id/author/type/dose/cases/n/logrr/se
@@ -397,13 +397,13 @@ forest(result,
 
 ## 10. Sample Size Planning & Power Analysis / 样本量规划与功效分析
 
-> **优先调用封装** / Prefer the wrapper: `source("scripts/advanced_functions.R")` →
+> **优先调用封装** / Prefer the wrapper: `source("src/r_engine/advanced_functions.R")` →
 > `run_power_curve()`。该函数**自实现无外部依赖**（Valentine/Borenstein 功效公式，
 > 含固定效应与随机效应 I² 校正双曲线），返回 `$data` / `$plot` / `$k_needed` / `$v_study`，
 > 比 `metapower` / `dmetar` 更稳健（避免包缺失/API 变动）。
 
 ```r
-source("scripts/advanced_functions.R")
+source("src/r_engine/advanced_functions.R")
 
 # 功效曲线: 固定研究间样本量，研究数 k 从 2 到 30 时功效如何变化
 pc <- run_power_curve(

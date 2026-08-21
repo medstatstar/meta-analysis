@@ -2,16 +2,16 @@
 
 ## run_surv_meta() — Combine Survival Effects (logHR) / 合并生存效应量（logHR）
 
-> ⚠️ **环境限制**：`survmeta` 在本沙盒的 R 4.5.1 上无二进制/源码可装（CRAN 无对应版本），
-> 因此封装 `run_surv_meta()` 仅做**语法校验 + 友好提示**，需在**本机**安装 survmeta 后运行。
-> 安装后请以本机 `?survmeta::survmeta` 的实际签名为准。
+> ℹ️ **实现说明**：`survmeta` 已从 CRAN 下架，故 `run_surv_meta()` 现**直接调用 `metafor::rma.uni`**
+> 做 logHR 逆方差合并（等价于标准 HR 合并），**无需任何额外包**，本机/沙盒均可直接运行。
+> 下方同时给出 `meta`/`metafor` 通用替代写法供参考。
 >
 > 📌 **最稳妥的生存 Meta 做法**：把各研究的 **logHR 与其方差** 提取出来，直接用通用
 > 逆方差法（`metafor::rma` / `meta::metagen`）合并 —— 这也是绝大多数系统评价的标准路径，
 > 无需依赖 survmeta。
 
 ```r
-source("scripts/advanced_functions.R")
+source("src/r_engine/advanced_functions.R")
 
 # 数据：每研究一行，loghr=log(HR)，v=logHR 的方差（= (log上限-log下限)/(2*1.96) 的平方）
 sm <- run_surv_meta(

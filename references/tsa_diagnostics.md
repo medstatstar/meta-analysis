@@ -7,7 +7,7 @@
 > `run_tsa()`（Wetterslev 2017 标准公式 + O'Brien-Fleming 监测边界），无需任何外部包。
 
 ```r
-source("scripts/advanced_functions.R")
+source("src/r_engine/advanced_functions.R")
 
 # es_data 需含 yi(效应量) 与 vi(方差)；labels 为研究标签(按时间排序)
 # ---- 连续型结局（用最小临床重要差 d，SMD 尺度）----

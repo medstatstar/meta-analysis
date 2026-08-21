@@ -1,6 +1,6 @@
 # Diagnostic Test Meta-Analysis / 诊断准确性Meta分析
 
-> **优先调用封装** / Prefer the wrapper: `source("scripts/advanced_functions.R")` →
+> **优先调用封装** / Prefer the wrapper: `source("src/r_engine/advanced_functions.R")` →
 > `run_diagnostic_meta(data, cols=list(TP="TP",FP="FP",FN="FN",TN="TN"))` + `plot_sroc(fit)`。
 > 以下为底层 `mada` API 说明，供需要精细控制时参考。
 

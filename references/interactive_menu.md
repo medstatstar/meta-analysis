@@ -1,10 +1,10 @@
 # How to Use meta-analysis in a Chat / 对话使用指南
 
-> **meta-analysis** is a conversational skill: you tell it what you want in natural language, and it checks the R environment → guides data input → runs the right model → emits editable vector figures + structured results. Everything runs **locally** — no data is uploaded.
+> **meta-analysis** is a conversational skill: you tell it what you want in natural language, and it guides data input → runs the right model (default: cloud coze R engine; local fallback available) → emits editable vector figures + structured results. Analysis data is sent to the cloud engine per the ct-base §5 outbound disclosure (see README); use the local engine (`prefer="local"`) for offline work.
 
 ---
 
-## 1. Five Real Conversational Examples (Simple → Advanced)
+## 1. Six Real Conversational Examples (Simple → Advanced)
 
 Each example shows **"You say"**, a sketch of **"The assistant replies"**, and how to trigger real computation.
 
@@ -54,7 +54,7 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 >
 > **① 你倾向哪种分析框架？**
 > - (a) 频率学派 — `netmeta`，基于倒方差法，适合一致性网络
-> - (b) 贝叶斯 — `multinma` (Stan) 或 `gemtc` (JAGS)，适合含生存数据 / 剂量反应
+> - (b) 贝叶斯 — `gemtc` (JAGS)，或 `multinma` (Stan，可选)，适合含生存数据 / 剂量反应
 >
 > **② 要不要纳入剂量反应？**
 > - (a) 不做 — 纯两两比较网络
@@ -81,6 +81,33 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 > （回答后继续追问，直到锁定模型 — 不会甩全量菜单）
 
 **📌 说明：** 当你说"不确定用哪种"时，助手用 **grill-me 逐分支追问** 理清需求，而非甩全量菜单或替你选。
+
+---
+
+### Example 6 · Topic selection: choose among candidate meta-analysis directions (upstream gate) / 示例 6 · 选题：选择候选 Meta 分析方向（上游门控）
+**You say:**
+> 我对 SGLT2 抑制剂在慢性肾脏病（CKD）中的肾保护与心血管获益感兴趣，但还没确定具体做哪个方向的 Meta，能帮我梳理候选方向吗？
+
+**Assistant replies (sketch):**
+> 好的，用「选题评估」框架（`references/topic-selection.md`）帮你锁定候选方向。先给 3 个候选（Stage 1 Gate 1：产出 1–3 个方向，不替你拍板）：
+>
+> **候选方向 ① 标准配对 Meta：SGLT2i vs 安慰剂对 CKD 主要肾脏终点**
+> - 结局：ESRD / 肌酐倍增复合（二分类 OR/RR）+ eGFR 斜率（连续 SMD）混合
+> - 四维初评：临床价值 4 / 方法学可行性 4 / 数据可得性 4 / 新颖性 3 → 总分 15（建议）
+> - Meta 类型：标准 pairwise（meta / metafor）
+>
+> **候选方向 ② 网络 Meta：不同 SGLT2i 药物头对头比较**
+> - 干预 ≥3（达格列净 / 恩格列净 / 卡格列净）→ 频率学 NMA（netmeta）
+> - 四维初评：临床 4 / 可行性 3（需多臂对比数据）/ 数据 3 / 新颖性 4 → 总分 14（建议）
+> - ⚠️ coze 端贝叶斯 NMA 为环境限制，云端请用 netmeta（频率学）
+>
+> **候选方向 ③ Meta-回归：SGLT2i 效应的糖尿病性 / 非糖尿病性 CKD 修饰**
+> - 协变量：糖尿病状态；效应修饰检验
+> - 四维初评：临床 3 / 可行性 3 / 数据 3 / 新颖性 4 → 总分 13（暂缓，先补数据）
+>
+> **建议**：候选 ① 可行性最高，推荐优先；若想做 ② 需确认 ≥3 干预且注意 coze 端贝叶斯限制。下一步可走 Full Assessment（PICO 分解 + 去重检索 + PRISMA/AMSTAR-2 预检）生成选题报告。
+
+**📌 说明：** 当你「有方向但不确定具体做哪个 Meta」时，助手用选题框架产出 **1–3 个候选方向 + 四维评分 + Meta 类型**，而非替你拍板或只给一个答案。这是分析前的**上游门控（Topic Selection）**，不调用 R 计算。
 
 ---
 
@@ -127,7 +154,7 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 | 多变量 Meta | "合并多个相关结局的 Meta" |
 | IPD Meta | "我有患者个体数据，做 IPD Meta" |
 | 剂量反应 | "做剂量反应 Meta，dosresmeta" |
-| 生存 Meta | "合并生存数据，survmeta" |
+| 生存 Meta | "用 metafor 合并生存 HR（survmeta 已移除）" |
 | 试验序贯分析 | "做 TSA，看还需要多少研究" |
 | Bootstrap Meta | "用 Bootstrap 做非参数 DL 估计" |
 
@@ -203,7 +230,7 @@ A: 说 **"帮我把 SPSS/Excel 数据转成 CSV"**，助手会推荐安装 `@ski
 - **默认行为：** 技能只**生成并展示 R 代码、不执行**——你可以先审查逻辑，确认无误后再让它运行。
 - **触发真实计算：** 在对话中说 **"请直接计算"** 或 **"执行"** → 助手真正运行 R 并给出数字。
 - **只看代码：** 说 **"展示代码"** 或 **"仅预览"** → 只给代码不给结果。
-- **所有计算均在本地**——不上传任何用户数据。
+- **默认计算路径：** 本技能默认将分析请求发送到云端 coze R 引擎（`https://ct-meta.coze.site/run`）执行，分析数据按上方 README「出站数据披露（§5）」块发送；如需本地 / 离线分析，走本地引擎（`prefer="local"`）。安全预览仅控制「是否执行」，与计算位置无关。
 - **输出结果仅供参考**，投稿或申报前请结合专业背景复核。
 
 ---

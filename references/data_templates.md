@@ -159,6 +159,8 @@
 - Delimiter: comma / 分隔符：逗号
 - First row: column names / 首行：列名
 
+**文档 / 模板类上传（docx / pptx / pdf / doc）不属于本表范围**：非结构化文档按 **ct-base §6.7**（`ct-base/docs/02-governance-redlines.md`）处理——先转 md/文本再提取研究数据（共享转换器 `scripts/office_to_md.py`；`.pdf` 走环境 pdf 技能；`.doc` 提示安装 word-reader / antiword）；**转换前须向用户展示 §6.7.2 提示**（PPT 转换易丢非文本元素）。结构化数据（csv/xlsx/xls）仍走本表验证流程；文档内容若涉密，按 §6.7.3 由用户决定出域与否（技能不主动拦截），要求数据不出域时引导本地引擎（`prefer="local"`）。
+
 ---
 
 ## Validation Checklist / 验证检查清单

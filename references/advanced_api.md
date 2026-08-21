@@ -11,7 +11,7 @@
 
 ```r
 # 统一入口：效应量计算 + 模型拟合，返回 ma_result 对象
-source("scripts/meta_analysis_core.R")
+source("src/r_engine/meta_analysis_core.R")
 res <- ma_analyze(data, type = "rate",            # binary|continuous|rate|precomp|survival
                                                # |correlation|single_proportion|single_mean
                   measure = "IRR",                # 自动选 OR/SMD/IRR/ZCOR/PLO/MN 等
@@ -30,7 +30,7 @@ Column names are case-insensitive; override mapping via `cols = list(a="A", b="B
 
 ```r
 # 高级诊断/可视化封装：GOSH / Baujat / Drapery / Power / Bayesian pairwise / 诊断Meta / RoB
-source("scripts/advanced_functions.R")
+source("src/r_engine/advanced_functions.R")
 
 g  <- run_gosh(res$model); plot_gosh(g)          # GOSH 敏感性(子集拟合密度散点)
 plot_baujat(res$model, top_n = 5)                # Baujat 异质性-影响力图(top_n 高亮标签)
@@ -57,12 +57,12 @@ dr2 <- run_dose_resp(yi="logrr", dose="dose", id="id", data=alcohol_cvd,
                      outcome="binary", shape="quadratic",
                      se="se", cases="cases", n="n", study_design="type")            # 二分类(gl)
 
-# 生存 Meta（合并 logHR）；贝叶斯 NMA（Stan / JAGS）—— 需本机装 survmeta / multinma+Stan / gemtc+JAGS
+# 生存 Meta（run_surv_meta 现已本地用 metafor 逆方差合并 logHR）；贝叶斯 NMA 用 gemtc(JAGS)，multinma 为可选后端
 sm <- run_surv_meta(yi="loghr", vi="v", studlab="study", data=hr_df, method="REML")
-bn <- run_bayes_nma_multinma(prep, priors)     # multinma (Stan)
+bn <- run_bayes_nma_multinma(prep, priors)     # multinma (Stan, 可选后端)
 bg <- run_bayes_nma_gemtc(data.ab, treatments, studies)   # gemtc (JAGS)
 ```
 
 Batch-2 functions: `run_tsa()` · `run_dose_resp()` · `run_surv_meta()` · `run_bayes_nma_multinma()` · `run_bayes_nma_gemtc()`.
-⚠️ `run_tsa()`/`run_dose_resp()` 沙盒内已实跑验证；`run_surv_meta()`/`run_bayes_nma_*()` 因需 survmeta 二进制 / Stan / JAGS 外部编译，封装做语法校验+友好提示，请在**本机**运行。
+⚠️ `run_tsa()`/`run_dose_resp()` 沙盒内已实跑验证；`run_surv_meta()` 现已本地实跑（metafor）；`run_bayes_nma_gemtc()` 需本机装 JAGS、`run_bayes_nma_multinma()` 需本机装 Stan 工具链，封装做友好提示，请在**本机**运行。
 📌 无 `meta::tes()`（`meta` 包不存在该函数，历史文档有误）；TSA 一律用自实现的 `run_tsa()`。

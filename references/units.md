@@ -10,7 +10,7 @@
 |---------|------|-------|--------|-------------|-----------|
 | `u_pairwise` | Pairwise Meta / 两组Meta | Summary data (2×2 tables for binary, M/SD/N for continuous, pre-calculated yi+SE, HR, r) | `rma` / `metabin` object + forest/funnel SVG + results table | ⬛ Full-auto | `u_heterogeneity`, `u_pubbias`, `u_sensitivity` |
 | `u_effect_size` | Effect Size Conversion / 效应量转换 | Raw stats (M/SD/N, t/F/r, OR/RR, d) | Converted effect size + SE | ⬛ Full-auto | `u_pairwise`, `u_batch` |
-| `u_network` | Network Meta / 网络Meta | Arm-level data + treatment labels | `netmeta` / `gemtc` / `multinma` object + league table + SUCRA | ⬛ Full-auto | `u_nma_consistency` |
+| `u_network` | Network Meta / 网络Meta | Arm-level data + treatment labels | `netmeta` / `gemtc` (multinma 可选) object + league table + SUCRA | ⬛ Full-auto | `u_nma_consistency` |
 | `u_single_group` | Single-Group Meta / 单组率均值 | Counts or means from single-arm studies | Pooled proportion / mean / incidence / correlation | ⬛ Full-auto | — |
 | `u_diagnostic` | Diagnostic Meta / 诊断准确性 | TP/FP/FN/SN tables | `mada::reitsma` bivariate model + SROC curve | ⬛ Full-auto | — |
 | `u_survival` | Survival Meta / 生存Meta | HR + CI (or KM curves for pseudo-IPD) | Pooled HR + KM reconstruction | 🟨 Semi-auto (confirm HR extraction method) | — |

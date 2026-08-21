@@ -1,15 +1,14 @@
 # Bayesian NMA (Network Meta-Analysis) / 贝叶斯网状Meta分析
 
-> two major backends: **multinma (Stan)** and **gemtc (JAGS)**. Both handle consistency/inconsistency modeling.
+> two major backends: **gemtc (JAGS, 主后端)** and **multinma (Stan, 可选后端)**. Both handle consistency/inconsistency modeling.
 
-> ⚠️ **环境限制**：multinma 需 Stan（cmdstanr/rstan 工具链）、gemtc 需 JAGS，**均需外部编译**，
-> 本沙盒无法运行。封装 `run_bayes_nma_multinma()` / `run_bayes_nma_gemtc()` 仅做**语法校验 +
-> 友好提示**，请在**本机**装好 Stan/JAGS 后运行，并以本机安装版本的 `?multinma::nma` /
-> `?gemtc::mtc.model` 实际签名为准。
+> ⚠️ **环境限制**：gemtc 需 JAGS（系统程序，需本机预装）、multinma 需 Stan（cmdstanr/rstan 工具链），
+> **均需外部编译**。封装 `run_bayes_nma_gemtc()` / `run_bayes_nma_multinma()` 在对应后端未安装时给出
+> **友好提示**（multinma 缺失时引导改用 gemtc / netmeta），请在**本机**装好 JAGS/Stan 后运行。
 >
 > ✅ **优先调用封装**（在 `advanced_functions.R`），参数默认值已按官方文档固化：
 > ```r
-> source("scripts/advanced_functions.R")
+> source("src/r_engine/advanced_functions.R")
 > bn <- run_bayes_nma_multinma(prep, priors, response = "events", distribution = "binomial")
 > bg <- run_bayes_nma_gemtc(data.ab, treatments, studies, type = "consistency",
 >                           link = "logit", likelihood = "binomial", linearModel = "random")
@@ -17,7 +16,7 @@
 
 ---
 
-## multinma — Stan Backend (NICE Preferred) / Stan后端
+## multinma — Stan Backend (可选后端) / Stan后端（可选）
 
 ```r
 library(multinma)
