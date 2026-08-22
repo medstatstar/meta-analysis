@@ -115,6 +115,13 @@ _MSGS = {
                 "如您愿意协助改进，请将文件内容粘贴到邮件发送至：{email}",
     "local_en": "No cloud call in this session; local report saved: {path}\n"
                 "If you'd like to help improve the skill, please email the content to: {email}",
+    # ── 历史回执（§20.3 历史回执，用户 2026-08-22）──
+    "thank_zh": "感谢您提交错误报告，我们已经收到，会尽快核查。",
+    "thank_en": "Thank you for submitting the bug report — we have received it and will review it shortly.",
+    "done_zh": "另外很高兴通知您，您上一次提交的技能 bug 已成功修复，详情为：{memo}",
+    "done_en": "Also, good news: the bug you reported last time has been fixed. Details: {memo}",
+    "pending_zh": "另外还需要通知您，您上一次提交的技能 bug 目前尚未完成修复，我们会尽快解决此问题。",
+    "pending_en": "Also, a note: the bug you reported last time is not yet fixed — we will resolve it as soon as possible.",
 }
 
 
@@ -214,6 +221,46 @@ def confirm_prompt(error_type: str = "error", test: str = "unknown", locale: str
     return base + "\n" + hint
 
 
+def confirm_thanks(locale: str = None) -> str:
+    """2.1 发送成功后固定感谢文案（技能端组织回复时先说这一句）。"""
+    loc = locale or _current_locale()
+    return _MSGS["thank_zh" if loc == "zh" else "thank_en"]
+
+
+def parse_history(history_str) -> dict:
+    """coze 返回 history 字段（JSON 字符串或 ""）→ dict；空/异常 → {}。"""
+    if not history_str:
+        return {}
+    if isinstance(history_str, dict):
+        return history_str
+    try:
+        d = json.loads(history_str)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def build_followup(history: dict, locale: str = None) -> str:
+    """2.2/2.3 追加文案：根据历史记录 resultstr 生成修复状态通知。
+
+    history 为空（无上一次提交）→ 返回 ""（2.1 感谢后即结束）；
+    resultstr == "done" → 2.2 已修复通知（带 memo 详情）；
+    resultstr != "done" → 2.3 未修复通知。
+    """
+    if not history:
+        return ""
+    loc = locale or _current_locale()
+    resultstr = (history.get("resultstr") or "").strip()
+    memo = (history.get("memo") or "").strip()
+    if resultstr == "done":
+        if loc == "zh":
+            return _MSGS["done_zh"].format(memo=memo if memo else "（暂无备注）")
+        return _MSGS["done_en"].format(memo=memo if memo else "(no details provided)")
+    if loc == "zh":
+        return _MSGS["pending_zh"]
+    return _MSGS["pending_en"]
+
+
 def detect_error_signal(test: str, attempts: int, cli_error: bool = False,
                         engine_error: bool = False, user_questioning: bool = False) -> bool:
     """错误信号判定（§20.3.1）：强信号 + 重试次数。
@@ -253,12 +300,17 @@ def send_to_endpoint(report: dict, endpoint: str = None, token: str = None,
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8", "replace")
             try:
-                parsed = json.loads(body)
-                return parsed if isinstance(parsed, dict) else {"status": "ok", "note": body[:200]}
+                data = json.loads(body)
             except Exception:  # pragma: no cover
-                return {"status": "ok" if resp.status < 400 else "error", "note": body[:200]}
+                return {"status": "ok" if resp.status < 400 else "error",
+                        "note": body[:200], "history": ""}
+            if not isinstance(data, dict):
+                return {"status": "ok" if resp.status < 400 else "error",
+                        "note": str(body)[:200], "history": ""}
+            data.setdefault("history", "")
+            return data
     except (urllib.error.URLError, OSError) as e:
-        return {"status": "error", "note": "endpoint unreachable: %s" % e}
+        return {"status": "error", "note": "endpoint unreachable: %s" % e, "history": ""}
 
 
 def save_local_report(report: dict, outdir: str = ".") -> str:

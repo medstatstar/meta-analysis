@@ -6,7 +6,7 @@ displayName: 医学Meta分析 / Meta Analysis
 version: 1.12.2
 summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
 license: MIT
-description: "基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。所有分析提供可复现 R 代码。 / Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta. All analyses ship reproducible R code."
+description: "基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。 / Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code."
 
 required_commands: [Rscript, python]
 invocable: true
@@ -27,6 +27,9 @@ triggers:
   - "单组率meta"
   - "TSA"
   - "诊断meta"
+  - "上报bug"
+  - "report a bug"
+  - "错误报告"
 permissions:
   scope: "user-space-only"
   network: "optional"
@@ -120,7 +123,7 @@ Module → R-package/function matrix (single-group / pairwise / effect-size / fo
 - **数据出域决策归用户（2026-08-20 原则，ct-base §5）**：技能**只负责实现功能 + 透明披露**（发送前告知发送内容与目标端点），**不替用户做安全/合规拦截**——是否允许数据（含 IPD）发送至 coze 由用户自行决定；coze 平台本身可满足安全合规需求。若用户明确要求数据不出域，引导其走本地引擎（`prefer="local"` / `META_LOCAL_ENGINE_DIR`，需本机 R 环境）。
 - **兜底**：当 coze 端点不可用（网络错误 / 非 2xx / 空响应）时，自动回退到本地镜像 `adapters/coze_project/src/r_engine/run_task.R` 完成相同分析；结果 `_source` 字段标记来源（`coze` / `local_fallback` / `local`）。
 - **显式本地**：用户明确要求"本地分析 / 离线"时，直接走本地引擎（`prefer="local"`），不触碰 coze。
-- PDF full-text download from external services ONLY on **explicit user instruction**（`scripts/pdf_fetch.py`，opt-in）。Analysis artifacts written to `meta_analysis/` + `output/` by default.
+- PDF full-text download from external services ONLY on **explicit user instruction**（`adapters/pdf_fetch.py`，opt-in）。Analysis artifacts written to `meta_analysis/` + `output/` by default.
 
 **Not clinical judgment**: Results require professional interpretation.
 
@@ -182,6 +185,7 @@ Version / fix log → `CHANGELOG.md`.
 - **Trigger (strong signal, max 1 proposal/session):** unexpected non-zero exit / engine or compute error / user explicitly questions the result — **and** the same operation was retried ≥1. Weak signal (just repeated tuning) never triggers.
 - **Two-stage confirmation (2026-08-21):** ① propose-with-preview — show the bilingual `confirm_prompt` **together with** the full report (`render_report_text`, state "sanitized, no input data", invite a problem description; if the user adds one, re-render and re-show before consent) → ② on explicit consent, `send_to_endpoint` (auto action=report, endpoint `https://ct-bugreport.coze.site/run`, token = embedded §5 public credential). If the user declines, never re-propose this session.
 - **Sanitization is hard:** the report carries only the 11-key whitelist (skill / version / error_type / error_code / engine_status / description / locale / query_origin / session_hash / attempts / test) — never raw data or subject records. `description` is the single free-text field for debugging, **user-reviewed**: write the symptom / reproduction / expected vs actual / algorithm or function used / error message; values and study design are OK. Hard boundary: no identifiable person/institution/subject info. The user reviews it in stage ① before consent; empty description omits the key. If the session had **no** cloud call, `save_local_report()` writes a local md + author email (data never leaves the machine).
+- **Post-send history receipt (2026-08-22):** after a successful send, surface `confirm_thanks()` first, then `build_followup(parse_history(resp["history"]))` — which tells the user whether the bug they reported last time was fixed (`done`, with `memo`) or is still pending. The `history` is pulled server-side by `query_origin` (the endpoint returns the latest prior record for that source); first-time reporters get an empty history (no follow-up beyond the thanks).
 - **Client-only:** this adapter sends `report` only. Governance actions (get/update/download/delete — pull pending, mark done, download all, clean up) are reserved for the `ct-update` skill (author side); never call them from here.
 
 Invoke: `python adapters/bug_report.py --error-type <t> --description "<free text>" [--send]` (add `--send` only after the user confirms).

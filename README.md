@@ -22,6 +22,8 @@
 > Payloads are sanitized (PII stripped) before sending.
 >
 > **Metadata sent with the request (ct-base §5):** the request also carries `query_origin` (a SHA-256 hash of your machine hostname, used only for server-side attribution / rate-limiting — **not** your plaintext hostname) and `locale` (your OS language, for bilingual output). Neither is used to identify you personally.
+>
+> **Bug-report endpoint disclosure (ct-base §5 / §20.3, mandatory)** — When you confirm sending a (sanitized) error report via the in-skill bug reporter (`adapters/bug_report.py`), the skill sends **only** the 11-key whitelist envelope (skill name / version / error type / error code / engine status / your free-text `description` / locale / `query_origin` / session hash / retry count / test) to the unified bug-report endpoint `https://ct-bugreport.coze.site/run`. It sends **no analysis data and no personal identifiers** — `description` is the only free-text field and you review it before consent (hard boundary: no identifiable person/institution/subject info). The same `query_origin` + `locale` metadata above is attached. If you decline, nothing is sent; if there is no cloud call this session, the report is saved locally instead (`save_local_report`, data never leaves the machine).
 
 ## Who This Is For
 

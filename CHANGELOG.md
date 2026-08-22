@@ -36,6 +36,18 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 - **§16.8 干净包清理**：取消跟踪废弃 R 脚本（`scripts/r_*.py` + `scripts/check_integrity.sh`，为 `adapters/coze_project` 镜像的重复件）、`tests/*`（保留物理、gitignored）、`assets/icon.png`（SkillHub 窄白名单拒绝 .png、且非 live 图标）；物理删除调试产物 `Rplots.pdf`。`.gitignore` / `.clawhubignore` 补充发布排除项。
 - **network 一致性（§16.6）**：frontmatter `network: optional` + 已修正 `network_note`（"有本地兜底（需本机 R）时才 optional；多数终端用户走 coze"）属可接受表述，与 README 出站披露一致。
 
+### Changed / 发布前合规审计第二轮（bugreport 合规 + §16.9 收口 + §3 统一，2026-08-22）
+
+因 bugreport 功能上线（ct-base §20.3），重新以 ct-base 治理规范复检并修正：
+
+- **§20.3 bug_report.py 同步最新模板**：补齐 `confirm_thanks()` / `parse_history()` / `build_followup()` 历史回执三件套及对应 `_MSGS`（thank/done/pending 中英），`send_to_endpoint()` 现回传 `history`（与统一端点历史回执协议对齐）；保留叶子技能内嵌公共 token（`get_endpoint_token()`，§5 XOR+base64 混淆，用户授权发布）。
+- **§20.3.1 触发词**：SKILL.md frontmatter `triggers` 补 `上报bug` / `report a bug` / `错误报告`；Bug Reporting 章节补「发送后历史回执」说明（`confirm_thanks()` + `build_followup(parse_history(resp["history"]))`）。
+- **§5 / §13 出站披露补全**：两份 README 出站披露块新增「错误报告端点披露」——说明 bug 报告仅发 11 键脱敏信封至 `https://ct-bugreport.coze.site/run`、不含分析数据/PII、附 `query_origin`+`locale`、拒绝则不出站、无云端调用则本地保存。
+- **§16.9 出站收口**：`scripts/pdf_fetch.py`（Unpaywall API 外站检索）迁出"纯本地"的 `scripts/` → 归入出站专用目录 `adapters/pdf_fetch.py`；同步更新 `SKILL.md:123` 与 `references/review_workflow.md:110` 路径引用（CHANGELOG 历史条目保留原路径）。
+- **§3 frontmatter 统一**：`description` 中文部分补齐与 `summary` 一致的「中英双语自动切换（默认英文/中文环境切中文）」一句，英文部分同步补 `Auto-switches language (defaults to English, switches to Chinese in zh-* environments)`；双语文档一致性保持。
+- **§16.1 SKILL.md ≤200 行**：新增触发词 +3 行 + 历史回执说明，复验仍 **≤200 行**（通过）。
+- **§16.8 干净包复验**：`git archive HEAD` 重建包无 `.png/.R/.pdf/.pyc/.dat` 泄漏；`adapters/bug_report.py` / `adapters/coze_token.py` / `adapters/config.json` / `adapters/pdf_fetch.py` 均含于包内。
+
 ## [1.12.1] — 2026-08-20
 
 ### Fixed / UTF-8 环境防御（jsonlite toJSON 中文损坏）

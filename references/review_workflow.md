@@ -107,7 +107,7 @@ imp_result <- impute_ml(
 > 替代 metagear 本地 GUI：由 agent 在对话中按纳入/排除标准逐条判定标题/摘要，输出结构化筛选表。**纯 agent 行为，无引擎/脚本依赖**。
 
 **流程**：
-1. 用户提供标题/摘要列表（文本、CSV、或经 `scripts/pdf_fetch.py` 收集的文献清单）。
+1. 用户提供标题/摘要列表（文本、CSV、或经 `adapters/pdf_fetch.py` 收集的文献清单）。
 2. agent 与用户确认纳入/排除标准（PICO 维度）。
 3. 逐条判定，输出统一筛选表：
 
