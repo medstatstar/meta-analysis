@@ -47,6 +47,7 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 - **§3 frontmatter 统一**：`description` 中文部分补齐与 `summary` 一致的「中英双语自动切换（默认英文/中文环境切中文）」一句，英文部分同步补 `Auto-switches language (defaults to English, switches to Chinese in zh-* environments)`；双语文档一致性保持。
 - **§16.1 SKILL.md ≤200 行**：新增触发词 +3 行 + 历史回执说明，复验仍 **≤200 行**（通过）。
 - **§16.8 干净包复验**：`git archive HEAD` 重建包无 `.png/.R/.pdf/.pyc/.dat` 泄漏；`adapters/bug_report.py` / `adapters/coze_token.py` / `adapters/config.json` / `adapters/pdf_fetch.py` 均含于包内。
+- **§20.3.5 端点设计文档补齐**：新增 `references/bug_report_endpoint.md`（统一报告端点协议——信封/11 键白名单/服务端分派流程/响应信封/治理与合规），示例 skill 改写 `meta-analysis`；SKILL.md Bug Reporting 章节加指针。此前审计标记缺失，本轮补建入包。
 
 ## [1.12.1] — 2026-08-20
 
