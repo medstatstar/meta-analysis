@@ -71,6 +71,7 @@ dimension(s), output must state which rule fired and what was re-examined.
 | **R4** | Methodological feasibility ≥4 but no pre-specified heterogeneity threshold / subgroup plan | Feasibility high, I² trigger (e.g. >50%) not pre-set |
 | **R5** | Data availability ≥4 but effect measure inconsistent with outcome type (e.g. survival outcome → OR) | Availability high + mismatched effect measure |
 | **R6** | Full assessment claims "recommend/proceed" but PROSPERO registration not mentioned | Verdict proceed + no PROSPERO step in next actions |
+| **R7** | Candidate directions ranked by meta *type* (pairwise/NMA/regression) or by raw feasibility, **without** a real dedup screen — and a saturated/generic direction is listed as the top pick | Top candidate is "SGLT2i vs placebo on CKD composite endpoints" (a direction already covered by ≥5–6 large meta-analyses in 2024) with no evidence-gap justification |
 
 ## Meta type decision tree（Meta 类型决策树）
 
@@ -168,3 +169,4 @@ Verdict mapping: `strongly_recommend | recommend | hold | not_recommended`
 11. Non-English population → extend non-English DB search.
 12. Quick assessment must not give a final verdict.
 13. Outcome ↔ effect measure mismatch → block (see R5).
+14. Candidate directions must be ranked by **evidence gap + novelty verified by dedup search** (R7), not by meta *type* or raw feasibility. Never list a saturated/generic direction (e.g. a broad "SGLT2i vs placebo on CKD composite endpoints" pairwise meta already covered by ≥5 large 2024 meta-analyses) as the top pick without an evidence-gap justification.

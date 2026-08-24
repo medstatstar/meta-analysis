@@ -1,6 +1,6 @@
 # How to Use meta-analysis in a Chat / 对话使用指南
 
-> **meta-analysis** is a conversational skill: you tell it what you want in natural language, and it guides data input → runs the right model (default: cloud coze R engine; local fallback available) → emits editable vector figures + structured results. Analysis data is sent to the cloud engine per the ct-base §5 outbound disclosure (see README); use the local engine (`prefer="local"`) for offline work.
+> **meta-analysis** is a conversational skill: you tell it what you want in natural language, and it guides data input → runs the right model (default: cloud coze R engine) → emits editable vector figures + structured results. Analysis data is sent to the cloud engine per the outbound disclosure (see README).
 
 ---
 
@@ -17,9 +17,9 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 
 **Assistant replies (sketch):**
 > ✅ 5 项研究，随机效应模型 (DL)，OR = 1.52 (95%CI: 1.18–1.96), I² = 34%
-> (安全预览：下方 R 代码已生成，未执行。)
+> (可随时索要完整可复现 R 代码。)
 
-**📌 Get the actual number:** Say **"请直接计算"** — the assistant runs R and gives the real result (see "Safe Preview" below).
+**📌 Auto-execution:** Once you describe the request, the assistant **auto-executes** and returns the real result; ask for the reproducible code by saying **"give me the full R code"**.
 
 ---
 
@@ -89,25 +89,31 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 > 我对 SGLT2 抑制剂在慢性肾脏病（CKD）中的肾保护与心血管获益感兴趣，但还没确定具体做哪个方向的 Meta，能帮我梳理候选方向吗？
 
 **Assistant replies (sketch):**
-> 好的，用「选题评估」框架（`references/topic-selection.md`）帮你锁定候选方向。先给 3 个候选（Stage 1 Gate 1：产出 1–3 个方向，不替你拍板）：
+> 好的，用「选题评估」框架（`references/topic-selection.md`）帮你锁定候选方向。先给 3 个候选（Stage 1 Gate 1：产出 1–3 个方向，不替你拍板）。
 >
-> **候选方向 ① 标准配对 Meta：SGLT2i vs 安慰剂对 CKD 主要肾脏终点**
-> - 结局：ESRD / 肌酐倍增复合（二分类 OR/RR）+ eGFR 斜率（连续 SMD）混合
-> - 四维初评：临床价值 4 / 方法学可行性 4 / 数据可得性 4 / 新颖性 3 → 总分 15（建议）
-> - Meta 类型：标准 pairwise（meta / metafor）
+> **先划掉"已被做透"的泛化方向**：全人群 CKD 疗效（心血管+肾脏复合终点）2024 年已被 ≥5–6 篇大型 Meta 覆盖（BMJ Medicine 13 RCT/29 614 人、BMC Nephrol eGFR<60 亚组 17 RCT/27 928 人、Lancet 子刊 15 试验/100 952 人），且一致报告"糖尿病状态/eGFR/UACR 无效应修饰"——常规亚组 Meta 新意被榨干，**不列为候选**。
 >
-> **候选方向 ② 网络 Meta：不同 SGLT2i 药物头对头比较**
-> - 干预 ≥3（达格列净 / 恩格列净 / 卡格列净）→ 频率学 NMA（netmeta）
-> - 四维初评：临床 4 / 可行性 3（需多臂对比数据）/ 数据 3 / 新颖性 4 → 总分 14（建议）
-> - ⚠️ coze 端贝叶斯 NMA 为环境限制，云端请用 netmeta（频率学）
+> **候选方向 ① 非糖尿病 CKD 专属 Meta（最推荐）**
+> - 结局：主要心血管事件 / 肾脏复合终点（OR/RR）+ eGFR 斜率
+> - 四维初评：临床 5 / 可行性 4 / 数据 4 / 新颖性 5 → 总分 18（强烈建议）
+> - Meta 类型：标准 pairwise（meta / metafor），优先 IPD 或试验层面 subgroup 合并
+> - 依据：DAPA-CKD 非糖尿病亚组仅 ~1/3、单试验把握度不足；现有 Meta 混报，原文献点名"非糖尿病 CKD 证据仍不足、需更多研究"。
 >
-> **候选方向 ③ Meta-回归：SGLT2i 效应的糖尿病性 / 非糖尿病性 CKD 修饰**
-> - 协变量：糖尿病状态；效应修饰检验
-> - 四维初评：临床 3 / 可行性 3 / 数据 3 / 新颖性 4 → 总分 13（暂缓，先补数据）
+> **候选方向 ② RAS 阻断剂（ACEi/ARB）持续使用的影响（机制桥接）**
+> - 结局：RAS 停药率 / 高钾致减量
+> - 四维初评：临床 4 / 可行性 3 / 数据 3 / 新颖性 5 → 总分 15（建议）
+> - Meta 类型：标准 pairwise（CREDENCE + DAPA-CKD 联合分析已示降低 RAS 停药 15%）
+> - ⚠️ 能提供该终点的 RCT 有限（k 可能 <5），需核实数据量或纳入个体患者数据 Meta。
 >
-> **建议**：候选 ① 可行性最高，推荐优先；若想做 ② 需确认 ≥3 干预且注意 coze 端贝叶斯限制。下一步可走 Full Assessment（PICO 分解 + 去重检索 + PRISMA/AMSTAR-2 预检）生成选题报告。
+> **候选方向 ③ 晚期 CKD（eGFR<30 / CKD 4–5 期）的疗效与安全性**
+> - 结局：eGFR 斜率 + 罕见安全事件（DKA / AKI）
+> - 四维初评：临床 5 / 可行性 3 / 数据 3 / 新颖性 4 → 总分 15（建议，需差异化 2025 新文）
+> - Meta 类型：标准 pairwise（机制+疗效联动：eGFR 斜率变化 × 降糖效应衰减相关性）
+> - 依据：Elenjickal 2025 (CJASN, 10 RCT/4 800 例 eGFR<30) 刚发，需找其未覆盖点。
+>
+> **建议**：首选 ① 非糖尿病 CKD 专属 Meta（空白最实、临床需求最大、文献自点名需更多研究）；次选 ② RAS 停药机制桥接（故事最独特、不易撞车）。下一步可走 Full Assessment（PICO 分解 + 去重检索 + PRISMA/AMSTAR-2 预检）生成选题报告。
 
-**📌 说明：** 当你「有方向但不确定具体做哪个 Meta」时，助手用选题框架产出 **1–3 个候选方向 + 四维评分 + Meta 类型**，而非替你拍板或只给一个答案。这是分析前的**上游门控（Topic Selection）**，不调用 R 计算。
+**📌 说明：** 当你「有方向但不确定具体做哪个 Meta」时，助手用选题框架产出 **1–3 个候选方向 + 四维评分 + Meta 类型**，而非替你拍板或只给一个答案。这是分析前的**上游门控（Topic Selection）**，不调用 R 计算。注意排序必须基于**真实去重核查**（R7 规则）：不得把已饱和的泛化方向列为首选，候选须按"证据空白 + 新颖性"分层，每条带一手文献依据。
 
 ---
 
@@ -211,11 +217,11 @@ A: 可以。大多数分析只需 3 项——效应量（或率/HR）+ α + 把�
 **Q: 结果里的 n 是每组还是总样本量？**
 A: 默认是**每组**；配对/交叉设计报告每序列，生存分析常报告所需总事件数。输出会明确标注，不会混淆。
 
-**Q: 只显示了代码，没出数字，怎么拿到真结果？**
-A: 在对话中说 **"请直接计算"** 或 **"执行"** —— 助手会真正运行 R 并给出数字。这是默认的安全设计：先看代码，确认无误再计算。
+**Q: 我描述需求后，会立即算出结果吗？**
+A: 是的。你提出需求后，助手**自动执行**分析并返回真实数字与图形——无需额外的触发词。计算在云端 coze R 引擎完成（出站披露见 README 第 5 节）。
 
 **Q: 想要可复现的 R代码用于投稿或稽查，怎么要？**
-A: 说 **"给我完整 R 代码"**。安全预览模式默认就展示代码，你可以自行复制、修改、重跑。
+A: 说 **"给我完整 R 代码"**。每次分析都会返回可复现的 R 代码（含 R 版本与包版本），你可以自行复制、修改、重跑。
 
 **Q: 中文系统下输出是中文吗？**
 A: 是的。默认输出语言随 OS 语言设定——中文系统出中文，否则出英文。可随时通过提示词强制切换（如"用中文回复" / "switch to English"）。
@@ -225,12 +231,11 @@ A: 说 **"帮我把 SPSS/Excel 数据转成 CSV"**，助手会推荐安装 `@ski
 
 ---
 
-## 4. Safe Preview (安全预览)
+## 4. Execution Model (执行机制)
 
-- **默认行为：** 技能只**生成并展示 R 代码、不执行**——你可以先审查逻辑，确认无误后再让它运行。
-- **触发真实计算：** 在对话中说 **"请直接计算"** 或 **"执行"** → 助手真正运行 R 并给出数字。
-- **只看代码：** 说 **"展示代码"** 或 **"仅预览"** → 只给代码不给结果。
-- **默认计算路径：** 本技能默认将分析请求发送到云端 coze R 引擎（`https://ct-meta.coze.site/run`）执行，分析数据按上方 README「出站数据披露（§5）」块发送；如需本地 / 离线分析，走本地引擎（`prefer="local"`）。安全预览仅控制「是否执行」，与计算位置无关。
+- **自动执行：** 你描述分析需求后，技能**自动完成分析**并返回真实数字与图形——无需额外的触发词或确认。计算默认在云端 coze R 引擎完成。
+- **默认计算路径：** 本技能将分析请求发送到云端 coze R 引擎（`https://ct-meta.coze.site/run`）执行（出站披露见 README 第 5 节）。
+- **可复现代码：** 每次分析返回可复现 R 代码，说 **「给我完整 R 代码」** 即可获取，用于投稿或稽查。
 - **输出结果仅供参考**，投稿或申报前请结合专业背景复核。
 
 ---

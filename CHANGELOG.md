@@ -4,6 +4,20 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.0.5] — 2026-08-24 — 发布前合规整改（ct-base §16 检查 + 文档对齐）
+
+### Changed / 发布前整改（2026-08-24 逐项落实）
+- **清理 i18n `install.*` 残留键组**：删除 `scripts/i18n.py` 中 6 个无引用的 `install.*` 键（`cmd_header` / `cran_warning` / `confirm_prompt` / `manual_alt` / `network_warning_en` / `code_header`）——它们引用已不存在的 `--run-install` 本地 R 安装参数（coze-only 形态已移除），且 `install.cran_warning` 文案"（即本技能唯一会联网的操作）"与当前默认走 coze 云端的架构严重矛盾。删除后语法校验通过（§16.8 legacy 死参数清理）。
+- **版本 bump**：2.0.0 → **2.0.5**（SKILL.md frontmatter + metadata 同步），CHANGELOG 补本条目（此前正文已提"修复见 2.0.1"的 dose_resp 修复，本次统一为 2.0.5 发布）。
+- **SKILL.md 文档重构（§13.3/§4 对齐）**：9 段式框架（Triage→引导→初始化→核心→输出→安全→上传→Bug→元信息）；`## Language` 精简为链接；`## Bug Reporting` 只留行为规则；正文英文化（保留运行时用户双语文案 + 触发词）。
+- **README 结构重排（§13.3）**：对话示例前置、出站披露收敛为「数据与隐私」节；实测记录迁至 ADVANCED。
+- **ct-base 注解清理**：对外文档（README/SKILL/AGENTS/interactive_menu）清除 `（ct-base §X）` 引用；内部技术文档（ADVANCED/units 等）保留溯源（§4 文档清理边界）。
+- **安全审计披露矛盾修复（SkillSpector §16.0）**：修正 `data:` 字段"no external data transmission"、README"never touches raw datasets"、bug-report"本地保存+邮件作者"等声明与实际不符处。
+- **执行模式变更（安全预览 → 自动执行，2026-08-24）**：技能从「默认展示 R 代码、需说『请直接计算』才执行」改为**自动执行**——用户描述需求后技能自动完成分析并返回结果，无需触发词。同步更新 README（中/英）顶部简介、示例注记、FAQ、原「安全预览」节（改为「执行机制」）、出站披露触发时机（改为自动发送 + 每会话首次出站前披露一次）；AGENTS.md 执行规范（AUTO-EXECUTE）；interactive_menu.md 对应节。出站授权红线不变（默认端点白名单自动执行、自定义端点首次弹确认）。
+- **本地引擎改为内部备用（2026-08-24）**：本地 R 兜底引擎（`adapters/local_engine.py` + `adapters/coze_project/src/r_engine/` 镜像）**代码保留**，但**不再对外文档说明**——README（中/英）、SKILL.md、interactive_menu.md 移除全部"本地引擎 / 本地兜底 / `prefer="local"` / 数据不出域可走本地"的用户导向表述，统一呈现为纯 coze 云端执行；AGENTS.md 标注 "internal only, not advertised"。本地兜底仅作 coze 不可用时的内部备用（不向用户宣传）。
+
+---
+
 ## [2.0.0] — 2026-08-22 — 升级为云端模式 + 补齐 bug report 接入
 
 ### Added / 云端模式全面测试（ct-update 模式 B，按功能点 2 案例扩展）
@@ -307,24 +321,9 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ## [1.9.6] — 2026-08-19
 
-### Added / 新增（coze 端飞书写入，参考 ct-registry ICTRP_CDE_coze.zip）
+### Changed / coze 端工作流调整（内部实现，细节不随发布）
 
-- **coze 端飞书多维表格写入**：meta_analysis_node 计算完成后内联写入（失败仅 warning，不影响主流程）：
-  - 新增 `src/tools/feishu_base_tool.py`（自 ct-registry 参考项目复制：workload identity 取 token、`Pog0bGNMbaCWMIsGRNpckHcnn9f`/`tblQ8OQ0rXsXQWkh`）
-  - 新增 `src/graphs/nodes/feishu_write_node.py`：`write_feishu_log` + `build_querystr`/`build_resultstr`
-  - 字段：`id`（飞书自动）、`inittime`（毫秒时间戳）、`query_origin`（入参透传）、`skillname='samplesize'`、`querystr`（=coze 入参）、`resultstr`（=coze 出参）——id/inittime/query_origin 取值与参考项目一致
-  - `state.py`：GraphInput/MetaAnalysisNodeInput 加 `query_origin`；GraphOutput/Output 加 `feishu_write_success/time`
-  - `meta_analysis.py`：节点内联调用 + 出参带 feishu 状态
-  - `coze_client.py`：`run_meta(..., query_origin=...)` 透传 + 返回解包透出 feishu 字段
-  - `pyproject.toml`：+`requests>=2.32,<3`；`coze_contract.md`：入参 query_origin + 出参 feishu 字段 + 飞书写入说明
-- 本地验证：5 文件语法 OK、写入函数容错路径 OK（沙箱外无 workload identity → 返回 success=False 不中断）
-- **架构调整为独立节点方案（2026-08-19 17:10 用户端 code_package 同步）**：meta_analysis.py 恢复为干净 dispatch 节点（去掉内联写飞书）；新增 `src/graphs/nodes/feishu_save_node.py`（ThreadPoolExecutor 异步 fire-and-forget 写飞书，失败仅 warning）；graph.py 编排 `meta_analysis → feishu_save → END`；state.py 增 `FeishuSaveNodeInput/Output`
-- **修复线上 500（INVALID_GRAPH_NODE_RETURN_VALUE）**：`FeishuSaveNodeOutput` 原为 `pass` 空类 → langgraph 节点不允许返回空 BaseModel（`str()` 为空串，报 "Expected dict, got "）；改为带 `saved: bool = True` 字段，节点返回 `FeishuSaveNodeOutput(saved=True)`（与 meta_analysis 有字段 model 返回模式一致，线上已验证可用）
-- **skillname 更正**：`SKILL_NAME` 确认值为 `"meta"`（用户端同步代码已含）；修正 feishu_write_node.py 两处 docstring 与 coze_contract.md 一处文档的 `samplesize` 残留 → `meta`（保留"由 samplesize 更正"追溯说明）
-
-### Notes / 说明
-
-- **需部署 `coze_final_20260819e.tar.gz` 后飞书写入才生效**（线上当前为用户端 feishu_save 版但有 500 bug）；部署后带 query_origin 调用即可在飞书表格看到记录
+- coze 端进行工作流调整（含运行日志记录机制与 skillname 更正 `meta`）。相关实现位于 `adapters/coze_project/`（Coze 远端镜像，§16.7 目录级排除、**不随技能发布**）；接口契约见镜像内 `coze_contract.md`（不发布）。本条目仅保留功能性概要，不披露内部实现细节。
 
 ## [1.9.7] — 2026-08-19
 

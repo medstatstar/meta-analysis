@@ -216,4 +216,21 @@ meta-analysis/
 
 ---
 
+## 9. 示例实测记录 / Example Test Records（§16.6 实测闸门留痕）
+
+> 测试日期 2026-08-20，依据 ct-base §16.6 逐示例实测：**7/7 通过**。计算类示例 2/3/4/7 经 coze 端点（`https://ct-meta.coze.site/run`）真实返回 `stats` + `figures` + `repro`；行为类示例 1/5/6 与 SKILL.md Triage（§5.2）及 `references/topic-selection.md` / `references/interactive_menu.md` 一致。完整报告见 `meta_readme_test/README_EXAMPLES_TEST_REPORT.md`。
+
+| 示例 | 类型 | 实测状态 |
+|---|---|---|
+| 1 选择候选方向 / 5 网络 Meta 路由菜单 / 6 Vague grill-me | 行为类（选题/路由） | ✅ 通过 |
+| 2 二分类 OR 配对 / 3 效应量转换 / 4 SMD+亚组 / 7 PRISMA 流程图 | 计算类（coze） | ✅ 通过 |
+
+**变更留痕（2026-08-24）：**
+- **示例 1 文案更新**：原示例按"Meta 类型"切分候选、且把泛化配对 Meta 列为首选（新颖性 3）；经一手文献核查，该泛化方向 2024 年已被 ≥5–6 篇大型 Meta 覆盖，原"首选推荐"事实站不住。已重写为**按证据空白 / 新颖性分层**，并引入真实去重核查依据：首选改为"非糖尿病 CKD 专属 Meta"，候选含"RAS 停药机制桥接""晚期 CKD"。行为类判定逻辑（不替用户拍板、不调用 R）不变，7/7 通过结论仍然有效。
+- **选题行为固化**：将"按证据空白分层 + 去重核查"从 README 范例提升为技能**固定规则**。`references/topic-selection.md` 新增 **R7 规则**（候选方向排序须基于真实去重核查，不得把已饱和泛化方向列为首选）并在 Traps 第 14 条同步；`references/interactive_menu.md` 示例 6 已与 README 示例 1 同步重写（按证据空白排 3 候选）。
+- **README 结构重排**：将「对话中使用（7 个示例）」前置到第 1 节，使**使用便利性优先**；把原先散落在最前、互相交叉的三个出站披露块（分析数据 / 元数据 / 错误报告）收敛为 README 第 5 节「数据与隐私说明」，表格化、去重 `query_origin`+`locale` 的重复描述，并加一句总结。内容与强制披露语义（ct-base §5 / §20.3）零丢失。
+- **实测记录迁移**：原位于 README 的「示例实测记录（§16.6 实测闸门留痕）」属开发/QA 视角，对普通使用者无意义，已从 README 移除并迁移至此（第 9 节）。
+
+---
+
 **版本**: v1.7 | **许可**: MIT | **作者**: medstatstar, phoe-zip

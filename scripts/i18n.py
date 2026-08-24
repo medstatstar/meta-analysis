@@ -168,30 +168,6 @@ _MESSAGES = {
         "en": "--{label} must be < {bound} (got {val})",
         "zh": "--{label} 必须 < {bound}（当前值 {val}）",
     },
-    "install.cmd_header": {
-        "en": "[R package commands — for review only, NOT executed]",
-        "zh": "[R 包安装命令 — 仅供审阅，未执行]",
-    },
-    "install.cran_warning": {
-        "en": "This command will download and install {n} R packages from CRAN (the ONLY network operation in this skill).",
-        "zh": "此命令会**从 CRAN 联网下载并安装** {n} 个 R 包（即本技能唯一会联网的操作）。",
-    },
-    "install.confirm_prompt": {
-        "en": "If confirmed, re-run with --run-install to actually download:",
-        "zh": "如确认无误，请重新运行并追加 --run-install 才会真正联网安装：",
-    },
-    "install.manual_alt": {
-        "en": "Or paste the above command into an R console to install manually.",
-        "zh": "或在 R 控制台中手动粘贴上述命令自行安装。",
-    },
-    "install.network_warning_en": {
-        "en": "⚠️  NETWORK INSTALL: the following R code will download packages from CRAN",
-        "zh": "⚠️  联网安装：以下 R 代码将从 CRAN 下载并安装 R 包（供应链风险由你知情触发）",
-    },
-    "install.code_header": {
-        "en": "[R CODE — will be executed by Rscript]",
-        "zh": "[R 代码 — 将由 Rscript 执行]",
-    },
     "header.r_code": {
         "en": "[R CODE — generated for this analysis]",
         "zh": "[R 代码 — 本次分析生成]",

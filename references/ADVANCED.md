@@ -207,4 +207,21 @@ meta-analysis/
 
 ---
 
+## 9. Example Test Records / 示例实测记录（§16.6 实测闸门留痕）
+
+> Tested 2026-08-20 per ct-base §16.6, one example at a time: **7/7 passed**. Computation examples 2/3/4/7 returned real `stats` + `figures` + `repro` from the coze endpoint (`https://ct-meta.coze.site/run`); behavioral examples 1/5/6 were verified against SKILL.md Triage (§5.2) and `references/topic-selection.md` / `references/interactive_menu.md`. Full report: `meta_readme_test/README_EXAMPLES_TEST_REPORT.md`.
+
+| Example | Type | Status |
+|---|---|---|
+| 1 Candidate-direction selection / 5 Network-meta routing menu / 6 Vague grill-me | Behavior (topic / routing) | ✅ Passed |
+| 2 Binary OR pairwise / 3 Effect-size conversion / 4 SMD+subgroup / 7 PRISMA flow | Computation (coze) | ✅ Passed |
+
+**Change log (2026-08-24):**
+- **Example 1 copy update**: the original example split candidates by "meta type" and listed the generic pairwise meta as the top pick (novelty 3); after primary-literature verification, that generic direction was already covered by ≥5–6 large meta-analyses in 2024, so the old "top-pick" recommendation no longer held. It was rewritten to stratify by **evidence gap / novelty**, backed by a real dedup check: top pick is now "dedicated non-diabetic CKD meta", candidates include "RAS-persistence mechanistic bridge" and "advanced CKD". The behavioral logic (no deciding for the user, no R invocation) is unchanged; the 7/7 verdict still holds.
+- **Topic-selection behavior hardening**: the "stratify by evidence gap + dedup check" approach was promoted from a README example into a **fixed skill rule**. `references/topic-selection.md` now has a **Rule R7** (candidate directions must be ranked by a real dedup check; a saturated generic direction must not be listed as the top pick) plus Trap #14; `references/interactive_menu.md` Example 6 was rewritten to match README Example 1 (3 candidates by evidence gap).
+- **README restructure**: "How to Use It in a Chat (7 examples)" was moved to README Section 1 so **usability comes first**. The three previously scattered, overlapping outbound-disclosure blocks (analysis data / metadata / error report) were consolidated into README Section 5 "Data & Privacy", tabularized, with the repeated `query_origin` + `locale` description deduplicated and a one-sentence summary added. Content and the mandatory-disclosure semantics (ct-base §5 / §20.3) are fully preserved.
+- **Test-records relocation**: the "Example Test Records (§16.6 gate)" section, which was previously in the README, is developer/QA-facing and has no value for ordinary users. It has been removed from the README and moved here (Section 9).
+
+---
+
 **Version**: v1.7 | **License**: MIT | **Authors**: medstatstar, phoe-zip

@@ -8,22 +8,9 @@
 
 > **Easy-to-use R-based Meta-Analysis for Clinical Researchers**
 >
-> You don't't need to code or memorize commands — just describe your meta-analysis needs in **plain language inside a chat**, and the skill runs the full analysis for you. Powered by R and 14 core + 2 optional professional R packages (metafor, meta, netmeta, bayesmeta, dosresmeta, mada, etc.), it returns results in Chinese or English depending on your OS language setting (you can force-switch via a prompt at any time). The generated R code is shown in **SAFE PREVIEW** (not executed) by default — it only computes once you confirm.
+> You don't need to code or memorize commands — just describe your meta-analysis needs in **plain language inside a chat**, and the skill **automatically runs** the full analysis (pooling, figures, report) for you. Powered by R and 14 core + 2 optional professional R packages (metafor, meta, netmeta, bayesmeta, dosresmeta, mada, etc.), it returns results in Chinese or English depending on your OS language setting (you can force-switch via a prompt at any time). Once you describe a request, the skill **auto-executes** and returns results + figures; ask for the full reproducible R code at any time.
 
 ---
-
-> **Outbound data disclosure (ct-base §5, mandatory)** — This skill sends your **analysis data**
-> (study event counts / sample sizes / effect sizes; no personal identifiers) to the coze
-> meta-analysis endpoint (`https://ct-meta.coze.site/run` by default) for cloud R computation.
-> The default endpoint is pre-approved in `adapters/config.json` (`auto_approve_endpoints`);
-> custom endpoints (`COZE_META_ENDPOINT`) ask for your confirmation on first use (AUTH-BLOCK),
-> and are persisted to the whitelist after you approve. If not approved, the skill falls back to
-> the local engine (or returns a clear "cloud analysis not used" message when no local R exists).
-> Payloads are sanitized (PII stripped) before sending.
->
-> **Metadata sent with the request (ct-base §5):** the request also carries `query_origin` (a SHA-256 hash of your machine hostname, used only for server-side attribution / rate-limiting — **not** your plaintext hostname) and `locale` (your OS language, for bilingual output). Neither is used to identify you personally.
->
-> **Bug-report endpoint disclosure (ct-base §5 / §20.3, mandatory)** — When you confirm sending a (sanitized) error report via the in-skill bug reporter (`adapters/bug_report.py`), the skill sends **only** the 11-key whitelist envelope (skill name / version / error type / error code / engine status / your free-text `description` / locale / `query_origin` / session hash / retry count / test) to the unified bug-report endpoint `https://ct-bugreport.coze.site/run`. It sends **no analysis data and no personal identifiers** — `description` is the only free-text field and you review it before consent (hard boundary: no identifiable person/institution/subject info). The same `query_origin` + `locale` metadata above is attached. If you decline, nothing is sent; if there is no cloud call this session, the report is saved locally instead (`save_local_report`, data never leaves the machine).
 
 ## Who This Is For
 
@@ -32,6 +19,8 @@ meta-analysis is part of the CT-series skill family, built for three groups:
 - **Clinical-trial practitioners at pharmaceutical companies** — sponsors, CROs, and medical / statistical / regulatory roles who need to pool and compare study evidence;
 - **Clinicians and nurses who design, conduct, or participate in clinical research** and need meta-analysis / systematic-review support;
 - **Medical students who want to learn evidence-based medicine and meta-analysis methodology in a structured way**.
+
+---
 
 ## 1. How to Use It in a Chat (the Core)
 
@@ -44,25 +33,33 @@ Below are 7 real conversational examples. **Example 1 is the upstream Topic Sele
 > I'm interested in SGLT2 inhibitors for renoprotection and cardiovascular benefit in chronic kidney disease (CKD), but I haven't decided which specific meta-analysis direction to pursue. Can you help me shortlist candidate directions?
 
 **Assistant replies (sketch):**
-> Sure — I'll use the topic-selection framework (`references/topic-selection.md`) to shortlist candidates. Here are 3 candidates (Stage 1 Gate 1: produce 1–3 directions; I won't decide for you):
+> Sure — I'll use the topic-selection framework (`references/topic-selection.md`). First I run a **dedup check against the primary literature (Rule R3)**, then shortlist — otherwise a saturated direction can be wrongly pushed as the top pick.
 >
-> **Candidate ① Standard pairwise meta: SGLT2i vs placebo on major kidney endpoints in CKD**
-> - Outcomes: ESRD / serum-creatinine-doubling composite (binary OR/RR) + eGFR slope (continuous SMD)
-> - 4-dim quick score: clinical 4 / feasibility 4 / data 4 / novelty 3 → total 15 (recommend)
-> - Meta type: standard pairwise (meta / metafor)
+> **First, rule out the saturated direction**: the generic "SGLT2i vs placebo on cardiorenal composite endpoints in CKD" was already covered by ≥5–6 large meta-analyses in 2024 (e.g. BMJ Medicine 2024, 13 RCTs/29 614 pts; BMC Nephrol 2024 eGFR<60 subgroup, 17 RCTs/27 928 pts; Lancet subsidiary 2024 across the cardiometabolic spectrum, 15 trials/100 952 pts). They consistently report "no effect modification by diabetes status / baseline eGFR / UACR" — the incremental value of a routine subgroup meta is exhausted. **Do not redo the generic pairwise meta.**
 >
-> **Candidate ② Network meta: head-to-head comparison of different SGLT2i agents**
-> - ≥3 interventions (dapagliflozin / empagliflozin / canagliflozin) → frequentist NMA (netmeta)
-> - 4-dim quick score: clinical 4 / feasibility 3 (needs multi-arm data) / data 3 / novelty 4 → total 14 (recommend)
-> - ⚠️ Bayesian NMA is a known coze-environment limitation — use netmeta (frequentist) on the cloud
+> Re-shortlisting 3 candidates by **evidence gap + novelty** (Stage 1 Gate 1: produce 1–3 directions; I won't decide for you):
 >
-> **Candidate ③ Meta-regression: effect modification of SGLT2i by diabetic / non-diabetic CKD**
-> - Covariate: diabetes status; effect-modification test
-> - 4-dim quick score: clinical 3 / feasibility 3 / data 3 / novelty 4 → total 13 (hold, fix data first)
+> **Candidate ① Dedicated meta in non-diabetic CKD (top pick)**
+> - Intervention: SGLT2i vs placebo; population: **non-diabetic CKD** (isolating non-diabetic subgroups from DAPA-CKD / EMPA-KIDNEY + a few dedicated RCTs)
+> - 4-dim quick score: clinical 5 / feasibility 4 / data 4 / novelty 5 → total 18 (strongly recommend)
+> - Meta type: standard pairwise (meta / metafor); IPD preferred, published subgroup data acceptable
+> - Basis: existing meta-analyses pool diabetic + non-diabetic together; the source papers themselves call non-diabetic CKD "still under-studied, needs more research" (Reyes-Farias, PLOS ONE 2023).
+> - ⚠️ The non-diabetic subgroup is smaller — power and heterogeneity must be discussed honestly.
 >
-> **Suggestion**: Candidate ① has the highest feasibility — start there. For ②, confirm ≥3 interventions and note the coze Bayesian limitation. The next step can be a Full Assessment (PICO decomposition + dedup search + PRISMA/AMSTAR-2 pre-check) to produce a topic report.
+> **Candidate ② Effect of SGLT2i on renin-angiotensin-system (RAS) blocker persistence (mechanistic bridge)**
+> - Outcome: RAS discontinuation/interruption (joint CREDENCE + DAPA-CKD analysis already reported −15%, PMID 37876229)
+> - 4-dim quick score: clinical 4 / feasibility 3 / data 3 / novelty 5 → total 15 (recommend)
+> - Meta type: standard pairwise (HR pooling); few RCTs report this endpoint — verify k ≥ 5 first
+> - Value: unique clinical story ("SGLT2i keeps RAS on board"), least likely to collide with existing work.
+>
+> **Candidate ③ Efficacy and safety in advanced CKD (eGFR<30 / stage 4–5)**
+> - Outcomes: kidney composite + eGFR slope + rare safety events
+> - 4-dim quick score: clinical 5 / feasibility 3 / data 3 / novelty 4 → total 15 (recommend)
+> - Meta type: standard pairwise; note CJASN 2025 (Elenjickal, 10 RCTs/4 800 eGFR<30 pts) just published — find a differentiated angle first.
+>
+> **Suggestion**: Start with ① (real gap, greatest clinical need, literature self-identifies the gap); ② is the most distinctive story; ③ needs differentiation from the 2025 paper. Next step can be a Full Assessment (PICO decomposition + dedup search + PRISMA/AMSTAR-2 pre-check) to produce a topic report.
 
-**📌 Note:** When you have a direction but are unsure which specific meta to run, the assistant uses the topic-selection framework to produce **1–3 candidate directions + a 4-dim score + meta type**, instead of deciding for you or giving a single answer. This is the upstream gate (Topic Selection) before analysis — no R computation is invoked.
+**📌 Note:** When you have a direction but are unsure which specific meta to run, the assistant uses the topic-selection framework to produce **1–3 candidate directions + a 4-dim score + meta type**, instead of deciding for you or giving a single answer. This is the upstream gate (Topic Selection) before analysis — no R computation is invoked. Candidates are stratified by **evidence gap / novelty**, each backed by a primary-literature dedup check (Rule R7), so a saturated generic direction is no longer mis-pushed as the top pick.
 
 ### Example 2 · Two-group binary meta (most common)
 **You say:**
@@ -73,9 +70,9 @@ Below are 7 real conversational examples. **Example 1 is the upstream Topic Sele
 
 **Assistant replies (sketch):**
 > ✅ 5 studies, random-effects (DL), OR = 1.52 (95%CI: 1.18–1.96), I² = 34%
-> (Safe preview: R code shown below but not executed.)
+> (Ask for the full reproducible R code at any time.)
 
-**📌 Get the actual number:** Say **"please compute directly"** — the assistant sends the request to the cloud coze R engine and returns the real result (see Section 4, "Safe Preview").
+**📌 Auto-execution:** Once you describe the request, the assistant **auto-executes** and returns the real result; ask for the reproducible code by saying **"give me the full R code"**.
 
 ### Example 3 · Effect size conversion
 **You say:**
@@ -104,7 +101,7 @@ Below are 7 real conversational examples. **Example 1 is the upstream Topic Sele
 >
 > **① Which analysis framework?**
 > - (a) Frequentist — `netmeta`, inverse-variance based, good for consistent networks
-> - (b) Bayesian — `gemtc` (JAGS) or `multinma` (Stan) **local only**（coze 端为已知环境限制，无 root 无法装 JAGS，云端请用 (a) netmeta）；`bayesmeta` 支持贝叶斯配对比较，本地可用
+> - (b) Bayesian — `gemtc` (JAGS) or `multinma` (Stan) **local only** (a known coze limitation: the container has no root to install JAGS; on the cloud use (a) netmeta); `bayesmeta` supports Bayesian pairwise comparisons locally
 >
 > **② Include dose-response?**
 > - (a) No — pure pairwise comparison network
@@ -112,7 +109,7 @@ Below are 7 real conversational examples. **Example 1 is the upstream Topic Sele
 >
 > **③ Can't decide?** → Say "explain the differences between these choices in detail" and the assistant explains first, then lets you decide
 
-**📌 Note:** When you've **named the test type but are stuck on "which option / design family"**, the assistant **pops a routing menu** to confirm step by step — instead of deciding for you or dumping the full 49-test menu. The menu also offers an "explain the differences" option — when you're unsure, it explains before you decide.
+**📌 Note:** When you've **named the test type but are stuck on "which option / design family"**, the assistant **pops a routing menu** to confirm step by step — instead of deciding for you or dumping the full menu. The menu also offers an "explain the differences" option — when you're unsure, it explains before you decide.
 
 ### Example 6 · Vague: Not sure which model (grill-me)
 **You say:**
@@ -153,7 +150,7 @@ Below are 7 real conversational examples. **Example 1 is the upstream Topic Sele
 
 Tests are grouped by **analysis purpose** (7 categories below). Each row gives the typical **clinical scenario** and a line you can **copy verbatim** under "Try saying". The same test may be reached from multiple entry points.
 
-> The underlying R packages (metafor / meta / netmeta …) are listed in Section 5 "Advanced Reference"; ordinary users don't need to care.
+> The underlying R packages (metafor / meta / netmeta …) are listed in Section 6 "Advanced Reference"; ordinary users don't need to care.
 
 ### ① Pairwise Meta-Analysis
 | Scenario | Try saying in chat |
@@ -251,11 +248,11 @@ A: Yes. Most analyses need only 3 items — effect size (or rate / HR) + α + po
 **Q: Is the n in the result per group or total?**
 A: By default it's **per group**; paired / crossover designs report per-sequence, and survival often reports total events needed. The output always labels this clearly.
 
-**Q: It only shows code, not the number. How do I get the actual result?**
-A: Just add **"please compute directly"** or **"execute"** in the chat — the assistant sends the analysis request to the cloud coze R engine and gives you the real number. This is the default safe design: see the request first, compute once you're sure. Sending only happens on this explicit, high-friction instruction — the skill never sends the request on its own or from a casual mention of these words.
+**Q: Does the analysis run as soon as I describe a request?**
+A: Yes. Once you describe the request, the assistant **auto-executes** and returns the real numbers + figures — no extra trigger word needed. Computation runs on the cloud coze R engine (data disclosure in Section 5).
 
 **Q: I want the reproducible R code for submission or audit — how do I ask?**
-A: Say **"give me the full R code"**. The code is also shown in safe preview by default, so you can copy, modify, and re-run it yourself.
+A: Say **"give me the full R code"**. Every analysis returns reproducible R code (with R and package versions), which you can copy, modify, and re-run yourself.
 
 **Q: On a Chinese system, is the output in Chinese?**
 A: Yes. By default the output language follows your OS language setting — Chinese on a Chinese-OS, English otherwise. This default requires no extra permission and only affects display language; you can force-switch anytime via a prompt (e.g. "用中文回复" / "switch to English").
@@ -263,42 +260,59 @@ A: Yes. By default the output language follows your OS language setting — Chin
 **Q: My data is in SPSS/Excel/Stata format — what do I do?**
 A: Say **"help me convert my SPSS/Excel data to CSV"** — the assistant will recommend installing `@skill:statdata-transfer` for 50+ format conversions.
 
----
-
 **Q: What if my data must stay confidential?**
-A: This skill sends only your **analysis parameters / summary statistics** (event counts, sample sizes, effect sizes) to the cloud coze R engine — it never touches your raw datasets or individual-patient records. If you still prefer data to stay on your machine, run the analysis **locally** (say "use local engine" / set `prefer="local"`): the same R engine runs on your computer and nothing leaves it. You can also ask for the full reproducible R code and run it yourself with your real data.
+A: Run the whole analysis with **simulated / placeholder data**, then ask the skill for the **full reproducible R code** and run it yourself locally with your real data. The skill itself only sends your **analysis parameters / summary statistics** (event counts, sample sizes, effect sizes) to the cloud coze R engine — it **never touches your raw datasets or individual-patient records** (unless you explicitly choose to run an IPD analysis through the cloud, in which case sending IPD to the cloud is your decision).
 
 **Q: What if I found an error in the result — how do I report it?**
-A: This skill follows the ct-base §20.3 bug-report workflow. If you suspect the result is wrong (or the engine errored), just say **"report a bug" / "上报问题" / "提交错误报告"**. The skill also **proactively asks** whether to report when it detects a likely defect (e.g. the engine errors or retries still fail) — at most **once per session**, and you can always decline. Either way, the assistant will:
+A: This skill follows the standard bug-report workflow. If you suspect the result is wrong (or the engine errored), just say **"report a bug" / "上报问题" / "提交错误报告"**. The skill also **proactively asks** whether to report when it detects a likely defect (e.g. the engine errors or retries still fail) — at most **once per session**, and you can always decline. Either way, the assistant will:
 1. **Propose a sanitized report** (11-field whitelist: skill / skill_version / test / error_type / error_code / engine_status / description / locale / query_origin / session_hash / attempts — **no raw input values or personal data**, except the `description` field where you decide what to disclose, e.g. the algorithm/function used and the error message);
 2. **Show the full report text for your review** — you can add a problem description or correct anything before confirming;
-3. **Send after your explicit confirmation** — to the unified endpoint `https://ct-bugreport.coze.site/run` (if this session called coze) or saved locally + emailed to the author (if purely local, data never leaves your machine);
+3. **Send after your explicit confirmation** — to the unified endpoint `https://ct-bugreport.coze.site/run` (if this session called coze) or, if purely local, **save the sanitized report locally and show you the author contact** so you can email it yourself if you choose (the skill itself does not send it; data never leaves your machine unless you email it);
 4. **Receive an acknowledgment** — including whether a previously submitted report from your source has already been fixed (with the fix note) or is still pending.
 
 You stay in full control: the report is shown to you **before** anything is sent, and nothing is transmitted without your explicit "send" confirmation.
 
-## 4. Safe Preview
+---
 
-- **Default behavior:** The skill only **builds and shows the analysis request (the task / data / params / figure envelope), but does not send it** — you can inspect the plan first, then let it run once you're confident.
-- **Trigger real computation:** In chat say **"please compute directly"** or **"execute"** → the assistant sends the request envelope to the cloud coze R engine, which computes and returns the real numbers. (No `--yes` flag — sending is driven entirely by this plain-language instruction; the skill never sends the request on its own or from a casual mention of these words.)
-- **Just see the code:** Say **"show code"** or **"preview only"** → only the request envelope, no result.
-- **Default compute path:** By default the skill sends the analysis request to the cloud coze R engine (`https://ct-meta.coze.site/run`); analysis data is sent per the "Outbound data disclosure (ct-base §5)" block above. For local / offline analysis, use the local engine (`prefer="local"`). Safe preview only controls whether the request is sent — it is independent of where computation runs.
+## 4. Execution Model
+
+- **Auto-execution:** Once you describe a request, the skill **auto-executes** the analysis and returns real numbers + figures — no extra trigger word or confirmation needed. Computation runs on the cloud coze R engine by default.
+- **Default compute path:** The skill sends the analysis request to the cloud coze R engine (`https://ct-meta.coze.site/run`) (data disclosure in Section 5).
+- **Reproducible code:** Every analysis returns reproducible R code (with R + package versions); say **"give me the full R code"** to obtain it for submission or audit.
+- **Outbound authorization:** The default endpoint is pre-approved and runs automatically; a custom endpoint (`COZE_META_ENDPOINT`) asks for confirmation on first use (see Section 5).
 - **Output is for reference only** — validate before journal submission or regulatory use.
 
 ---
 
-## Example Test Records (§16.6 gate)
+## 5. Data & Privacy
 
-> Tested 2026-08-20 per ct-base §16.6, one example at a time: **7/7 passed**. Computation examples 2/3/4/7 returned real `stats` + `figures` + `repro` from the coze endpoint (`https://ct-meta.coze.site/run`); behavioral examples 1/5/6 were verified against SKILL.md Triage (§5.2) and `references/topic-selection.md` / `references/interactive_menu.md`. Full report: `meta_readme_test/README_EXAMPLES_TEST_REPORT.md`.
+The skill sends data externally in **two** situations: ① when you describe an analysis request, the skill **auto-sends** the analysis request to execute; ② when you confirm sending an error report. **Neither sends personal identifiers.**
 
-| Example | Type | Status |
-|---|---|---|
-| 1 Candidate-direction selection / 5 Network-meta routing menu / 6 Vague grill-me | Behavior (topic / routing) | ✅ Passed |
-| 2 Binary OR pairwise / 3 Effect-size conversion / 4 SMD+subgroup / 7 PRISMA flow | Computation (coze) | ✅ Passed |
+**5.1 Analysis request (cloud computation)**
+- **What is sent:** your **analysis data** — **summary statistics** such as study event counts / sample sizes / effect sizes. No personal identifiers; payloads are sanitized before sending.
+- **When:** the skill **auto-sends** after you describe a request; **before the first outbound call each session**, the skill gives you a one-time spoken disclosure of what is sent and to which endpoint (then executes automatically, without per-call confirmation).
+- **Endpoint:** default `https://ct-meta.coze.site/run` (pre-approved in `adapters/config.json` `auto_approve_endpoints`). A custom endpoint (`COZE_META_ENDPOINT`) asks for confirmation on first use (AUTH-BLOCK), and is persisted to the whitelist after you approve.
+- **If declined:** the skill returns a clear "cloud analysis not used" message.
 
-## 5. Advanced Reference (moved to a separate file)
+**5.2 Metadata sent with the request**
+Each request also carries two metadata fields (**in both the analysis request and the error report**):
+- `query_origin`: a SHA-256 hash of your machine hostname, used only for server-side attribution / rate-limiting — **not** your plaintext hostname;
+- `locale`: your OS language, for bilingual output.
 
-CLI examples, bidirectional solving, curve mode, core formulas, system requirements, common errors, full file structure, and references for developers have been moved to **[references/ADVANCED.md](references/ADVANCED.md)**. Ordinary users don't need it; see Sections 1-4 for daily use.
+Neither is used to identify you personally.
+
+**5.3 Error report**
+- **What is sent:** **only** the 11-key whitelist envelope (skill / skill_version / test / error_type / error_code / engine_status / description / locale / query_origin / session_hash / attempts) — **no analysis data and no personal identifiers**. `description` is the only free-text field, and you review it before consent (hard boundary: no identifiable person/institution/subject info).
+- **Endpoint:** unified bug-report endpoint `https://ct-bugreport.coze.site/run`.
+- **If declined:** nothing is sent; if there is no cloud call this session, the report is saved locally instead (`save_local_report`, data never leaves the machine).
+
+> **In one sentence:** your **analysis summary data** is **auto-sent** to the cloud after you describe a request (with a one-time disclosure before the first outbound call each session); **error reports** go to the unified endpoint only after your confirmation; the two metadata fields (`query_origin` hash + `locale`) are for anonymous attribution. Raw data and individual records never leave your machine.
+
+---
+
+## 6. Advanced Reference (moved to a separate file)
+
+CLI examples, bidirectional solving, curve mode, core formulas, system requirements, common errors, full file structure, and references for developers have been moved to **[references/ADVANCED.md](references/ADVANCED.md)**. Ordinary users don't need it; see Sections 1-5 for daily use.
 
 ---
 
@@ -310,12 +324,11 @@ For feature requests, bug reports, or other feedback, please contact the author 
 
 ## Confidentiality Notice
 
-> The CT series consists of 20+ specialized domain skills, organized into **two tiers — A, B (the former C/D tiers are merged into confidential Tier B)** — by "confidential-data-exfiltration risk + whether external retrieval is needed", providing full coverage of the entire new-drug clinical trial (Clinical Trial) lifecycle.
+> The CT series consists of 20+ specialized domain skills, organized into **two tiers — A, B** — by "confidential-data-exfiltration risk + whether external retrieval is needed", providing full coverage of the entire new-drug clinical trial (Clinical Trial) lifecycle.
 >
-> - **Tier A / B (non-confidential)**: run fully locally using only ordinary data; Tier B may need external public retrieval but involves no confidential information. These skills are published openly on GitHub.
-> - **Tier B (confidential, formerly C/D)**: involve strictly confidential clinical-trial data and internal information from pharma sponsors (e.g., ct-analysis, ct-sdtm); Tier B is processed locally and never leaves the boundary, or additionally requires policy approval. These skills are designated for internal enterprise use only and are not publicly released at present.
+> - **Tier A (non-confidential, public)**: inputs are ordinary data, run fully locally (`network=off`) or with external public retrieval (`network=public-retrieval`, e.g. ct-registry / ct-advisor); no confidential information involved. Tier A skills are published openly on GitHub.
+> - **Tier B (confidential, internal)**: involve strictly confidential clinical-trial data and internal information from pharma sponsors (e.g., ct-analysis, ct-sdtm, ct-eligibility); Tier B is processed locally (`egress=none`, data never leaves the boundary) or requires approval for outbound (`egress=approval-req`, e.g. ct-eligibility). Tier B skills are designated for internal enterprise use only and are not publicly released at present.
 >
 > If you do have a genuine need for these confidential skills, please contact the author to request custom installation.
 >
 > 📧 Contact: medstatstar@gmail.com (Wintone Zhang / 张文彤)
-
