@@ -5,6 +5,8 @@ __pycache__/
 *.pyc
 # 发布排除（§16.8 干净包）：测试夹具 / 调试产物 / 运行产物 / 废弃根 r_engine / PNG 图标
 tests/
+# coze 模式 B 测试夹具（46 例，仅测试脚本引用、运行时零引用，不进发布包）
+adapters/coze_cases/
 Rplots.pdf
 output/
 r_engine/

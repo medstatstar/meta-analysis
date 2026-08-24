@@ -21,6 +21,8 @@ __pycache__/
 Rplots.pdf
 output/
 tests/
+# coze 模式 B 测试夹具（46 例，仅测试脚本引用、运行时零引用，不进发布包）
+adapters/coze_cases/
 r_engine/
 assets/icon.png
 

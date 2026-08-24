@@ -37,90 +37,9 @@ meta-analysis is part of the CT-series skill family, built for three groups:
 
 meta-analysis is a **conversational skill**: you simply tell the assistant what you want in natural language — no commands, no parameter names to remember. As a WorkBuddy skill it **auto-loads with no extra installation**.
 
-Below are 7 real conversational examples ordered from simple to advanced. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
+Below are 7 real conversational examples. **Example 1 is the upstream Topic Selection gate** (choose among candidate directions before running any analysis), followed by Examples 2–7 ordered from simple to advanced. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
 
-### Example 1 · Two-group binary meta (most common)
-**You say:**
-> Combine the OR across these 5 binary studies:
-> Study A: experimental 30/100, control 20/100
-> Study B: experimental 45/120, control 30/100
-> ...
-
-**Assistant replies (sketch):**
-> ✅ 5 studies, random-effects (DL), OR = 1.52 (95%CI: 1.18–1.96), I² = 34%
-> (Safe preview: R code shown below but not executed.)
-
-**📌 Get the actual number:** Say **"please compute directly"** — the assistant sends the request to the cloud coze R engine and returns the real result (see Section 4, "Safe Preview").
-
-### Example 2 · Effect size conversion
-**You say:**
-> Convert Cohen's d = 0.8 to logOR
-
-**Assistant replies (sketch):**
-> ✅ d = 0.8 → logOR ≈ 1.45 (SE ≈ 0.38), based on logOR = d × π/√3
-
-### Example 3 · Heterogeneity + subgroup
-**You say:**
-> I did a continuous meta with 8 studies, SMD pooled, but I² is high — I want to subgroup by region
-
-**Assistant replies (sketch):**
-> ✅ 8 studies, SMD = 0.42 (95%CI: 0.15–0.69), I² = 78%
-> Subgroup by region:
-> - Asia (k=4): SMD = 0.55, I² = 45%
-> - Euro-US (k=4): SMD = 0.28, I² = 62%
-> - Between-group Q = 4.12, p = 0.04
-
-### Example 4 · Complex: Network meta with multiple decisions (popup menu)
-**You say:**
-> I want to do a network meta with 4 interventions, but I haven't decided whether to use frequentist or Bayesian, and I'm not sure if I should include dose-response
-
-**Assistant replies (sketch):**
-> 4 interventions clear. Two key choices to clarify:
->
-> **① Which analysis framework?**
-> - (a) Frequentist — `netmeta`, inverse-variance based, good for consistent networks
-> - (b) Bayesian — `gemtc` (JAGS) or `multinma` (Stan) **local only**（coze 端为已知环境限制，无 root 无法装 JAGS，云端请用 (a) netmeta）；`bayesmeta` 支持贝叶斯配对比较，本地可用
->
-> **② Include dose-response?**
-> - (a) No — pure pairwise comparison network
-> - (b) Yes — needs dose-effect parameters, Bayesian framework preferred
->
-> **③ Can't decide?** → Say "explain the differences between these choices in detail" and the assistant explains first, then lets you decide
-
-**📌 Note:** When you've **named the test type but are stuck on "which option / design family"**, the assistant **pops a routing menu** to confirm step by step — instead of deciding for you or dumping the full 49-test menu. The menu also offers an "explain the differences" option — when you're unsure, it explains before you decide.
-
-### Example 5 · Vague: Not sure which model (grill-me)
-**You say:**
-> I want to do a meta-analysis but I'm not sure which model to use — help me figure it out
-
-**Assistant replies (sketch):**
-> Sure — let's pin down your needs first; a few key questions will locate the right model:
-> 1. What type is your **primary endpoint**? — continuous (e.g. SMD) / binary (e.g. OR) / survival (HR) / single-group rate / other?
-> 2. Is it a **two-group comparison or multi-group network**?
-> 3. Any **special dependency structure**? — multi-arm / multi-outcome / IPD / none
->
-> (After you answer, the assistant keeps probing until the model is locked, then computes — no full menu dumped on you.)
-
-**📌 Note:** When you say "not sure which model", the assistant uses **branch-by-branch probing** to clarify your needs, instead of dumping the full menu.
-
-### Example 6 · Systematic review workflow
-**You say:**
-> Help me generate a PRISMA flow diagram
-
-**Assistant replies (sketch):**
-> Sure, please provide:
-> - Records identified: ___
-> - Records screened: ___
-> - Records excluded: ___
-> - Full-text assessed: ___
-> - Full-text excluded (+ reasons): ___
-> - Studies included: ___
->
-> User: 520, 380, 140, 80, 52(20 no data, 18 wrong pop, 14 wrong design), 28
->
-> ✅ PRISMA flow diagram generated! [SVG output]
-
-### Example 7 · Topic selection: choose among candidate meta-analysis directions (upstream gate)
+### Example 1 · Topic selection: choose among candidate meta-analysis directions (upstream gate)
 **You say:**
 > I'm interested in SGLT2 inhibitors for renoprotection and cardiovascular benefit in chronic kidney disease (CKD), but I haven't decided which specific meta-analysis direction to pursue. Can you help me shortlist candidate directions?
 
@@ -144,6 +63,87 @@ Below are 7 real conversational examples ordered from simple to advanced. Each s
 > **Suggestion**: Candidate ① has the highest feasibility — start there. For ②, confirm ≥3 interventions and note the coze Bayesian limitation. The next step can be a Full Assessment (PICO decomposition + dedup search + PRISMA/AMSTAR-2 pre-check) to produce a topic report.
 
 **📌 Note:** When you have a direction but are unsure which specific meta to run, the assistant uses the topic-selection framework to produce **1–3 candidate directions + a 4-dim score + meta type**, instead of deciding for you or giving a single answer. This is the upstream gate (Topic Selection) before analysis — no R computation is invoked.
+
+### Example 2 · Two-group binary meta (most common)
+**You say:**
+> Combine the OR across these 5 binary studies:
+> Study A: experimental 30/100, control 20/100
+> Study B: experimental 45/120, control 30/100
+> ...
+
+**Assistant replies (sketch):**
+> ✅ 5 studies, random-effects (DL), OR = 1.52 (95%CI: 1.18–1.96), I² = 34%
+> (Safe preview: R code shown below but not executed.)
+
+**📌 Get the actual number:** Say **"please compute directly"** — the assistant sends the request to the cloud coze R engine and returns the real result (see Section 4, "Safe Preview").
+
+### Example 3 · Effect size conversion
+**You say:**
+> Convert Cohen's d = 0.8 to logOR
+
+**Assistant replies (sketch):**
+> ✅ d = 0.8 → logOR ≈ 1.45 (SE ≈ 0.38), based on logOR = d × π/√3
+
+### Example 4 · Heterogeneity + subgroup
+**You say:**
+> I did a continuous meta with 8 studies, SMD pooled, but I² is high — I want to subgroup by region
+
+**Assistant replies (sketch):**
+> ✅ 8 studies, SMD = 0.42 (95%CI: 0.15–0.69), I² = 78%
+> Subgroup by region:
+> - Asia (k=4): SMD = 0.55, I² = 45%
+> - Euro-US (k=4): SMD = 0.28, I² = 62%
+> - Between-group Q = 4.12, p = 0.04
+
+### Example 5 · Complex: Network meta with multiple decisions (popup menu)
+**You say:**
+> I want to do a network meta with 4 interventions, but I haven't decided whether to use frequentist or Bayesian, and I'm not sure if I should include dose-response
+
+**Assistant replies (sketch):**
+> 4 interventions clear. Two key choices to clarify:
+>
+> **① Which analysis framework?**
+> - (a) Frequentist — `netmeta`, inverse-variance based, good for consistent networks
+> - (b) Bayesian — `gemtc` (JAGS) or `multinma` (Stan) **local only**（coze 端为已知环境限制，无 root 无法装 JAGS，云端请用 (a) netmeta）；`bayesmeta` 支持贝叶斯配对比较，本地可用
+>
+> **② Include dose-response?**
+> - (a) No — pure pairwise comparison network
+> - (b) Yes — needs dose-effect parameters, Bayesian framework preferred
+>
+> **③ Can't decide?** → Say "explain the differences between these choices in detail" and the assistant explains first, then lets you decide
+
+**📌 Note:** When you've **named the test type but are stuck on "which option / design family"**, the assistant **pops a routing menu** to confirm step by step — instead of deciding for you or dumping the full 49-test menu. The menu also offers an "explain the differences" option — when you're unsure, it explains before you decide.
+
+### Example 6 · Vague: Not sure which model (grill-me)
+**You say:**
+> I want to do a meta-analysis but I'm not sure which model to use — help me figure it out
+
+**Assistant replies (sketch):**
+> Sure — let's pin down your needs first; a few key questions will locate the right model:
+> 1. What type is your **primary endpoint**? — continuous (e.g. SMD) / binary (e.g. OR) / survival (HR) / single-group rate / other?
+> 2. Is it a **two-group comparison or multi-group network**?
+> 3. Any **special dependency structure**? — multi-arm / multi-outcome / IPD / none
+>
+> (After you answer, the assistant keeps probing until the model is locked, then computes — no full menu dumped on you.)
+
+**📌 Note:** When you say "not sure which model", the assistant uses **branch-by-branch probing** to clarify your needs, instead of dumping the full menu.
+
+### Example 7 · Systematic review workflow
+**You say:**
+> Help me generate a PRISMA flow diagram
+
+**Assistant replies (sketch):**
+> Sure, please provide:
+> - Records identified: ___
+> - Records screened: ___
+> - Records excluded: ___
+> - Full-text assessed: ___
+> - Full-text excluded (+ reasons): ___
+> - Studies included: ___
+>
+> User: 520, 380, 140, 80, 52(20 no data, 18 wrong pop, 14 wrong design), 28
+>
+> ✅ PRISMA flow diagram generated! [SVG output]
 
 > 💡 **Tip:** Most analyses need only three things — effect size (or rate / HR) + α + power. Anything you omit is filled with sensible defaults. It's fine to be incomplete — the assistant will tell you what's missing.
 
@@ -268,6 +268,15 @@ A: Say **"help me convert my SPSS/Excel data to CSV"** — the assistant will re
 **Q: What if my data must stay confidential?**
 A: This skill sends only your **analysis parameters / summary statistics** (event counts, sample sizes, effect sizes) to the cloud coze R engine — it never touches your raw datasets or individual-patient records. If you still prefer data to stay on your machine, run the analysis **locally** (say "use local engine" / set `prefer="local"`): the same R engine runs on your computer and nothing leaves it. You can also ask for the full reproducible R code and run it yourself with your real data.
 
+**Q: What if I found an error in the result — how do I report it?**
+A: This skill follows the ct-base §20.3 bug-report workflow. If you suspect the result is wrong (or the engine errored), just say **"report a bug" / "上报问题" / "提交错误报告"**. The skill also **proactively asks** whether to report when it detects a likely defect (e.g. the engine errors or retries still fail) — at most **once per session**, and you can always decline. Either way, the assistant will:
+1. **Propose a sanitized report** (11-field whitelist: skill / skill_version / test / error_type / error_code / engine_status / description / locale / query_origin / session_hash / attempts — **no raw input values or personal data**, except the `description` field where you decide what to disclose, e.g. the algorithm/function used and the error message);
+2. **Show the full report text for your review** — you can add a problem description or correct anything before confirming;
+3. **Send after your explicit confirmation** — to the unified endpoint `https://ct-bugreport.coze.site/run` (if this session called coze) or saved locally + emailed to the author (if purely local, data never leaves your machine);
+4. **Receive an acknowledgment** — including whether a previously submitted report from your source has already been fixed (with the fix note) or is still pending.
+
+You stay in full control: the report is shown to you **before** anything is sent, and nothing is transmitted without your explicit "send" confirmation.
+
 ## 4. Safe Preview
 
 - **Default behavior:** The skill only **builds and shows the analysis request (the task / data / params / figure envelope), but does not send it** — you can inspect the plan first, then let it run once you're confident.
@@ -280,12 +289,12 @@ A: This skill sends only your **analysis parameters / summary statistics** (even
 
 ## Example Test Records (§16.6 gate)
 
-> Tested 2026-08-20 per ct-base §16.6, one example at a time: **7/7 passed**. Computation examples 1/2/3/6 returned real `stats` + `figures` + `repro` from the coze endpoint (`https://ct-meta.coze.site/run`); behavioral examples 4/5/7 were verified against SKILL.md Triage (§5.2) and `references/interactive_menu.md` / `references/topic-selection.md`. Full report: `meta_readme_test/README_EXAMPLES_TEST_REPORT.md`.
+> Tested 2026-08-20 per ct-base §16.6, one example at a time: **7/7 passed**. Computation examples 2/3/4/7 returned real `stats` + `figures` + `repro` from the coze endpoint (`https://ct-meta.coze.site/run`); behavioral examples 1/5/6 were verified against SKILL.md Triage (§5.2) and `references/topic-selection.md` / `references/interactive_menu.md`. Full report: `meta_readme_test/README_EXAMPLES_TEST_REPORT.md`.
 
 | Example | Type | Status |
 |---|---|---|
-| 1 Binary OR pairwise / 2 Effect-size conversion / 3 SMD+subgroup / 6 PRISMA flow | Computation (coze) | ✅ Passed |
-| 4 Network-meta routing menu / 5 Vague grill-me / 7 Candidate-direction selection | Behavior (routing / topic) | ✅ Passed |
+| 1 Candidate-direction selection / 5 Network-meta routing menu / 6 Vague grill-me | Behavior (topic / routing) | ✅ Passed |
+| 2 Binary OR pairwise / 3 Effect-size conversion / 4 SMD+subgroup / 7 PRISMA flow | Computation (coze) | ✅ Passed |
 
 ## 5. Advanced Reference (moved to a separate file)
 
@@ -293,7 +302,7 @@ CLI examples, bidirectional solving, curve mode, core formulas, system requireme
 
 ---
 
-**Version**: v1.12.2 | **License**: MIT | **Authors**: medstatstar, phoe-zip
+**Version**: v2.0.0 | **License**: MIT | **Authors**: medstatstar, phoe-zip
 
 For feature requests, bug reports, or other feedback, please contact the author directly at medstatstar@gmail.com (Wintone Zhang / 张文彤).
 

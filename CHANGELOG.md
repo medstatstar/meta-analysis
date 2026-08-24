@@ -4,6 +4,39 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.0.0] — 2026-08-22 — 升级为云端模式 + 补齐 bug report 接入
+
+### Added / 云端模式全面测试（ct-update 模式 B，按功能点 2 案例扩展）
+- **模式 B 联调（ct-meta.coze.site/run 线上端点）**：按"每个功能点覆盖、每 task 至少 1 标准 + 1 变体"原则，将 `adapters/coze_cases/` 从 10 例扩展至 **46 个案例**，覆盖 contract §3 全部 **24 个 task 类型**（pairwise_meta / single_group_meta / subgroup_analysis / metareg / forest_plot / funnel_plot / labbe_plot / baujat_plot / radial_plot / bubble_plot / influence / trimfill / nma / nma_rank / survival_meta / dose_resp / diagnostic_meta / bayesian_pairwise / gosh / tsa / power / rob2 / esc / prisma_flow / prisma_checklist / grade / metainc / nnt / leave_one_out / cumulative_meta / selmodel / rve_meta / multilevel_meta / multivariate_meta）+ 维度变体（locale 中英 / colmap 自定义 / 多图组合）。
+- **结果**：**44/46 通过**（含 2 个预期 `warn`：Egger 检验偏倚提示，属 Quality Gate 正常非阻断输出）；**2 个失败 = dose_resp（case19 continuous / case45 binary），属 R 端 `run_dose_resp` dosresmeta NSE 集成缺陷，待修复 R 端代码**（见 Pending）。其余 44 例功能完整。
+
+### Fixed / bug report 接入缺漏（ct-base §20.3.5）
+- **问题**：`adapters/config.json` 的 `auto_approve_endpoints` 仅含 `https://ct-meta.coze.site/run`，**缺少**统一 bug-report 端点 `https://ct-bugreport.coze.site/run`，违反 §20.3.5（每个技能须将该端点列入自动批准白名单）。
+- **修复**：`auto_approve_endpoints` 追加 `https://ct-bugreport.coze.site/run`。
+- **已合规项确认**：`adapters/bug_report.py` 已含 §20.3.7 的 `confirm_thanks()` / `build_followup()` / `parse_history()`；SKILL.md §20.3 章节与 README §5/§20.3 出站披露均已就位。
+
+### Pending / 待确认（非阻断，记入发布报告）
+- **clawhub_security_audit MEDIUM**：SKILL.md 第 91 行 + `scripts/i18n.py` 读取 `~/.workbuddy/MEMORY.md` 用于 R config（用户已授权、仅取 R 相关键、不发送个人内容）。审计认为超出技能窄范围，建议移除或收窄。属预存在设计，改动可能影响 R 配置功能，标记待用户确认，未擅改。
+- **dose_resp R 端缺陷（模式 B 抓出，2026-08-23，**已修复见 2.0.1**）**：`adapters/coze_project/src/r_engine/advanced_functions.R` 的 `run_dose_resp` 用 dosresmeta 公式法 `(cases/n) ~ dose`（LHS 表达式），触发 2.2.0 内部 bug（`unique() applies only to vectors` / `'x' must have positive length`；as.name/字符串列名均不行）。case19（continuous）与 case45（binary）失败。**非测试设计错误，是技能 R 端代码缺陷**，修复见 2.0.1（v4：预计算效应量列 + 裸列名 + 参考组 se=NA + type factor，R 4.6.1 实测通过）。
+
+---
+
+## [2.0.1] — 2026-08-23 — dose_resp 崩溃修复（v4：dosresmeta 官方写法，R 4.6.1 实测验证）
+
+### Fixed / coze 端 dose_resp「死机」——R 进程 segfault（根因链完整闭环）
+- **第一层根因（文件版本错位）**：`run_task.R` dose_resp 分支已改**字符串列名**，但 `advanced_functions.R` 的 `run_dose_resp` 内部仍用 **`as.name()`** 转符号 → dosresmeta 内部崩溃。本机实测 as.name 版 exit=139 Segfault（进程崩溃 → Python 侧等不到 result → coze 画布卡死）。
+- **第二层根因（dosresmeta 2.2.0 正确用法，R 4.6.1 实测推翻 v2 字符串方案）**：字符串列名也会崩（`non-numeric argument to binary operator`，因 dosresmeta 对独立参数 `eval(mf.id, data)` 会把字符串当字面量）。**正确写法**：
+  1. formula LHS 用**预计算效应量列**（binary: `logrr=log(cases/n)`；continuous: `yi`），不能用 `(cases/n) ~ dose` 表达式（触发 `unique() applies only to vectors` / `'x' must have positive length`）；
+  2. 独立参数 id/cases/n/sd/se 传**裸列名**（写入 df 后传 `_id_f`/`_cases`/`_n`/`_se_use` 等短名列），不传字符串也不传 as.name；
+  3. binary 参考剂量组（dose 最小）**se 置 NA**（Greenland-Longnecker 约定），type 转 factor；
+  4. covariance: binary=`"gl"`（需 cases/n），continuous=`"md"`（需 sd/n）。
+- **修复**：`run_dose_resp` 重写为 v4（预处理 df → 短名列 → 官方调用）；`run_task.R` dose_resp 分支 plot 条件对齐（plots 空也默认出图）。
+- **验证（R 4.6.1 + 干净 PATH，完整复现 coze 环境）**：case45 binary `status=ok figures=1`（coef=-0.0191, p<0.0001, SVG 8535 字符）；case19 continuous `status=ok figures=1`（coef=0.0145, p<0.0001）；pairwise_meta 回归 k=5 I2=0% OR=1.221 无破坏。
+- **case 数据修正**：case19/45 原"每剂量点一个研究"（S1-S5）是错误结构，dosresmeta 需**单研究×多剂量点**——已统一 id 为 S1。
+- **交付**：`meta-analysis-coze-full-v4.zip`（完整工程 113 文件 + 修正 case19/45）。
+
+---
+
 ## [1.12.2] — 2026-08-20
 
 ### Fixed / 部署环境候选列表过时（libicu76）
