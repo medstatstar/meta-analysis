@@ -1,6 +1,6 @@
 # meta-analysis
 
-[🇨🇳 中文 (Chinese)](./README_zh-CN.md) | [🇺🇸 English (Current)](#)
+- **English guide** → [README.md](https://github.com/medstatstar/meta-analysis/blob/main/README.md) · **中文指南** → [README_zh-CN.md](https://github.com/medstatstar/meta-analysis/blob/main/README_zh-CN.md)
 
 <div align="center">
   <img src="assets/icon.svg" width="240" height="240" alt="meta-analysis logo"/>
@@ -107,7 +107,7 @@ Below are 7 real conversational examples. **Example 1 is the upstream Topic Sele
 > - (a) No — pure pairwise comparison network
 > - (b) Yes — needs dose-effect parameters, Bayesian framework preferred
 >
-> **③ Can't decide?** → Say "explain the differences between these choices in detail" and the assistant explains first, then lets you decide
+> **③ Can't decide?** → say "explain the differences between these choices in detail", and I'll clarify the clinical/statistical meaning before you choose
 
 **📌 Note:** When you've **named the test type but are stuck on "which option / design family"**, the assistant **pops a routing menu** to confirm step by step — instead of deciding for you or dumping the full menu. The menu also offers an "explain the differences" option — when you're unsure, it explains before you decide.
 
@@ -316,7 +316,7 @@ CLI examples, bidirectional solving, curve mode, core formulas, system requireme
 
 ---
 
-**Version**: v2.0.0 | **License**: MIT | **Authors**: medstatstar, phoe-zip
+**Version**: v2.1.0 | **License**: MIT | **Authors**: medstatstar, phoe-zip
 
 For feature requests, bug reports, or other feedback, please contact the author directly at medstatstar@gmail.com (Wintone Zhang / 张文彤).
 

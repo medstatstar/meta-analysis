@@ -2,6 +2,23 @@
 
 > **meta-analysis** is a conversational skill: you tell it what you want in natural language, and it guides data input → runs the right model (default: cloud coze R engine) → emits editable vector figures + structured results. Analysis data is sent to the cloud engine per the outbound disclosure (see README).
 
+> **📌 框架归属 / Framework**：本文件是 **「计算型交互框架（Type-Compute）」** 的范式实现。**meta-analysis 与 ct-samplesize 同属计算型，与走 `search_menu.md` 的 ct-literature / ct-registry / ct-safety（检索型）不是一伙**——请勿把检索型的「确认门 / 关键字门」强加进来。
+
+---
+
+## 0. 框架归属与状态机 / Framework & State Machine
+
+本技能是 **Type-Compute（计算型 · 描述即执行）** 的原型实现，核心契约：
+
+- **描述即自动执行**：你说清分析需求即返回真实数字/图形，不强制确认门（仅昂贵/不可逆/出域计算给轻量预览）。
+- **两层状态**：数据集可落盘（`output/data_backup.csv`）；**分析 config（model / method / measure / byvar / task）+ 列映射（yi / sei / slab）仅在线程内**，不落盘 → 必须靠回显块 + merge_spec 兜底。
+- **状态机（计算型）**：Simple→描述即执行（不弹菜单）；Vague→grill-me 逐分支锁模型；Complex→自动执行 + 能力路由菜单（卡在"哪个设计族"时）。
+- **跨轮连续性**：每次分析后回显 `## 当前分析设定：` 块，追问只改变化字段（详见下文 §6）。
+
+> 下方第 1–6 节是 **meta-analysis 专属的真实对话示例与场景索引**，演示如何套用该框架。
+>
+> **注**：本文件已内联全部运行所需规则（回显块、列映射继承、解释差异入口均见下文 §1–§6），运行自包含、不依赖外部底座文档。
+
 ---
 
 ## 1. Six Real Conversational Examples (Simple → Advanced)
@@ -60,9 +77,9 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 > - (a) 不做 — 纯两两比较网络
 > - (b) 做 — 需要剂量-效应参数，贝叶斯框架更合适
 >
-> **③ 拿不准？** → 说"详细解释这些选择的差异"，我先讲清再让你决定
+> **③ 还拿不准？** → 说「详细解释这些选择之间的差异」，我先讲清临床与统计含义再让你决定
 
-**📌 说明：** 当你已点名能力但卡在"哪个选项/设计族"时，助手**弹出路由菜单**逐步确认，而非替你拍板或甩全量菜单。菜单含"详细解释差异"入口——拿不准时先讲清再决定。
+**📌 说明：** 当你已点名能力但卡在"哪个选项/设计族"时，助手**弹出能力路由菜单**逐步确认，而非替你拍板或甩全量菜单。菜单含统一「解释差异」入口（见本文 §5）——拿不准时先讲清再决定。
 
 ---
 
@@ -246,6 +263,33 @@ CLI 调用示例、双向求解模式、曲线模式、核心公式推导、系�
 
 ---
 
-**Version**: v1.7 | **License**: MIT | **Authors**: medstatstar, phoe-zip
+## 6. 跨轮连续性实战样板（多轮追问无损继承）
+
+下面是一段**真实多轮对话**，演示每次结果后的回显块如何成为"下一轮的上下文"——LLM 读最近块、只改变化字段、列映射零丢失。
+
+**第 1 轮 · 你**：合并这 5 项二分类研究的 OR（数据已落盘 `output/data_backup.csv`）。
+**助手**：✅ 随机效应 (REML)，OR = 1.52 (95%CI 1.18–1.96)，I² = 34%
+`## 当前分析设定：data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | byvar=— | task=forest`
+
+**第 2 轮 · 你**：按 age 做个亚组。
+**助手**：✅ 亚组（age）：<50 岁 OR=1.31 (1.02–1.69)；≥50 岁 OR=1.88 (1.40–2.53)；组间 Q=3.94, p=0.047
+`## 当前分析设定：data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | byvar=age | task=subgroup`
+> 本轮回显块**只读第 1 轮块**、把 `task←subgroup` + `byvar←age`，**列映射 yi/sei/slab 与 model/method/measure 原样继承**——未重贴数据、未丢列映射。
+
+**第 3 轮 · 你**：去掉效应量最大的那篇，做敏感性分析。
+**助手**：✅ leave-one-out：剔除 study-C 后 OR=1.47 (1.13–1.91)，结论稳健
+`## 当前分析设定：data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | byvar=age | task=sensitivity`
+> `task←sensitivity`；byvar 仍=age（敏感性分析保留原亚组框架）；其余继承。注意**未重置 byvar**——敏感性在原亚组内做。
+
+**第 4 轮 · 你**：那把年龄当连续变量做元回归看看。
+**助手**：✅ 元回归（age 连续）：斜率 β=0.012/岁 (95%CI 0.003–0.021)，p=0.009，年龄可解释部分异质性
+`## 当前分析设定：data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | byvar=age | task=metareg`
+> `task←metareg`；byvar=age 已是连续变量，直接复用；列映射零丢失。
+
+**⚠️ 反例（必须避免）**：第 4 轮若助手忘了读第 1 轮块、漏带 `yi=eff`，coze 端会把错误的列当效应量 → OR 数值"算出来了"但**静默错配**，统计结论直接翻车。回显块 + 读最近块是唯一的本地防线（见本文 §6 的列映射继承规则）。
+
+---
+
+**Version**: v2.1.0 | **License**: MIT | **Authors**: medstatstar, phoe-zip
 
 如有功能改进建议、Bug 报告或其他反馈，请直接联系作者：medstatstar@gmail.com（张文彤 / Wintone Zhang）。

@@ -1,6 +1,6 @@
 # meta-analysis 技能
 
-[🇬🇧 English (英文)](./README.md) | [🇨🇳 中文 (当前)](#)
+- **English guide** → [README.md](https://github.com/medstatstar/meta-analysis/blob/main/README.md) · **中文指南** → [README_zh-CN.md](https://github.com/medstatstar/meta-analysis/blob/main/README_zh-CN.md)
 
 <div align="center">
   <img src="assets/icon.svg" width="240" height="240" alt="meta-analysis 图标"/>
@@ -107,9 +107,9 @@ meta-analysis 是**对话式技能**：用自然语言告诉助手你要做什�
 > - (a) 不做 — 纯两两比较网络
 > - (b) 做 — 需要剂量-效应参数，贝叶斯框架更合适
 >
-> **③ 拿不准？** → 说「详细解释这些选择的差异」，我先讲清再让你决定
+> **③ 还拿不准？** → 说「详细解释这些选择之间的差异」，我先讲清临床与统计含义再让你决定
 
-**📌 说明：** 当你已点名能力但卡在「哪个选项 / 设计族」时，助手**弹出路由菜单**逐步确认，而非替你拍板或甩全量菜单。菜单含「详细解释差异」入口——拿不准时先讲清再决定。
+**📌 说明：** 当你已点名能力但卡在「哪个选项 / 设计族」时，助手**弹出能力路由菜单**逐步确认，而非替你拍板或甩全量菜单。菜单含统一「解释差异」入口（见本文 §5）——拿不准时先讲清再决定。
 
 ### 示例 6 · Vague：不确定用哪种模型（grill-me）
 **你说：**
@@ -318,7 +318,7 @@ CLI 调用示例、双向求解模式、曲线模式、核心公式推导、系�
 
 ---
 
-**版本**: v2.0.0 | **许可**: MIT | **作者**: medstatstar, phoe-zip
+**版本**: v2.1.0 | **许可**: MIT | **作者**: medstatstar, phoe-zip
 
 如有功能改进建议、Bug 报告或其他反馈，请直接联系作者：medstatstar@gmail.com（张文彤 / Wintone Zhang）。
 

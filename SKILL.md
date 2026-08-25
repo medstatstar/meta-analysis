@@ -3,7 +3,7 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: 医学Meta分析 / Meta Analysis
-version: 2.0.5
+version: 2.1.0
 summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
 license: MIT
 description: "基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。 / Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code."
@@ -30,14 +30,14 @@ triggers:
 permissions:
   scope: "user-space-only"
   network: "optional"
-  network_note: "Default compute path is the coze cloud R engine (requires network). A fully local R fallback (adapters/coze_project) is available ONLY if the user installs R + 14 packages locally — so network is optional only when local R is present; most end-users run via coze. Network is also touched if the user explicitly requests PDF full-text download from DOI/PMID lists (external services), which requires opt-in confirmation of the target list."
+  network_note: "Default compute path is the coze cloud R engine (requires network). A fully local R fallback (a separate local-R backend) is available ONLY if the user installs R + 14 packages locally — so network is optional only when local R is present; most end-users run via coze. Network is also touched if the user explicitly requests PDF full-text download from DOI/PMID lists (external services), which requires opt-in confirmation of the target list."
   filesystem: "writes only to the current working directory (meta_analysis/ and output/ report artifacts: generated .R scripts, .svg/.png figures, .csv tables); otherwise read-only"
   data: "By default, analysis parameters / summary statistics (event counts, sample sizes, effect sizes) are transmitted to the coze cloud R engine for computation, with a local-R fallback when the endpoint is unavailable or the user opts for local mode. Raw datasets / individual-patient records are only transmitted if the user explicitly chooses to send IPD to the cloud; otherwise processing stays local. R package installation is never performed by this skill — if the user installs packages, that is a manual action in their own R environment."
 metadata:
   {
     "openclaw": { "emoji": "📊", "icon": "assets/icon.svg" },
     "authors": ["medstatstar", "phoe-zip"],
-    "version": "2.0.5",
+    "version": "2.1.0",
     "license": "MIT",
     "homepage": "https://github.com/medstatstar/meta-analysis",
     "tags": ["meta-analysis", "systematic-review", "clinical-trials", "R", "biostatistics", "evidence-based-medicine", "forest-plot", "network-meta-analysis", "bayesian", "metafor", "meta", "netmeta", "gemtc", "revman", "robumeta", "clubSandwich", "esc", "dosresmeta", "mada", "metagear", "forestploter"],
@@ -47,7 +47,11 @@ metadata:
 # Meta-Analysis
 
 > R-based comprehensive meta-analysis. Every module ships reproducible R code.
-> **Language**: output auto-switches with the OS locale (zh / en); force-switch via prompt. See `references/language_policy.md` and the bilingual READMEs ([EN](https://github.com/medstatstar/meta-analysis/blob/main/README.md) / [ZH](https://github.com/medstatstar/meta-analysis/blob/main/README_zh-CN.md)).
+
+## Language
+
+- **English guide** → [README.md](https://github.com/medstatstar/meta-analysis/blob/main/README.md) · **中文指南** → [README_zh-CN.md](https://github.com/medstatstar/meta-analysis/blob/main/README_zh-CN.md)
+- Bilingual auto-switch: the answer language follows the user's question language (English question → English answer, Chinese question → Chinese answer).
 
 ## 1. Triage — First step: classify the user's intent
 
@@ -57,7 +61,7 @@ On first user message, classify into one of three:
 |---|---|---|
 | **Simple** | Single, specific intent (e.g., "pool OR from these 5 studies") | Reply directly, no menu |
 | **Complex** | Multi-decision / multi-parameter (e.g., "network meta with 3 interventions, subgroup, check inconsistency") | Present level-1 routing menu incl. "③ Can't decide? → explain the differences between these choices" entry; full menu → `references/interactive_menu.md` |
-| **Vague** | Unclear what user wants (e.g., "I need meta-analysis help") | Grill-me style branch questions, 1–3 per round; "无选题/可行性评估" → **Topic Selection** (section 2.2) |
+| **Vague** | Unclear what user wants (e.g., "I need meta-analysis help") | Grill-me style branch questions, 1–3 per round; "no topic / feasibility check" → **Topic Selection** (section 2.2) |
 
 If unsure between Simple and Complex → give short reply + optional expansion hint.
 
@@ -68,7 +72,7 @@ Vague → Level 1 menu (7 categories). Select → Level 2 with data-format hints
 > **Other formats?** Install `@skill:statdata-transfer` for 50+ format conversion.
 
 ### 2.2 Topic Selection (upstream gate)
-Trigger: user wants a meta-analysis but has no topic ("我想做 Meta 但没选题") / feasibility check / "被拒为重复了" (rejected as duplicate) / pre-PROSPERO audit → `references/topic-selection.md`. Two paths:
+Trigger: user wants a meta-analysis but has no topic ("I want to do a meta-analysis but have no topic") / feasibility check / "rejected as a duplicate" / pre-PROSPERO audit → `references/topic-selection.md`. Two paths:
 - **Quick** (≤30 min): 1-page decision card — 4-dim scores (clinical/feasibility/data/novelty, 0–5 each, 0–20, any ≤2 = veto) + screen verdict. No final go/no-go.
 - **Full** (5 stages + gates): PICO (`pico-guide.md`) → scoring + cross-checks R1–R6 → dedup (`dedup-search.md`: PROSPERO→Cochrane→PubMed; non-English opt-in) → PRISMA 2020/AMSTAR-2 (`compliance-precheck.md`) → 11-section report via `python scripts/generate_topic_report.py input.json output.md|html` (template + PROSPERO mapping → `topic-report-template.md` / `prospero-mapping.md`).
 - ⚠️ Dedup searches run ONLY on user opt-in; otherwise deliver query templates.
@@ -105,6 +109,45 @@ Module → R-package/function matrix (single-group / pairwise / effect-size / fo
 
 figure_mode (`svg_inline` / `png_file`) and render-timing thresholds (implementation details) → `references/ADVANCED.md`.
 
+### 5.1 Cross-turn Continuity (mandatory)
+
+> **Runtime is stateless.** Both the coze and local-R engines are stateless: each `run_analysis.py` call re-supplies `task` + `data` + `params`, and the engine never persists the analysis config or column mapping. Semantic drift (model / method / measure changing silently between rounds) = silently inconsistent results — the highest-risk failure mode in this prompt-driven flow.
+
+When the user follows up across rounds (subgroup / sensitivity / meta-regression / NMA / diagnostic meta / TSA …), the prior round's analysis spec MUST be inherited losslessly — **never rely on the LLM's memory alone**.
+
+#### Cross-turn spec (minimal unit maintained inside the conversation thread)
+```
+{
+  "task": "forest",                       # analysis task (forest/sensitivity/subgroup/metareg/nma/diagnostic/tsa…)
+  "data_path": "output/data_backup.csv",  # dataset pointer (persisted on disk; only the path is inherited across rounds, not the data body)
+  "measure": "OR",                        # R sm (OR/RR/SMD/MD/HR…)
+  "model": "random",                      # fixed / random
+  "method": "REML",                       # estimation method (DL/REML/HE/SJ…)
+  "yi": "eff", "sei": "se", "slab": "study",  # column mapping: dataset columns → effect size / SE / study label
+  "byvar": "—",                           # subgroup / meta-reg variable column (— if none)
+  "...": "other params passed through"    # subgroup / reference_group / k_min etc., vary by task
+}
+```
+
+#### Three hard rules
+1. **Echo a "Current analysis settings" block after every analysis (mandatory, placed after this round's numbers/figures):**
+   `## Current analysis settings: data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | byvar=— | task=forest`
+   No field may be omitted (use `—` as placeholder). This lets the LLM locate the "most recent settings block" via the `## Current analysis settings:` prefix when the user follows up.
+2. **On follow-up, change only the changed fields:** the LLM MUST first locate the most recent `## Current analysis settings:` block in the conversation, read all its fields, and override only what changed (e.g. `task←subgroup / byvar←age`, `task←sensitivity`). **Column mapping (yi/sei/slab) and model/method/measure are inherited verbatim** — dropping the column mapping = effect-size mismatch = silently inconsistent results (a statistical-conclusion-level defect, the highest-risk point).
+3. **Dataset is inherited by pointer, not re-transmitted:** `data_backup.csv` is already on disk. On follow-up the LLM re-reads the CSV via `data_path` (to get column names + rows); the column mapping (yi/sei/slab) is inherited from the settings block (the CSV carries only column names, no "which column is the effect size" semantic annotation, so it cannot be inferred by reading the CSV).
+
+#### Deterministic fallback (recommended, not optional)
+When worried about dropping config / column mapping, use `scripts/merge_spec.py` (bundled in this skill's `scripts/`) for a deterministic merge:
+prior-round spec JSON (`prev`) + this-round partial (`cur`) via stdin → complete merged spec; state passes only through the conversation thread, never persisted.
+```bash
+echo '{"prev":{"task":"forest","data_path":"output/data_backup.csv","measure":"OR","model":"random","method":"REML","yi":"eff","sei":"se","slab":"study","byvar":"—"},"cur":{"task":"subgroup","byvar":"age"},"required":["task","data_path","measure","model","method","yi","sei","slab"]}' \
+  | python scripts/merge_spec.py
+# → merged inherits all fields, byvar overridden to age; if both prev/cur miss yi/sei/slab → missing_required error
+```
+Field inheritance / reset conventions when switching `task` (forest→subgroup / →metareg / →nma / →diagnostic / →tsa) → `references/interactive_menu.md` §6.4.
+
+> Full few-shot continuity samples (with each round's echo block) → `references/interactive_menu.md` §6.
+
 ## 6. Security & scope
 
 **Execution model**:
@@ -126,16 +169,16 @@ figure_mode (`svg_inline` / `png_file`) and render-timing thresholds (implementa
 ## 7. User-uploaded files
 
 Two upload types, two paths:
-1. **Structured data files (`.csv` / `.xlsx` / `.xls`)** → **Type 4 data template** (`references/data_templates.md`: encoding detection / zh-en column matching / missing-value detection / row-count confirmation). These are analysis data — §6.7 doc→md conversion does not apply; §6.7.2 transparency and §6.7.3 confidentiality boundaries still apply.
-2. **Document / template files (`.docx` / `.pptx` / `.pdf` / `.doc`)** → convert to md/text first, then extract study data (§6.7.1 layered strategy):
+1. **Structured data files (`.csv` / `.xlsx` / `.xls`)** → **Type 4 data template** (`references/data_templates.md`: encoding detection / zh-en column matching / missing-value detection / row-count confirmation). These are analysis data — the doc→md conversion tier does not apply; the pre-conversion transparency notice and confidentiality boundary still apply.
+2. **Document / template files (`.docx` / `.pptx` / `.pdf` / `.doc`)** → convert to md/text first, then extract study data (layered conversion strategy):
    - `.docx` / `.pptx` → `python scripts/office_to_md.py <file>` (shared converter)
    - `.pdf` → environment `pdf` skill (text extraction; scanned pages need OCR); if absent → prompt the user to install it, never write a custom PDF parser
    - `.doc` (legacy OLE) → prompt to install word-reader / antiword
    - Image/scanned-only (no text layer) → prompt the user to provide a text version
 
-**🔔 Pre-conversion user notice (§6.7.2, show before converting)** — bilingual copy (auto-switch by locale). EN: `⚠️ All uploaded documents will be converted to md format. PPT conversion can lose a lot of information (images, layout, animations, charts, etc.). We recommend converting to md yourself and checking the content first.`
+**🔔 Pre-conversion user notice (show before converting)** — bilingual copy (auto-switch by locale). EN: `⚠️ All uploaded documents will be converted to md format. PPT conversion can lose a lot of information (images, layout, animations, charts, etc.). We recommend converting to md yourself and checking the content first.`
 
-**Confidentiality (§6.7.3)**: the skill **never proactively judges/blocks** upload confidentiality — documents convert and data reads as usual; whether it leaves the machine is the user's decision. Content sent to coze is disclosed on first outbound; **whether IPD and other individual data goes to the cloud is the user's call**.
+**Confidentiality:** the skill **never proactively judges/blocks** upload confidentiality — documents convert and data reads as usual; whether it leaves the machine is the user's decision. Content sent to coze is disclosed on first outbound; **whether IPD and other individual data goes to the cloud is the user's call**.
 
 **Figure format (2026-08-20 tightened)**: the engine always returns SVG (adapter forces `figure.format="svg"`, overriding even a png request); PNG is always converted by the local presentation layer.
 

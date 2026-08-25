@@ -20,7 +20,7 @@
   "action": "report",
   "report": {
     "skill": "meta-analysis",
-    "skill_version": "1.12.2",
+    "skill_version": "2.1.0",
     "test": "survival",
     "error_type": "engine_error",
     "error_code": "R_ENGINE_ERROR",

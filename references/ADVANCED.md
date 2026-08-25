@@ -224,4 +224,4 @@ meta-analysis/
 
 ---
 
-**Version**: v1.7 | **License**: MIT | **Authors**: medstatstar, phoe-zip
+**Version**: v2.1.0 | **License**: MIT | **Authors**: medstatstar, phoe-zip

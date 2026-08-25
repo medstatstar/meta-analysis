@@ -4,6 +4,25 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.1.0] — 2026-08-25 — 跨轮上下文交互能力完善 + 发布自包含修复（ct-base 模式 A / Type-Compute）
+
+### Fixed / 发布自包含（P0-2）
+- **`merge_spec.py` 注入发布包**：`ct-base/scripts/publish_inject.py` 的 `SHARED_ASSETS` 清单补 `scripts/merge_spec.py`，发布时注入 `meta-analysis/scripts/merge_spec.py`；SKILL.md §5.1 命令与描述改为相对路径 `scripts/merge_spec.py`（不再悬空引用 `ct-base/scripts/`，符合 AGENTS §5 发布后不假设 ct-base 存在）。
+- **`ct-base/references/*` 悬空引用加注**（P1）：SKILL.md §5.1 声明"开发底座文档、发布包不含、关键规则已内联"，消除用户/审阅者困惑。
+- **版本号统一**：SKILL frontmatter + metadata + README（中/英）+ interactive_menu/ADVANCED + bug-report 示例统一为 2.1.0。
+
+### Added / 跨轮连续性协议（发布前完善，沿用 2.0.6 条目）
+- **SKILL.md §5.1 升级为可操作协议**：定义跨轮 spec 字段集（task/data_path/measure/model/method/yi/sei/slab/byvar + params 透传）、回显块强制格式与位置、数据集指针继承、列映射显式继承（最高风险点：漏带 = 效应量错配 = 结论级静默不一致）、task 切换字段规则；`merge_spec.py` 从「可选」提为「推荐」并给调用范式。
+- **interactive_menu.md 新增 §6 多轮连续性实战样板**：四轮 few-shot（forest→subgroup→sensitivity→metareg），每轮回显块演示「读最近块、只改变化字段、列映射零丢失」；含漏带 `yi=eff` 导致静默错配反例。
+- **ct-base 回写（家族标准）**：`compute_menu.md` 补 §6.3（数据集指针继承）/ §6.4（列映射与 task 切换字段规则）；`continuity.md` §1.4 加交叉指针；`continuity_lint.py` 已验证 `meta-analysis` COMPLIANT。
+
+### Added / 跨轮连续性协议（发布前完善）
+- **SKILL.md §5.1 升级为可操作协议**：定义跨轮 spec 字段集（task/data_path/measure/model/method/yi/sei/slab/byvar + params 透传）、回显块强制格式与位置、数据集指针继承、列映射显式继承（最高风险点：漏带 = 效应量错配 = 结论级静默不一致）、task 切换字段规则；`merge_spec.py` 从「可选」提为「推荐」并给调用范式。
+- **interactive_menu.md 新增 §6 多轮连续性实战样板**：四轮 few-shot（forest→subgroup→sensitivity→metareg），每轮回显块演示「读最近块、只改变化字段、列映射零丢失」；含漏带 `yi=eff` 导致静默错配反例。
+- **ct-base 回写（家族标准）**：`compute_menu.md` 补 §6.3（数据集指针继承）/ §6.4（列映射与 task 切换字段规则）；`continuity.md` §1.4 加交叉指针；`continuity_lint.py` 已验证 `meta-analysis` COMPLIANT。
+
+---
+
 ## [2.0.5] — 2026-08-24 — 发布前合规整改（ct-base §16 检查 + 文档对齐）
 
 ### Changed / 发布前整改（2026-08-24 逐项落实）

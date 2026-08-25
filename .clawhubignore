@@ -1,4 +1,7 @@
 # ClawHub 发布排除（与 .gitignore 同步；镜像/引擎不随发布）
+# 嵌套 .git 元数据不得进入发布包
+.git
+
 adapters/coze_project/
 config/coze.dat
 __pycache__/
