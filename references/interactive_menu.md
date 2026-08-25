@@ -290,6 +290,6 @@ CLI 调用示例、双向求解模式、曲线模式、核心公式推导、系�
 
 ---
 
-**Version**: v2.1.0 | **License**: MIT | **Authors**: medstatstar, phoe-zip
+**Version**: v2.1.1 | **License**: MIT | **Authors**: medstatstar, phoe-zip
 
 如有功能改进建议、Bug 报告或其他反馈，请直接联系作者：medstatstar@gmail.com（张文彤 / Wintone Zhang）。

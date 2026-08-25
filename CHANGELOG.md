@@ -4,6 +4,13 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.1.1] — 2026-08-25 — 文档清理收尾 + 三平台统一发布
+
+### Changed
+- **版本号升 2.1.1**：SkillHub 已占用 2.1.0（早期发布），且 SkillHub 不允许同版本重发；为保持 GitHub / SkillHub / ClawHub 三平台版本一致，升到 2.1.1 统一发布。
+- **对外文档清理收尾**（本轮发布前）：SKILL.md §5.1 跨轮连续性协议全文英文化并删除 `ct-base/references/*` 死链；`## Language` 段改为符合 ct-base skeleton 标准表述（双语指针单行 + 核心语义句 "answer language follows the user's question language"）；`references/interactive_menu.md` 与 `README_zh-CN.md` 清除同类死链。
+- 版本号引用统一：SKILL frontmatter + metadata + README（中/英）+ interactive_menu/ADVANCED + bug-report 示例统一为 2.1.1。
+
 ## [2.1.0] — 2026-08-25 — 跨轮上下文交互能力完善 + 发布自包含修复（ct-base 模式 A / Type-Compute）
 
 ### Fixed / 发布自包含（P0-2）
