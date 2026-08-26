@@ -8,19 +8,21 @@
 
 ## 1. CLI Invocation Examples / CLI 调用示例
 
-### Meta-analysis via Coze workflow (R engine lives there)
+### Self-test & invocation (skill side)
 ```bash
-# From the skill side: self-test connectivity to the coze endpoint
+# Self-test connectivity to the coze endpoint
 python adapters/coze_client.py
 
-# Inside the coze project: inspect/review required R packages
-Rscript src/r_engine/setup_packages.R
-
-# Inside the coze project: run the dispatcher directly (task routed by JSON input)
-Rscript src/r_engine/run_task.R --input input.json --output output.json
+# Run an analysis (delegates to the coze R engine)
+python adapters/run_analysis.py ...
 ```
 
-### Direct R invocation
+> **Coze-project R-engine maintenance commands** (package setup, dispatcher run, module help,
+> etc.) are **not published here** — they live in `adapters/coze_project/DEV.md`
+> (git/clawhub-ignored, excluded from the published package). They are for coze-project
+> maintainers only.
+
+### Direct R invocation (reference only — computation runs on coze)
 ```r
 library(metafor)
 # Binary meta

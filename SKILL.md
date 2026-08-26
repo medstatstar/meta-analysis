@@ -3,12 +3,12 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: 医学Meta分析 / Meta Analysis
-version: 2.1.1
+version: 2.1.5
 summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
 license: MIT
 description: "基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。 / Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code."
 
-required_commands: [Rscript, python]
+required_commands: [python]
 invocable: true
 
 triggers:
@@ -30,9 +30,9 @@ triggers:
 permissions:
   scope: "user-space-only"
   network: "optional"
-  network_note: "Default compute path is the coze cloud R engine (requires network). A fully local R fallback (a separate local-R backend) is available ONLY if the user installs R + 14 packages locally — so network is optional only when local R is present; most end-users run via coze. Network is also touched if the user explicitly requests PDF full-text download from DOI/PMID lists (external services), which requires opt-in confirmation of the target list."
+  network_note: "All numerical computation runs in the coze cloud R engine (requires network). There is no local-R fallback — if coze is unreachable or unauthorized, the skill returns a structured error instead of silently computing locally. End users need no local R install. Network is also touched if the user explicitly requests PDF full-text download from DOI/PMID lists (external services), which requires opt-in confirmation of the target list."
   filesystem: "writes only to the current working directory (meta_analysis/ and output/ report artifacts: generated .R scripts, .svg/.png figures, .csv tables); otherwise read-only"
-  data: "By default, analysis parameters / summary statistics (event counts, sample sizes, effect sizes) are transmitted to the coze cloud R engine for computation, with a local-R fallback when the endpoint is unavailable or the user opts for local mode. Raw datasets / individual-patient records are only transmitted if the user explicitly chooses to send IPD to the cloud; otherwise processing stays local. R package installation is never performed by this skill — if the user installs packages, that is a manual action in their own R environment."
+  data: "By default, analysis parameters / summary statistics (event counts, sample sizes, effect sizes) are transmitted to the coze cloud R engine for computation. Raw datasets / individual-patient records are only transmitted if the user explicitly chooses to send IPD to the cloud; otherwise processing stays local. There is no local-R fallback — if coze is unreachable or unauthorized, the skill returns a structured error. R package installation is never performed by this skill (the coze-side engine manages its own packages)."
 metadata:
   {
     "openclaw": { "emoji": "📊", "icon": "assets/icon.svg" },
@@ -71,11 +71,12 @@ If unsure between Simple and Complex → give short reply + optional expansion h
 Vague → Level 1 menu (7 categories). Select → Level 2 with data-format hints. Sufficient info → skip menu, run analysis directly. Full menu tree + data formats → `references/interactive_menu.md`.
 > **Other formats?** Install `@skill:statdata-transfer` for 50+ format conversion.
 
-### 2.2 Topic Selection (upstream gate)
+### 2.2 Topic Selection (upstream gate, self-contained)
 Trigger: user wants a meta-analysis but has no topic ("I want to do a meta-analysis but have no topic") / feasibility check / "rejected as a duplicate" / pre-PROSPERO audit → `references/topic-selection.md`. Two paths:
 - **Quick** (≤30 min): 1-page decision card — 4-dim scores (clinical/feasibility/data/novelty, 0–5 each, 0–20, any ≤2 = veto) + screen verdict. No final go/no-go.
-- **Full** (5 stages + gates): PICO (`pico-guide.md`) → scoring + cross-checks R1–R6 → dedup (`dedup-search.md`: PROSPERO→Cochrane→PubMed; non-English opt-in) → PRISMA 2020/AMSTAR-2 (`compliance-precheck.md`) → 11-section report via `python scripts/generate_topic_report.py input.json output.md|html` (template + PROSPERO mapping → `topic-report-template.md` / `prospero-mapping.md`).
-- ⚠️ Dedup searches run ONLY on user opt-in; otherwise deliver query templates.
+- **Full** (5 stages + gates): PICO (`pico-guide.md`) → scoring + cross-checks R1–R6 → dedup (`dedup-search.md`) → PRISMA 2020/AMSTAR-2 (`compliance-precheck.md`) → 11-section report via `python scripts/generate_topic_report.py input.json output.md|html` (template + PROSPERO mapping → `topic-report-template.md` / `prospero-mapping.md`).
+- **Dedup is self-contained (no other skill needed)**: Stage 4 runs the in-skill Europe PMC probe `adapters/literature_probe.py` (Cochrane + PubMed layers) by **DEFAULT** — it returns real hit counts + top titles, so the novelty ranking (R7) is grounded in actual literature. No delegation to other skills; templates are only a fallback when the network is unavailable. PROSPERO / non-English DBs remain guided manual steps (no clean public API).
+  - ⚠️ The probe is a **quick dedup check** (real hit counts + top titles), **not** a full retrieval. For comprehensive retrieval — anti-hallucination verification / merge-dedupe / Excel·HTML report / PRISMA screen — use the **ct-literature** skill first (same Europe PMC journal filter, consistent Cochrane counts; its `--cochrane` flag is the counterpart of this probe). The probe's JSON already emits a `ct_handoff` block with the ready-to-run commands.
 
 ## 3. Initialization & execution backend
 
@@ -86,7 +87,7 @@ Trigger: user wants a meta-analysis but has no topic ("I want to do a meta-analy
 2. **Workspace**: create `meta_analysis/` + `output/` (⚠️ writes files: reports and SVG/CSV).
 3. **Memory**: read R-related config keys from `~/.workbuddy/MEMORY.md` (R config only; unrelated personal content is ignored and never sent).
 
-Local R environment, package list, endpoint self-test, etc. (developer details) → `references/ADVANCED.md` · `references/ADVANCED_zh-CN.md`.
+Endpoint self-test, coze-side R engine & package details (developer details) → `references/ADVANCED.md` · `references/ADVANCED_zh-CN.md`.
 
 ## 4. Core functions & API
 
@@ -111,7 +112,7 @@ figure_mode (`svg_inline` / `png_file`) and render-timing thresholds (implementa
 
 ### 5.1 Cross-turn Continuity (mandatory)
 
-> **Runtime is stateless.** Both the coze and local-R engines are stateless: each `run_analysis.py` call re-supplies `task` + `data` + `params`, and the engine never persists the analysis config or column mapping. Semantic drift (model / method / measure changing silently between rounds) = silently inconsistent results — the highest-risk failure mode in this prompt-driven flow.
+> **Runtime is stateless.** The coze R engine is stateless: each `run_analysis.py` call re-supplies `task` + `data` + `params`, and the engine never persists the analysis config or column mapping. Semantic drift (model / method / measure changing silently between rounds) = silently inconsistent results — the highest-risk failure mode in this prompt-driven flow.
 
 When the user follows up across rounds (subgroup / sensitivity / meta-regression / NMA / diagnostic meta / TSA …), the prior round's analysis spec MUST be inherited losslessly — **never rely on the LLM's memory alone**.
 
@@ -150,9 +151,7 @@ Field inheritance / reset conventions when switching `task` (forest→subgroup /
 
 ## 6. Security & scope
 
-**Execution model**:
-- **Default**: numeric computation via the coze workflow. The skill sends an analysis request (task/data/params/figure) and retrieves structured results. Common inputs are summary statistics (2×2 tables, effect sizes + SE); user-provided individual-patient data (IPD) is also supported. Numeric judgments are made by R, never read by the LLM.
-- **Data-exfiltration decision belongs to the user**: the skill **only implements the function + transparent disclosure**, **never acts as a safety/compliance gate** — whether data (incl. IPD) may be sent to coze is the user's call.
+**Execution model**: numeric computation via the coze workflow (R engine; the LLM only normalizes requests and presents results — numbers are judged by R, never read by the LLM). **Data-exfiltration decision belongs to the user**: the skill only implements the function + transparent disclosure, never a safety/compliance gate — whether data (incl. IPD) may go to coze is the user's call.
 
 **Outbound disclosure (global mandatory)**:
 - **What is sent**: analysis data (study event counts / sample sizes / effect sizes; no personal identifiers) POSTed to the coze endpoint. Payloads are sanitized by `sanitize_payload()` (strips PII: ID numbers / phone / email) before sending.
@@ -164,23 +163,16 @@ Field inheritance / reset conventions when switching `task` (forest→subgroup /
 - PDF full-text download from external services ONLY on **explicit user instruction** (`adapters/pdf_fetch.py`, opt-in).
 - **Not clinical judgment**: results require professional interpretation.
 - **No literature DB search**: does not search literature databases; only downloads full text when the user provides DOI/PMID.
-- Analysis artifacts written to `meta_analysis/` + `output/` by default.
 
 ## 7. User-uploaded files
 
 Two upload types, two paths:
 1. **Structured data files (`.csv` / `.xlsx` / `.xls`)** → **Type 4 data template** (`references/data_templates.md`: encoding detection / zh-en column matching / missing-value detection / row-count confirmation). These are analysis data — the doc→md conversion tier does not apply; the pre-conversion transparency notice and confidentiality boundary still apply.
-2. **Document / template files (`.docx` / `.pptx` / `.pdf` / `.doc`)** → convert to md/text first, then extract study data (layered conversion strategy):
-   - `.docx` / `.pptx` → `python scripts/office_to_md.py <file>` (shared converter)
-   - `.pdf` → environment `pdf` skill (text extraction; scanned pages need OCR); if absent → prompt the user to install it, never write a custom PDF parser
-   - `.doc` (legacy OLE) → prompt to install word-reader / antiword
-   - Image/scanned-only (no text layer) → prompt the user to provide a text version
+2. **Document / template files (`.docx` / `.pptx` / `.pdf` / `.doc`)** → convert to md/text first, then extract study data: `.docx`/`.pptx` via `scripts/office_to_md.py`; `.pdf` via the `pdf` skill (OCR for scans; prompt to install if absent — never write a custom parser); `.doc`/scanned images → prompt the user for a text version.
 
 **🔔 Pre-conversion user notice (show before converting)** — bilingual copy (auto-switch by locale). EN: `⚠️ All uploaded documents will be converted to md format. PPT conversion can lose a lot of information (images, layout, animations, charts, etc.). We recommend converting to md yourself and checking the content first.`
 
 **Confidentiality:** the skill **never proactively judges/blocks** upload confidentiality — documents convert and data reads as usual; whether it leaves the machine is the user's decision. Content sent to coze is disclosed on first outbound; **whether IPD and other individual data goes to the cloud is the user's call**.
-
-**Figure format (2026-08-20 tightened)**: the engine always returns SVG (adapter forces `figure.format="svg"`, overriding even a png request); PNG is always converted by the local presentation layer.
 
 ## 8. Bug Reporting
 

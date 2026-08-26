@@ -153,7 +153,7 @@
 - 推荐：`bayesmeta`（贝叶斯）、`forestploter`（出版级森林图）、`robvis` + `metapower`（替代原 dmetar 的 RoB 图 / 功效分析）
 - 可选增强：`metasens`、`ggplot2`、`gridExtra`、`robumeta`、`clubSandwich`、`metaviz`、`metaDigitise`、`robvis`、`gt`
 
-**辅助脚本**：可运行 `Rscript src/r_engine/setup_packages.R`，脚本会检测缺失包并**仅打印**安装清单（不会自动下载或安装）。
+**辅助脚本（coze 项目维护者）**：包检测 / 安装清单脚本 `setup_packages.R` 位于 coze 项目 `src/r_engine/`，其运行方式见 `adapters/coze_project/DEV.md`（不随技能发布，仅供维护者）。
 
 > ⚠️ 所有安装均为用户手动操作。本技能在任何运行路径下都不会调用包安装函数。
 

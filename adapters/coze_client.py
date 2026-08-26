@@ -1,15 +1,15 @@
 """
 adapters/coze_client.py — meta-analysis 技能 → Coze 工作流 主路径客户端
 
-设计（2026-08-17 拆分 refined：coze 默认优先 + 本地 R 兜底）：
-- 这是技能的**主计算路径**客户端。R 引擎（metafor/meta/netmeta + dispatcher run_task.R）
+设计（coze 唯一主路径）：
+- 这是技能的**唯一计算路径**客户端。R 引擎（metafor/meta/netmeta + dispatcher run_task.R）
   运行在 coze 元分析工作流（src/r_engine/ + src/graphs/nodes/meta_analysis.py）。
 - 本客户端把分析请求打包成信封，POST 到 coze 工作流的 /run 端点，解析返回的 JSON 结果
   （status / stats / figures[].svg / warnings / notes）。
-- 当 coze 不可达时，由上层 `adapters/run_analysis.py` 自动兜底到技能内置的本地引擎
-  （adapters/local_engine.py → coze_project/src/r_engine/run_task.R），两者接口信封完全一致。
-- 数值判断由 R 计算（coze 侧或本地），本客户端只解析结构、绝不读取/改写数值结论。
+- 数值判断由 coze 端 R 计算产出，本客户端只解析结构、绝不读取/改写数值结论。
 - 接口契约见 coze 项目的 coze_contract.md（不随技能发布）。
+- ⚠️ 回退已取消（2026-08-26）：coze 不可达 / 未授权时本客户端直接抛错，不再兜底本地引擎；
+  原本地引擎代码保留在 `adapters/_dev/local_engine.py`（开发调试用，不随发布包分发）。
 
 配置（环境变量）：
   COZE_META_ENDPOINT  工作流 /run 地址，默认 https://ct-meta.coze.site/run（2026-08-19 修正：
@@ -22,8 +22,9 @@ adapters/coze_client.py — meta-analysis 技能 → Coze 工作流 主路径客
   本模块会把**分析数据**（研究事件数 / 样本量 / 效应量等，不含个人身份信息）POST 到
   coze 工作流端点（默认 https://ct-meta.coze.site/run）执行云端 R 计算。首次出站前
   须经用户确认（AUTH-BLOCK + 统一文案，见 _auth_gate）；确认后端点写入 config.json
-  auto_approve_endpoints 白名单，后续免确认。未授权时不阻断——由 run_analysis.py
-  回退本地引擎并提示"本次未使用云端分析"。payload 发送前经 sanitize_payload() 脱敏。
+  auto_approve_endpoints 白名单，后续免确认。未授权时直接抛 AuthRequiredError，
+  由上层 run_analysis 转为结构化错误返回（不再兜底本地引擎）。payload 发送前经
+  sanitize_payload() 脱敏。
 
 依赖：标准库（urllib / json / os / re / sys）+ 同目录 coze_token（凭据解析，仅标准库）。
 """
@@ -84,7 +85,7 @@ def _timeout() -> int:
 class AuthRequiredError(RuntimeError):
     """coze 出站未授权（首次出站须用户确认，ct-base §5 授权门控）。
 
-    由 run_analysis.py 捕获 → 回退本地引擎，并提示"本次未使用云端分析"。
+    由 run_analysis.py 捕获 → 转为结构化错误返回（不再兜底本地引擎）。
     """
 
 
@@ -120,7 +121,7 @@ def approve_endpoint(endpoint: str) -> None:
 
 def _auth_gate(endpoint: str) -> bool:
     """出站授权门控：端点已在白名单 → True；否则 stderr 输出 AUTH-BLOCK +
-    统一确认文案（由 agent 呈现给用户），返回 False（调用方回退本地，不阻断）。
+    统一确认文案（由 agent 呈现给用户），返回 False（调用方转结构化错误，不阻断流程）。
 
     §5 统一文案（中文，按技能名/端点/发送内容适配；禁止出现内部术语）。
     """
@@ -132,9 +133,8 @@ def _auth_gate(endpoint: str) -> bool:
         "⚠️ [meta-analysis] 需要把您的分析数据发送到外部服务器进行计算：\n"
         f"目标服务器：{endpoint}\n"
         "发送内容：您的分析数据（研究事件数 / 样本量 / 效应量等，不含任何个人身份信息）\n"
-        "⚠️ 重要提示：本技能的本地计算能力有限，大部分统计计算（meta / metafor / "
-        "netmeta 等 R 引擎）依赖云端执行。如不同意发送，将无法使用云端分析，仅能使用"
-        "本地基础引擎，功能与速度会显著下降。\n"
+        "⚠️ 重要提示：本技能所有统计计算（meta / metafor / netmeta 等 R 引擎）"
+        "均依赖云端 coze 执行。如不同意发送，将无法完成分析。\n"
         "是否允许本次发送？确认后本会话内不再重复询问。\n"
     )
     return False
@@ -201,7 +201,7 @@ def run_meta(task: str, data: dict, params: dict | None = None,
     # （旧逻辑无条件再拼 /run → 请求打到 /run/run → 404 Not Found）
     ep = _endpoint()
     run_url = ep if ep.endswith("/run") else ep + "/run"
-    # ct-base §5 授权门控：首次出站须用户确认（未授权 → AuthRequiredError → 本地兜底）
+    # ct-base §5 授权门控：首次出站须用户确认（未授权 → AuthRequiredError → 结构化错误）
     if not _auth_gate(run_url):
         raise AuthRequiredError(
             f"coze 出站未授权（端点 {run_url} 不在 auto_approve_endpoints 白名单）。"

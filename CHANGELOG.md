@@ -4,12 +4,79 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.1.5] — 2026-08-26 — README 去除内部框架注解
+
+### Changed
+- `README.md` / `README_zh-CN.md` 示例 1 段落移除面向用户的代码关联注解：
+  - 删除反引号文件路径引用 `` `references/topic-selection.md` ``；
+  - 删除英文代码标签 `(Topic Selection)`、`(upstream gate)`、`Stage 1 Gate 1`、`Rule R7`；
+  - `Full Assessment` 代码阶段名改写为可读描述「完整选题评估 / full topic assessment」。
+- 保留用户可点击的 `references/ADVANCED*.md` 导航链接（非注解，正常文档链接）。
+
+---
+
+## [2.1.4] — 2026-08-26 — README 示例1 校正（改为探针真实证据）
+
+### Changed
+- `README.md` / `README_zh-CN.md` **示例 1 答案重写**：原答案把「非糖尿病 CKD」列为首选（新颖性 5、总分 18，称其为真实缺口），
+  与 in-skill 去重探针实测矛盾——探针显示非糖尿病 CKD（Cochrane 20 / PubMed 2402）与透析/晚期 CKD（22 / 1067）**均已高度饱和**。
+  改为基于探针真实命中数的结论：首选 **IgA 肾病肾保护**（4 / 224）、次选 **净获益框架**（5 / 442）、
+  条件型 **特定肾小球疾病**（FSGS 0 / 膜性 1 / ADPKD 2 / 狼疮 3）；并保留「先用 ct-literature 全量确证缺口」的提示。
+- 示例 1 下方「说明」同步明确：候选方向基于**自含去重探针（Cochrane + PubMed 真实命中数）**核查（R7 规则）。
+- 全文简化，未机械复制候选地图。
+
+---
+
+## [2.1.3] — 2026-08-26 — 探针 ↔ ct-literature 无缝对接 + 快速检索提示
+
+### Added
+- `adapters/literature_probe.py`：输出新增 `ct_handoff` 块（Cochrane / PubMed 两层的 ct-literature 复现命令
+  + 原始 Europe PMC 查询串 + “快速检查 vs 全面检索”提示）；`probe()` 单层与 `dedup_probe()` 均携带该块。
+- `references/dedup-search.md`：新增「快速检查 vs 全面检索（何时用 ct-literature）」段，明确本探针只是
+  选题去重快速检查，全面检索先走 ct-literature，并给出可直接复制的命令。
+- `SKILL.md` §2.2：选题去重 self-contained 说明补一句——“快速去重检查，非全面检索；全面检索先使用 ct-literature”。
+
+### Changed
+- 回写 **ct-literature（v0.10.1）**：新增 `--cochrane` 检索能力（Europe PMC 期刊过滤，过滤串与探针
+  **完全一致**，Cochrane 计数跨技能一致），使「选题去重（meta-analysis）→ 全面检索（ct-literature）」
+  形成无缝闭环。
+
+### Verified
+- meta-analysis 探针 live 测试：`ct_handoff` 命令串正确、Cochrane 查询与 ct-literature `--cochrane` 同源；
+  ct-literature `--cochrane` 全链路 live 测试（NSCLC）合并 10 篇 → Cochrane 过滤后 5 篇，publication 全为
+  Cochrane、`is_cochrane` 全 True；两技能 `py_compile` 通过。
+
+## [2.1.2] — 2026-08-26 — 选题去重自包含（in-skill Europe PMC 探针）
+
+### Added
+- **`adapters/literature_probe.py`**：选题去重自包含探针（不依赖其他技能、不依赖 coze）。直接调
+  Europe PMC 公开 REST（MEDLINE/PubMed，无需密钥），仅用标准库 `urllib/json/re/time/datetime`，
+  字段映射与查询语法复用 ct-literature `adapters/fetch_europepmc.py`、重试/退避复刻其 `http_utils`
+  （429 读 `Retry-After` + 指数退避），但**独立实现在本技能内、不 import ct-literature 包**。
+  两层：`cochrane`（按 `JOURNAL:"The Cochrane database of systematic reviews"` 精准过滤，
+  经验证避免短语匹配虚高）+ `pubmed`（`systematic review OR meta-analysis`，近 5 年）。
+  返回真实 `hit_count` + top titles；`dedup_probe()` 一次性出 Cochrane+PubMed 双层去重信号。
+- 选题（Stage 4 / R7）改为**默认真实联网、自包含**：不再默认只给模板、不再委派 ct-literature/ct-registry。
+  PROSPERO 与中文库仍保留为「手动/模板」步骤（无干净公开 API，如实标注），符合「技能不假装包办一切」的边界。
+
+### Changed
+- `references/dedup-search.md`：网络说明从「从不自动检索、只给模板」翻转为「默认 in-skill 探针真实检索」；
+  三层去重表重写（Layer1–2 = in-skill 实时，Layer3/中文 = 手动模板）；新增「Run the in-skill probe」段与真实输出示例。
+- `references/topic-selection.md`：Stage 4 改写，明确去重自包含（Cochrane+PubMed 走探针），R7 的「真实去重筛查」落到探针。
+- `SKILL.md` §2.2：选题去重标注 self-contained，移除「Dedup searches run ONLY on user opt-in; otherwise deliver query templates」。
+- `adapters/README.md`：文件树补 `literature_probe.py` 并注明为选题去重自包含探针。
+
+### Verified
+- 真实联网端到端测试通过：选题「PD-1 inhibitors NSCLC second line」→ Cochrane `hit_count=36`
+  （全部 `is_cochrane=True`）、PubMed SR/MA `hit_count=5358`；`py_compile` 通过。
+
 ## [2.1.1] — 2026-08-25 — 文档清理收尾 + 三平台统一发布
 
 ### Changed
 - **版本号升 2.1.1**：SkillHub 已占用 2.1.0（早期发布），且 SkillHub 不允许同版本重发；为保持 GitHub / SkillHub / ClawHub 三平台版本一致，升到 2.1.1 统一发布。
 - **对外文档清理收尾**（本轮发布前）：SKILL.md §5.1 跨轮连续性协议全文英文化并删除 `ct-base/references/*` 死链；`## Language` 段改为符合 ct-base skeleton 标准表述（双语指针单行 + 核心语义句 "answer language follows the user's question language"）；`references/interactive_menu.md` 与 `README_zh-CN.md` 清除同类死链。
 - 版本号引用统一：SKILL frontmatter + metadata + README（中/英）+ interactive_menu/ADVANCED + bug-report 示例统一为 2.1.1。
+- **文档与代码对齐（2026-08-26 收尾）**：默认计算路径统一描述为 coze（终端用户零本地依赖）；requirements.txt 改为「默认零依赖」清单（cairosvg 仅 PNG 可选，R 包降为 coze 端/开发者维护说明）；ADVANCED.md / ADVANCED_zh-CN.md / r_packages.md 的 coze 项目 R 引擎维护命令（`Rscript src/r_engine/*`）移至 `adapters/coze_project/DEV.md`（git/clawhub 忽略、不发布）；**取消本地 R 回退**——`run_analysis.py` 重写为 coze-only（coze 不可达/未授权直接返回结构化错误，不再兜底本地），原 `adapters/local_engine.py` 移至 `adapters/_dev/local_engine.py`（git/clawhub 双重忽略、不随发布包分发，仅开发调试参考，已不在运行路径）；同步更新 SKILL.md（network_note/data 改 coze-only 无回退）、AGENTS.md（Execution backend / 环境检测 / 代码执行 / 安全红线 / Outbound calls / 目录树 全部翻转）、adapters/README.md（路由图/文件清单/配置/用法清除回退）、data_templates.md（移除 `prefer="local"` 引导）；AGENTS.md / SKILL.md 版本号对齐 2.1.1。
 
 ## [2.1.0] — 2026-08-25 — 跨轮上下文交互能力完善 + 发布自包含修复（ct-base 模式 A / Type-Compute）
 

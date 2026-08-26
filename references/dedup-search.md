@@ -2,10 +2,13 @@
 
 > Grounding: PROSPERO (NIHR), Cochrane Library, PubMed/MEDLINE;
 > PRISMA-S (Rethlefsen ML et al., 2021) search reporting guidance.
-> ⚠️ **Network note**: this skill never auto-searches literature databases.
-> Searches below are executed ONLY when the user opts in (and provides network
-> confirmation) — otherwise deliver search-query templates for the user to run
-> in their own browser, then backfill results into the report JSON.
+> **Self-contained dedup (default: live, in-skill)**. The two primary layers —
+> Cochrane (CDSR) and PubMed/MEDLINE — are probed **live and by default** via the
+> in-skill `adapters/literature_probe.py` (Europe PMC REST, no key, no other skill
+> required). It returns real hit counts + top titles, so the novelty ranking (R7
+> in `topic-selection.md`) is grounded in actual literature — not templates.
+> Templates below are only a **fallback** when the network is unavailable, and for
+> the two layers with no clean public API (PROSPERO, non-English DBs).
 
 ## Purpose
 
@@ -16,22 +19,73 @@ assessment (and in Dedup re-review path).
 ## Three-layer dedup（三层去重）
 
 Layer order is deliberate — registered protocols first, then ongoing, then
-published.
+published. **Layers 1–2 run live in-skill** (default); Layer 3 + non-English are
+guided manual steps (no clean public API).
 
-| Layer | Database | What to check | Time window |
-|---|---|---|---|
-| 1 | **PROSPERO** (NIHR register) | Registered/recently completed systematic reviews on the same question | active + completed ≤24 months |
-| 2 | **Cochrane Library** (CDSR) | Cochrane Reviews / protocols on the same question | any (Cochrane has priority) |
-| 3 | **PubMed / MEDLINE** | Published meta-analyses / systematic reviews on the same question | last 5 years (extend if the field is slow-moving) |
+| Layer | Database | How | What to check | Time window |
+|---|---|---|---|---|
+| 1 | **Cochrane Library** (CDSR) | **In-skill probe** (`literature_probe.py`, `layer="cochrane"`) — live, default | Cochrane Reviews / protocols on the same question | any (Cochrane has priority) |
+| 2 | **PubMed / MEDLINE** | **In-skill probe** (`literature_probe.py`, `layer="pubmed"`) — live, default | Published meta-analyses / systematic reviews on the same question | last 5 years (extend if the field is slow-moving) |
+| 3 | **PROSPERO** (NIHR register) | Manual / template (no clean public API) | Registered/recently completed systematic reviews on the same question | active + completed ≤24 months |
+| — | **Non-English DBs** (CNKI / 万方 / 维普 / SinoMed) | Manual / template (opt-in) | Chinese-herb / regional questions where English DBs under-cover | any |
 
-**Non-English scope extension** (user opt-in; required when the population or
-literature is partly non-English — e.g. Chinese herbal medicine, regional
-reimbursement questions): CNKI / 万方 / 维普 / SinoMed.
+### Run the in-skill probe（默认路径，真实结果）
 
-## Search-query templates
+```bash
+# Two-layer dedup (Cochrane + PubMed SR/MA), last 5 years:
+python adapters/literature_probe.py --topic "PD-1 inhibitors NSCLC second line" --layer both --max 8
 
-Deliver these to the user (or execute on opt-in). Replace placeholders from
-the PICO block (`pico-guide.md`):
+# Cochrane only:
+python adapters/literature_probe.py --topic "<P> <I> <C>" --layer cochrane
+```
+
+Output (real, from Europe PMC):
+```json
+{
+  "topic": "PD-1 inhibitors NSCLC second line",
+  "layers": {
+    "cochrane": {"hit_count": 36, "cochrane_count": 36, "works": [{"title": "...", "journal": "The Cochrane database of systematic reviews", "year": 2026, "pmid": "..."}]},
+    "pubmed_meta": {"hit_count": 5358, "works": [{"title": "...", "journal": "...", "year": 2026}]}
+  },
+  "summary": "Cochrane: 36 review(s) on this topic; PubMed SR/MA (last 5 y): 5358",
+  "any_error": false
+}
+```
+
+Interpretation: `hit_count` is the **live total** for that layer. A high Cochrane
+count → the topic is likely saturated (discount novelty); a high PubMed count with
+few/zero Cochrane → a gap may still exist but weigh competition. Feed `hit_count`
+into the novelty dimension and the R7 ranking. If `any_error` is true (network
+down), fall back to the templates below and mark dedup as **"unverified"**.
+
+## 快速检查 vs 全面检索（何时用 ct-literature）
+
+> ⚠️ **本探针只是「快速去重检查」，不是全面文献检索**：它给出真实命中数 + 前几篇标题，
+> 用于选题阶段的新颖性判断（R7 排名）。它**不**产出完整题录、**不**做反幻觉验证、
+> **不**合并去重、**不**生成 Excel/HTML 报告、**不**做 PRISMA 筛选。
+
+**需要全面检索时，先使用 `ct-literature` 技能**——与本研究探针用**同一 Europe PMC 期刊过滤串**
+`(JOURNAL:"The Cochrane database of systematic reviews")`，Cochrane 层计数完全一致，可无缝衔接。
+两种典型用法：
+
+```bash
+# 1) Cochrane 全面检索（确认“该方向是否已被 Cochrane 系统评价覆盖”）
+cd <ct-literature 技能目录> && python scripts/ct_literature.py \
+    --topic "PD-1 inhibitors NSCLC second line" --cochrane --with-europepmc --run --out-dir ./cochrane_out
+
+# 2) PubMed SR/MA 全面检索（近 5 年系统评价 / Meta 分析）
+cd <ct-literature 技能目录> && python scripts/ct_literature.py \
+    --topic "PD-1 inhibitors NSCLC second line" --review-type systematic-review \
+    --year-from 2021 --with-europepmc --run --out-dir ./pubmed_out
+```
+
+探针的 JSON 输出已自带 `ct_handoff` 块（含上述命令 + 原始 Europe PMC 查询串），可直接复制执行。
+
+## Fallback search-query templates (PROSPERO + non-English; or when probe unavailable)
+
+Use when the in-skill probe cannot run (network down) or for Layer 3 (PROSPERO) /
+non-English DBs that have no clean public API. Replace placeholders from the PICO
+block (`pico-guide.md`):
 
 ```
 # PubMed (E-utilities URL, opt-in only)

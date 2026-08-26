@@ -1,30 +1,27 @@
-# AGENTS.md — meta-analysis v1.12.2 (R-based Meta-Analysis Skill)
+# AGENTS.md — meta-analysis v2.1.1 (R-based Meta-Analysis Skill)
 
-> This skill is a published skill (A-tier equivalent). Its AGENTS.md is **English-only** (SKILL.md body + references + AGENTS.md are English-only for published skills). Compute is delegated to a coze workflow by default, with a local R fallback retained in-skill.
+> This skill is a published skill (A-tier equivalent). Its AGENTS.md is **English-only** (SKILL.md body + references + AGENTS.md are English-only for published skills). Compute is delegated to a coze workflow (coze-only); no local R engine is shipped or advertised.
 
 ## Overview / 技能概述
 
 `meta-analysis`: A conversation-driven Meta-Analysis skill for WorkBuddy. Covers 100% of RevMan 5.x functionality, Stata `metareg`/`mvmeta` equivalents, effect-size conversions (`esc`), cluster-robust variance estimation (`clubSandwich`/`robumeta`), Bayesian NMA (Stan/JAGS), survival meta, TSA, single-group meta, diagnostic meta, and systematic-review workflow.
 
-**Execution backend**: **coze workflow is the compute path** (default). A local R mirror is retained internally as an unadvertised fallback (not presented to users).
-- **coze (default)**: R engine (metafor/meta/netmeta + dispatcher `run_task.R`) runs in the coze meta-analysis workflow (`src/r_engine/` + `src/graphs/nodes/meta_analysis.py`). The skill delegates via `adapters/run_analysis.py` (→ `coze_client.run_meta`) → coze `/run`.
-- **local fallback (internal only, not advertised)**: a byte-identical mirror of the same R engine lives at `adapters/coze_project/src/r_engine/run_task.R` (sole local source, 2026-08-19) (kept in sync with coze via `coze_contract.md`). Invoked by `adapters/local_engine.py` as an internal fallback when coze is unreachable.
-Numeric judgment is always R-computed (coze-side or local), never read by the LLM.
+**Execution backend**: **coze workflow is the sole compute path**. All R computation (metafor/meta/netmeta + dispatcher `run_task.R`) runs in the coze meta-analysis workflow (`src/r_engine/` + `src/graphs/nodes/meta_analysis.py`); the skill delegates via `adapters/run_analysis.py` (→ `coze_client.run_meta`) → coze `/run`. There is **no local-R fallback** — if coze is unreachable or unauthorized, `run_analysis` returns a structured error (`{status:"error", ...}`) instead of silently computing locally. The historical local-R code lives in `adapters/_dev/local_engine.py` (git/clawhub-ignored, not published, not in the runtime path). End users need no R install.
+Numeric judgment is always R-computed on the coze side, never read by the LLM.
 
 ---
 
 ## Core Rules / 核心规则
 
 ### 1. Environment Detection / 环境检测
-- **Coze endpoint (default path)**: confirm via `COZE_META_ENDPOINT` + `coze_client.health()`. If unreachable, the local R fallback below is used automatically.
-- **Local R engine (fallback path)**: `adapters/coze_project/src/r_engine/run_task.R` requires a local R install (`Rscript --version`) + core 14 packages. Configure via `RSCRIPT_PATH` / `META_LOCAL_ENGINE_DIR`. Not auto-installed by this skill.
-- **Python**: Anaconda (`C:\Tools\anaconda3\python.exe`); used for `adapters/run_analysis.py` (unified front door), `coze_client.py`, `local_engine.py`, and helper scripts. Never for meta-analysis computation directly.
+- **Coze endpoint (sole path)**: confirm via `COZE_META_ENDPOINT` + `coze_client.health()`. This is the only compute path.
+- **Python**: Anaconda (`C:\Tools\anaconda3\python.exe`); used for `adapters/run_analysis.py` (unified front door), `coze_client.py`, and helper scripts. Never for meta-analysis computation directly.
 - Never hardcode paths.
 
 ### 2. Code Execution / 代码执行规范
 - **Default: AUTO-EXECUTE**. Once the user describes an analysis request, call the unified front door `adapters/run_analysis.run_analysis(task, data, params, figure)` and return results — no preview-confirm gate. Before the **first outbound call each session**, give a one-time spoken disclosure of what is sent and to which endpoint (ct-base §5), then execute automatically.
-- **Execution (default = coze)**: `run_analysis` calls the coze workflow. On coze failure it may attempt a fallback (internal, not advertised to the user) and tags the result `_source` accordingly.
-  - Result shape: `{status, stats, figures[].svg, warnings, notes, _source}`.
+- **Execution (coze only)**: `run_analysis` calls coze. On coze failure / unauthorized it returns a structured error (`{status:"error", ...}`) — no local fallback. The successful result carries `_source="coze"`.
+  - Successful result shape: `{status, stats, figures[].svg, warnings, notes, _source}`.
 
 ### 3. Language Detection / 语言检测
 - Default: English.
@@ -33,8 +30,8 @@ Numeric judgment is always R-computed (coze-side or local), never read by the LL
 - User-facing runtime prompts use `i18n.t(key)`.
 
 ### 4. Security Red Line / 安全红线
-- **Default compute = coze, fallback = local R**: by default all R computation runs in the coze meta-analysis workflow. Only the analysis request (task/data/params/figure) is sent to the configured coze endpoint; **no IPD or raw datasets are uploaded** — summary statistics (2×2 tables, effect sizes + SEs) are the common case. When coze is unreachable, the same analysis runs **locally** via `adapters/coze_project/src/r_engine/run_task.R` (still no data leaves the machine).
-- **Numeric judgment stays in R**: the R-computed numbers (pooled estimate, I², P-scores, etc.) are produced by R (coze-side or local) and returned as structured JSON; the LLM agent only parses structure, never reads or rewrites numeric conclusions.
+- **Default compute = coze (only path)**: by default all R computation runs in the coze meta-analysis workflow; only the analysis request (task/data/params/figure) is sent to the configured coze endpoint — **no IPD or raw datasets are uploaded** (summary statistics are the common case). There is no local-R fallback: coze unreachable / unauthorized returns a structured error.
+- **Numeric judgment stays in R**: the R-computed numbers (pooled estimate, I², P-scores, etc.) are produced by the coze-side R engine and returned as structured JSON; the LLM agent only parses structure, never reads or rewrites numeric conclusions.
 - **No auto-install**: R packages are NOT auto-installed by this skill. The coze side installs its own.
 - **Network only on explicit opt-in**: PDF full-text download from DOI/PMID requires explicit user confirmation.
 - `permissions` block declared in SKILL.md top-level.
@@ -45,11 +42,11 @@ Numeric judgment is always R-computed (coze-side or local), never read by the LL
   - `references/language_policy.md`: bilingual policy detailed companion.
   - `references/report_template.md`: report skeleton reference.
 - **Outbound calls**: `adapters/` is the skill's compute exit layer:
-  - `adapters/run_analysis.py` — unified front door (coze-first, local-fallback).
-  - `adapters/coze_client.py` — coze `/run` client (primary path).
-  - `adapters/local_engine.py` — local R fallback (`adapters/coze_project/src/r_engine/run_task.R`).
-- **R engine (two-track, single source of truth)**: the canonical R engine + `run_task.R` dispatcher lives in the coze project (`src/r_engine/`); a **byte-identical mirror** is kept at `adapters/coze_project/src/r_engine/` (sole local sync source) and kept in sync via `coze_contract.md`. Both tracks call the same dispatcher, so results are reproducible regardless of path.
-- **Directory layout**: `scripts/` = pure-local Python; `adapters/` = compute exit layer; `adapters/coze_project/src/r_engine/` = local R fallback mirror (sole sync source; skill-root `r_engine/` removed 2026-08-19).
+  - `adapters/run_analysis.py` — unified front door (coze only).
+  - `adapters/coze_client.py` — coze `/run` client (sole path).
+  - `adapters/literature_probe.py` — **in-skill literature dedup probe** (Europe PMC REST, `https://www.ebi.ac.uk/europepmc/webservices/rest/search`). This is a *literature-retrieval* adapter for the topic-selection Stage-4 dedup (Cochrane + PubMed layers), NOT numerical computation — it runs self-contained, by default, and does not delegate to other skills or to coze. Zero third-party deps (stdlib only).
+- **R engine (single source of truth)**: the canonical R engine + `run_task.R` dispatcher lives in the coze project (`src/r_engine/`) and is mirrored at `adapters/coze_project/src/r_engine/` (maintenance/dev-reference only; NOT a runtime fallback, NOT published). Developer R-engine maintenance commands live in `adapters/coze_project/DEV.md` (git/clawhub-ignored, not published). The historical `adapters/_dev/local_engine.py` is retained as a dev-only reference (git/clawhub-ignored) but is NOT invoked by the runtime.
+- **Directory layout**: `scripts/` = pure-local Python; `adapters/` = compute exit layer; `adapters/coze_project/src/r_engine/` = coze-project R engine mirror (maintenance/dev-reference only; git/clawhub-ignored); `adapters/_dev/` = dev-only reference code (git/clawhub-ignored, not published).
 
 ### 6. Interactive Menu / Navigation / 交互菜单
 - **Triage**: classify user's first message as Simple / Complex / Vague.
@@ -68,7 +65,7 @@ Numeric judgment is always R-computed (coze-side or local), never read by the LL
 
 ## Dependencies / 依赖
 
-### R packages (coze-side, and local-fallback if used)
+### R packages (coze-side; optional for local dev/maintenance only)
 ```
 # Core 14 (2026-08-19; esc/metagear/gridExtra/gemtc/rjags/multinma removed)
 metafor meta netmeta bayesmeta dosresmeta mada robumeta clubSandwich
@@ -82,6 +79,8 @@ ggrepel robvis
 ```
 # adapters/coze_client.py + scripts/i18n.py + scripts/generate_topic_report.py
 # coze_client.py depends only on stdlib (urllib/json/os); no third-party packages.
+# cairosvg: OPTIONAL, only when PNG output is requested (adapters/rendering.svg_to_png).
+#           Default SVG output needs nothing. `pip install cairosvg` to enable PNG.
 ```
 
 ---
@@ -110,18 +109,19 @@ meta-analysis/
 ├── README.md                      # English (top switch to README_zh-CN.md)
 ├── README_zh-CN.md                # Chinese (top switch to README.md)
 ├── LICENSE                        # MIT
-├── requirements.txt               # R package list
+├── requirements.txt               # Dependency manifest (default: zero deps; cairosvg optional for PNG)
 ├── assets/
 │   └── icon.svg                   # Skill logo
 ├── scripts/
 │   ├── i18n.py                    # ct-base shared: bilingual helper
 │   └── generate_topic_report.py   # Topic-selection report generator (pure Python)
-├── adapters/                      # Compute exit layer (§16.9): coze-first + local fallback
-│   ├── run_analysis.py            # Unified front door (coze-first, auto local-fallback)
-│   ├── coze_client.py             # Coze /run client (primary path)
-│   ├── local_engine.py            # Local R fallback (coze_project/src/r_engine/run_task.R)
+├── adapters/                      # Compute exit layer (§16.9): coze-only
+│   ├── run_analysis.py            # Unified front door (coze only)
+│   ├── coze_client.py             # Coze /run client (sole path)
+│   ├── _dev/                      # Dev-only reference (git/clawhub-ignored, not published)
+│   │   └── local_engine.py        # Historical local-R engine; NOT invoked by runtime
 │   └── README.md                  # Adapter docs
-├── adapters/coze_project/          # Coze project local mirror (sole sync source; includes src/r_engine/)
+├── adapters/coze_project/          # Coze project R engine mirror (maintenance/dev-reference only; not published)
 │   ├── run_task.R                 # Dispatcher (task → stats + SVG), single source with coze
 │   ├── meta_analysis_core.R
 │   ├── advanced_functions.R

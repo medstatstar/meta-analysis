@@ -159,7 +159,7 @@
 - Delimiter: comma / 分隔符：逗号
 - First row: column names / 首行：列名
 
-**文档 / 模板类上传（docx / pptx / pdf / doc）不属于本表范围**：非结构化文档按 **ct-base §6.7**（`ct-base/docs/02-governance-redlines.md`）处理——先转 md/文本再提取研究数据（共享转换器 `scripts/office_to_md.py`；`.pdf` 走环境 pdf 技能；`.doc` 提示安装 word-reader / antiword）；**转换前须向用户展示 §6.7.2 提示**（PPT 转换易丢非文本元素）。结构化数据（csv/xlsx/xls）仍走本表验证流程；文档内容若涉密，按 §6.7.3 由用户决定出域与否（技能不主动拦截），要求数据不出域时引导本地引擎（`prefer="local"`）。
+**文档 / 模板类上传（docx / pptx / pdf / doc）不属于本表范围**：非结构化文档按 **ct-base §6.7**（`ct-base/docs/02-governance-redlines.md`）处理——先转 md/文本再提取研究数据（共享转换器 `scripts/office_to_md.py`；`.pdf` 走环境 pdf 技能；`.doc` 提示安装 word-reader / antiword）；**转换前须向用户展示 §6.7.2 提示**（PPT 转换易丢非文本元素）。结构化数据（csv/xlsx/xls）仍走本表验证流程；文档内容若涉密，按 §6.7.3 由用户决定出域与否（技能不主动拦截）。⚠️ 本技能默认计算路径为 coze 云端——会向 coze 端点发送汇总统计量（事件数/样本量/效应量等，不含个人身份信息）；若用户**强制要求数据不出域**，云端路径无法满足，需明确告知并建议改用离线工具（开发调试用的 `adapters/_dev/local_engine.py` 不随发布包分发，不在运行路径内）。
 
 ---
 

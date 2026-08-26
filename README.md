@@ -26,40 +26,34 @@ meta-analysis is part of the CT-series skill family, built for three groups:
 
 meta-analysis is a **conversational skill**: you simply tell the assistant what you want in natural language — no commands, no parameter names to remember. As a WorkBuddy skill it **auto-loads with no extra installation**.
 
-Below are 7 real conversational examples. **Example 1 is the upstream Topic Selection gate** (choose among candidate directions before running any analysis), followed by Examples 2–7 ordered from simple to advanced. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
+Below are 7 real conversational examples. **Example 1 is the upstream topic-selection gate** (choose among candidate directions before running any analysis), followed by Examples 2–7 ordered from simple to advanced. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
 
-### Example 1 · Topic selection: choose among candidate meta-analysis directions (upstream gate)
+### Example 1 · Topic selection: choose among candidate meta-analysis directions
 **You say:**
 > I'm interested in SGLT2 inhibitors for renoprotection and cardiovascular benefit in chronic kidney disease (CKD), but I haven't decided which specific meta-analysis direction to pursue. Can you help me shortlist candidate directions?
 
 **Assistant replies (sketch):**
-> Sure — I'll use the topic-selection framework (`references/topic-selection.md`). First I run a **dedup check against the primary literature (Rule R3)**, then shortlist — otherwise a saturated direction can be wrongly pushed as the top pick.
+> Sure — I'll use a **topic-selection approach** to lock down the direction. First I run the **in-skill dedup probe (Cochrane + PubMed real hit counts)**, then shortlist — otherwise a saturated direction can be wrongly pushed as top pick.
 >
-> **First, rule out the saturated direction**: the generic "SGLT2i vs placebo on cardiorenal composite endpoints in CKD" was already covered by ≥5–6 large meta-analyses in 2024 (e.g. BMJ Medicine 2024, 13 RCTs/29 614 pts; BMC Nephrol 2024 eGFR<60 subgroup, 17 RCTs/27 928 pts; Lancet subsidiary 2024 across the cardiometabolic spectrum, 15 trials/100 952 pts). They consistently report "no effect modification by diabetes status / baseline eGFR / UACR" — the incremental value of a routine subgroup meta is exhausted. **Do not redo the generic pairwise meta.**
+> **First, rule out the saturated directions**: the generic "SGLT2i on cardiorenal outcomes in CKD" is Cochrane 23 / PubMed 2785 — highly saturated. **Counter-intuitively**, the seemingly niche **non-diabetic CKD (Cochrane 20 / PubMed 2402)** and **dialysis / advanced CKD (Cochrane 22 / PubMed 1067)** are also heavily covered (DAPA-CKD / EMPA-KIDNEY spawned many reviews) — also not recommended.
 >
-> Re-shortlisting 3 candidates by **evidence gap + novelty** (Stage 1 Gate 1: produce 1–3 directions; I won't decide for you):
+> Re-shortlisting 3 candidates by **evidence gap + novelty** (I'll produce 1–3 directions; I won't decide for you):
 >
-> **Candidate ① Dedicated meta in non-diabetic CKD (top pick)**
-> - Intervention: SGLT2i vs placebo; population: **non-diabetic CKD** (isolating non-diabetic subgroups from DAPA-CKD / EMPA-KIDNEY + a few dedicated RCTs)
-> - 4-dim quick score: clinical 5 / feasibility 4 / data 4 / novelty 5 → total 18 (strongly recommend)
-> - Meta type: standard pairwise (meta / metafor); IPD preferred, published subgroup data acceptable
-> - Basis: existing meta-analyses pool diabetic + non-diabetic together; the source papers themselves call non-diabetic CKD "still under-studied, needs more research" (Reyes-Farias, PLOS ONE 2023).
-> - ⚠️ The non-diabetic subgroup is smaller — power and heterogeneity must be discussed honestly.
+> **Candidate ① Renoprotection in IgA nephropathy (top pick)**
+> - Cochrane 4 / PubMed 224 (≈1/10 of the broad direction) → **real gap**
+> - Most common primary GN; SGLT2i already a guideline adjunct; many RCTs, data available
 >
-> **Candidate ② Effect of SGLT2i on renin-angiotensin-system (RAS) blocker persistence (mechanistic bridge)**
-> - Outcome: RAS discontinuation/interruption (joint CREDENCE + DAPA-CKD analysis already reported −15%, PMID 37876229)
-> - 4-dim quick score: clinical 4 / feasibility 3 / data 3 / novelty 5 → total 15 (recommend)
-> - Meta type: standard pairwise (HR pooling); few RCTs report this endpoint — verify k ≥ 5 first
-> - Value: unique clinical story ("SGLT2i keeps RAS on board"), least likely to collide with existing work.
+> **Candidate ② Net benefit / benefit–risk framework**
+> - Cochrane 5 / PubMed 442 → gap
+> - Pools renal + cardiac benefit with safety events (DKA / infection / volume depletion) in one framework — strong methodological differentiation
 >
-> **Candidate ③ Efficacy and safety in advanced CKD (eGFR<30 / stage 4–5)**
-> - Outcomes: kidney composite + eGFR slope + rare safety events
-> - 4-dim quick score: clinical 5 / feasibility 3 / data 3 / novelty 4 → total 15 (recommend)
-> - Meta type: standard pairwise; note CJASN 2025 (Elenjickal, 10 RCTs/4 800 eGFR<30 pts) just published — find a differentiated angle first.
+> **Candidate ③ Specific glomerular diseases (FSGS / membranous / ADPKD / lupus)**
+> - FSGS Cochrane 0, ADPKD 2, membranous 1, lupus 3 → **very deep gap**
+> - ⚠️ but sparse RCTs → power risk; better as a **scoping review** than a hard efficacy MA
 >
-> **Suggestion**: Start with ① (real gap, greatest clinical need, literature self-identifies the gap); ② is the most distinctive story; ③ needs differentiation from the 2025 paper. Next step can be a Full Assessment (PICO decomposition + dedup search + PRISMA/AMSTAR-2 pre-check) to produce a topic report.
+> **Suggestion**: Start with ① (real gap, high clinical need); ② as the methodological-differentiation alternative; ③ conditional. Next step: a **full topic assessment** (PICO + dedup search + PRISMA/AMSTAR-2 pre-check), and **run ct-literature first for a full dedup confirmation** (the probe is a quick signal; FSGS=0 may include index-phrasing variance, don't rely on it alone).
 
-**📌 Note:** When you have a direction but are unsure which specific meta to run, the assistant uses the topic-selection framework to produce **1–3 candidate directions + a 4-dim score + meta type**, instead of deciding for you or giving a single answer. This is the upstream gate (Topic Selection) before analysis — no R computation is invoked. Candidates are stratified by **evidence gap / novelty**, each backed by a primary-literature dedup check (Rule R7), so a saturated generic direction is no longer mis-pushed as the top pick.
+**📌 Note:** When you have a direction but are unsure which specific meta to run, the assistant uses the topic-selection framework to produce **1–3 candidate directions + a 4-dim score + meta type**, instead of deciding for you or giving a single answer. This is the **topic-selection gate** before analysis — no R computation is invoked. Candidates are stratified by **evidence gap / novelty**, each backed by the **in-skill dedup probe (Cochrane + PubMed real hit counts)** — so a saturated generic direction (including the "intuitively niche" non-diabetic CKD or dialysis) is no longer mis-pushed as the top pick.
 
 ### Example 2 · Two-group binary meta (most common)
 **You say:**
@@ -316,7 +310,7 @@ CLI examples, bidirectional solving, curve mode, core formulas, system requireme
 
 ---
 
-**Version**: v2.1.1 | **License**: MIT | **Authors**: medstatstar, phoe-zip
+**Version**: v2.1.5 | **License**: MIT | **Authors**: medstatstar, phoe-zip
 
 For feature requests, bug reports, or other feedback, please contact the author directly at medstatstar@gmail.com (Wintone Zhang / 张文彤).
 

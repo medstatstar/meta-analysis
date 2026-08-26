@@ -115,10 +115,13 @@ Score with anchors, run R1–R6, choose meta type via decision tree.
 
 ### Stage 4 — Dedup search + PRISMA/AMSTAR-2 pre-check
 See `dedup-search.md` and `compliance-precheck.md`.
-Three-layer dedup: PROSPERO → Cochrane → PubMed (last 5 years);
-non-English scope → CNKI / 万方 / 维普 / SinoMed extension (user opt-in,
-network note applies).
-- **Gate 4**: dedup evidence + compliance risk 🟢/🟡/🔴 recorded → Stage 5.
+**Dedup is self-contained**: run the in-skill Europe PMC probe
+`adapters/literature_probe.py` (`dedup_probe`) for the **Cochrane (CDSR)** and
+**PubMed/MEDLINE** layers — live, by default, no other skill required. It returns
+real `hit_count` + top titles that directly feed the novelty dimension and the R7
+ranking. PROSPERO and non-English DBs remain guided manual steps (no clean public
+API). Templates are only a fallback when the network is unavailable.
+- **Gate 4**: dedup evidence (live `hit_count` from the probe) + compliance risk 🟢/🟡/🔴 recorded → Stage 5. If `any_error` (network down), mark dedup **"unverified"** and state so in the report.
 
 ### Stage 5 — Topic report generation
 Mode A (recommended): `python scripts/generate_topic_report.py input.json output.md|html`.

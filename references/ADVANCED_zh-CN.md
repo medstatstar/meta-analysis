@@ -8,23 +8,20 @@
 
 ## 1. CLI 调用示例 / CLI Invocation Examples
 
-### 通过 Python helper
+### 通过 Python helper（技能侧）
 ```bash
 cd meta-analysis
-# 从模板生成 R 脚本（不执行）
-python src/r_engine/r_templates.py
+# 自检与 coze 端点的连通性
+python adapters/coze_client.py
 
-# 检查环境
-bash src/r_engine/check_integrity.sh
-
-# 查看包安装命令
-Rscript src/r_engine/setup_packages.R
-
-# 运行特定分析（示例：二分类 Meta）
-Rscript src/r_engine/meta_analysis_core.R --help
+# 运行分析（委派给 coze R 引擎）
+python adapters/run_analysis.py ...
 ```
 
-### 直接调用 R
+> **coze 项目 R 引擎维护命令**（包安装、分发器运行、模块帮助等）**不在此发布**——它们位于
+> `adapters/coze_project/DEV.md`（已被 git/clawhub 忽略，不进入发布包），仅供 coze 项目维护者使用。
+
+### 直接调用 R（仅作参考——计算在 coze 端进行）
 ```r
 library(metafor)
 # 二分类 Meta

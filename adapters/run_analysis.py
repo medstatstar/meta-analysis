@@ -1,22 +1,22 @@
 """
-adapters/run_analysis.py — 元分析统一调用入口（coze 优先 + 本地兜底）
+adapters/run_analysis.py — 元分析统一调用入口（coze 唯一路径）
 
-默认行为（prefer="coze"）：
-  1. 调用 coze 工作流（adapters/coze_client.run_meta）；
-  2. 若 coze 不可用（网络错误 / HTTP 非 2xx / 空响应），自动回退到本地 R 引擎
-     （adapters/local_engine.run_meta），结果 _source 标记为 "local_fallback"；
-  3. 若两者皆失败，抛出 RuntimeError 同时报告两路错误。
+默认行为（coze-only）：
+  调用 coze 工作流（adapters/coze_client.run_meta）完成 R 计算。
+  - 认证未授权（AuthRequiredError）→ 返回明确提示，不绕过 ct-base §5 授权门控、不回退本地。
+  - coze 调用失败 → 返回结构化错误（含 coze 错误原文），不再本地兜底。
 
-显式本地（prefer="local"）：
-  仅调用本地 R 引擎（用户明确要求本地分析，或离线 / coze 不可达环境）。
+本地 R 引擎（原 adapters/local_engine.py）自 2026-08-26 起已从主路径移除，
+移至 adapters/_dev/local_engine.py（git/clawhub 忽略、不随发布包分发），
+仅作为开发者本地调试 / 复现保留，run_analysis 不再调用它。
 
 返回结果统一带 `_source` 字段：
-  "coze"          — 由 coze 工作流产出
-  "local_fallback"— coze 失败、已本地兜底
-  "local"         — 用户明确要求、仅本地产出
+  "coze"         — 由 coze 工作流产出
+  "auth_blocked" — 未授权出站，未使用云端分析
+  "coze_error"   — coze 调用失败
 
 CLI：
-  python adapters/run_analysis.py <request.json> [--prefer coze|local]
+  python adapters/run_analysis.py <request.json>
   request.json = {"task":..., "data":..., "params":..., "figure":...}
 """
 
@@ -27,12 +27,11 @@ import time
 import hashlib
 import socket
 
-# 让 coze_client / local_engine / rendering 可被直接 import
+# 让 coze_client / rendering 可被直接 import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from coze_client import run_meta as _coze_run
 from coze_client import AuthRequiredError
-from local_engine import run_meta as _local_run
 from rendering import svg_to_png
 
 # 渲染计时阈值（秒）：**本地渲染阶段**（拿到 SVG → 处理 → 界面渲染完成）超过该值，
@@ -45,14 +44,8 @@ RENDER_SVG_KB_THRESHOLD = 200.0
 
 
 def run_analysis(task: str, data: dict, params: dict | None = None,
-                 figure: dict | None = None, prefer: str = "coze") -> dict:
-    """统一分析入口。prefer='coze'（默认）优先 coze、失败兜底本地；prefer='local' 仅本地。"""
-    if prefer == "local":
-        res = _local_run(task, data, params, figure)
-        res["_source"] = "local"
-        return res
-
-    # 默认：coze 优先
+                 figure: dict | None = None) -> dict:
+    """统一分析入口（coze-only）。coze 失败 / 未授权时返回结构化错误，不回退本地。"""
     # §8.6 query_origin：客户端计算主机名 SHA-256 哈希（"sha256:" + 64hex = 71 字符），
     # 随请求发送，供 coze 端归因/限流；coze 端不得兜底生成（客户端唯一真相源）。
     query_origin = "sha256:" + hashlib.sha256(socket.gethostname().encode("utf-8")).hexdigest()
@@ -61,45 +54,28 @@ def run_analysis(task: str, data: dict, params: dict | None = None,
         res["_source"] = "coze"
         return res
     except AuthRequiredError as e_auth:
-        # ct-base §5 授权门控：未授权出站不阻断 —— 优先本地兜底；本地不可用时
-        # 返回明确提示（授权问题可解决，非系统故障，不抛 RuntimeError）
-        try:
-            res = _local_run(task, data, params, figure)
-            res["_source"] = "local_fallback"
-            note = res.get("notes") or ""
-            res["notes"] = (
-                f"{note}  [未授权出站（ct-base §5）：本次未使用云端分析，已用本地引擎。"
-                f"如需云端分析请确认授权：{e_auth}]".strip()
-            )
-            res["_auth_required"] = True
-            return res
-        except Exception as e_local:
-            return {
-                "status": "error",
-                "notes": (
-                    f"未授权出站（ct-base §5 授权门控），本次未使用云端分析；"
-                    f"本地引擎亦不可用（{type(e_local).__name__}: {e_local}）。"
-                    f"如同意将分析数据发送至云端，请确认授权后重试（端点 {_coze_run.__module__}）。"
-                ),
-                "_source": "auth_blocked",
-                "_auth_required": True,
-                "figures": [],
-                "warnings": [],
-            }
+        # ct-base §5 授权门控：未授权出站不阻断、也不绕过 —— 返回明确提示，由用户确认授权后重试。
+        return {
+            "status": "error",
+            "notes": (
+                f"未授权出站（ct-base §5 授权门控），本次未使用云端分析。"
+                f"如同意将分析数据发送至云端，请确认授权后重试"
+                f"（端点 {_coze_run.__module__}）。"
+            ),
+            "_source": "auth_blocked",
+            "_auth_required": True,
+            "figures": [],
+            "warnings": [],
+        }
     except Exception as e_coze:
-        try:
-            res = _local_run(task, data, params, figure)
-            res["_source"] = "local_fallback"
-            note = res.get("notes") or ""
-            res["notes"] = (
-                f"{note}  [coze 调用失败，已本地兜底：{type(e_coze).__name__}]".strip()
-            )
-            res["_coze_error"] = str(e_coze)[:500]
-            return res
-        except Exception as e_local:
-            raise RuntimeError(
-                f"coze 与本地 R 引擎均失败。\ncoze: {e_coze}\n本地: {e_local}"
-            )
+        return {
+            "status": "error",
+            "notes": f"coze 调用失败：{type(e_coze).__name__}: {e_coze}",
+            "_source": "coze_error",
+            "_coze_error": str(e_coze)[:500],
+            "figures": [],
+            "warnings": [],
+        }
 
 
 def render_figures(out: dict, mode: str = "svg_inline", out_dir: str = "output",
@@ -172,15 +148,13 @@ def _render_hint(out: dict) -> str | None:
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="元分析统一调用（coze 优先 + 本地兜底）")
+    ap = argparse.ArgumentParser(description="元分析统一调用（coze-only）")
     ap.add_argument("request", help="JSON 请求文件路径")
-    ap.add_argument("--prefer", choices=["coze", "local"], default="coze",
-                    help="coze=默认优先并兜底本地；local=仅本地")
     a = ap.parse_args()
 
     req = json.load(open(a.request, encoding="utf-8"))
     out = run_analysis(
         req.get("task"), req.get("data"), req.get("params"),
-        req.get("figure"), prefer=a.prefer,
+        req.get("figure"),
     )
     print(json.dumps(out, ensure_ascii=False, indent=2)[:4000])

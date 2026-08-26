@@ -9,8 +9,12 @@
 
 # coze 项目本地镜像（与 coze 远端双向同步的唯一源，2026-08-19 统一放置）
 # 含 coze_contract.md（接口契约，ct-base §16.7 红线：不随技能发布）与 R 引擎/部署脚本
-# 注意：本地引擎即镜像 src/r_engine/（技能根 r_engine/ 已废弃删除，local_engine 指向此处）
+# 注意：本地引擎即镜像 src/r_engine/（技能根 r_engine/ 已废弃删除）
 adapters/coze_project/
+
+# 开发者本地调试/复现用（2026-08-26 起）：原回退引擎 local_engine.py 从主路径移除后
+# 置于此处，git/clawhub 双重忽略 → 不随发布包分发，仅本地开发调试使用。run_analysis 不再调用。
+adapters/_dev/
 
 # 本地凭据覆盖文件（ct-base §5：公开凭据须内嵌 .py，config/*.dat 不入包——
 # SkillHub 窄白名单不含 .dat 会被静默剥离；该文件仅作本地 store_token 覆盖，禁止随发布）
@@ -23,6 +27,8 @@ __pycache__/
 # 发布排除（ct-base §16.8 干净包）：调试产物 / 运行产物 / 测试夹具 / 废弃根 r_engine / PNG 图标
 Rplots.pdf
 output/
+# 会话期选题分析产物（候选地图等），属工作区交付物而非技能通用资产，不进发布包
+meta_analysis/
 tests/
 # coze 模式 B 测试夹具（46 例，仅测试脚本引用、运行时零引用，不进发布包）
 adapters/coze_cases/
