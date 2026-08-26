@@ -20,28 +20,30 @@
   <text x="270" y="259" font-family="sans-serif" font-size="8" font-weight="400" fill="#FFFFFF" opacity="0.85">↑</text>
   <text x="400" y="196" font-family="sans-serif" font-size="8" font-weight="400" fill="#FFFFFF" opacity="0.85">precision</text>
 
-  <rect x="320" y="162" width="20" height="16" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(-1, 330, 170)"/>
-  <line x1="300" y1="170" x2="340" y2="170" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" transform="rotate(-1, 320, 170)"/>
+  <g transform="translate(340 195) scale(1.31) translate(-340 -242)">
+    <rect x="320" y="162" width="20" height="16" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(-1, 330, 170)"/>
+    <line x1="300" y1="170" x2="340" y2="170" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" transform="rotate(-1, 320, 170)"/>
 
-  <rect x="292" y="176" width="26" height="20" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
-  <line x1="270" y1="186" x2="318" y2="186" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>
+    <rect x="292" y="176" width="26" height="20" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
+    <line x1="270" y1="186" x2="318" y2="186" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>
 
-  <rect x="332" y="206" width="24" height="18" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(1, 344, 215)"/>
-  <line x1="310" y1="215" x2="356" y2="215" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" transform="rotate(1, 333, 215)"/>
+    <rect x="332" y="206" width="24" height="18" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(1, 344, 215)"/>
+    <line x1="310" y1="215" x2="356" y2="215" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" transform="rotate(1, 333, 215)"/>
 
-  <rect x="300" y="222" width="16" height="13" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
-  <line x1="284" y1="228" x2="316" y2="228" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+    <rect x="300" y="222" width="16" height="13" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
+    <line x1="284" y1="228" x2="316" y2="228" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
 
-  <rect x="316" y="244" width="28" height="22" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(0.5, 330, 255)"/>
-  <line x1="290" y1="255" x2="344" y2="255" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" transform="rotate(0.5, 317, 255)"/>
+    <rect x="316" y="244" width="28" height="22" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(0.5, 330, 255)"/>
+    <line x1="290" y1="255" x2="344" y2="255" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" transform="rotate(0.5, 317, 255)"/>
 
-  <rect x="324" y="264" width="16" height="12" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(-1.5, 332, 270)"/>
-  <line x1="310" y1="270" x2="338" y2="270" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" transform="rotate(-1.5, 324, 270)"/>
+    <rect x="324" y="264" width="16" height="12" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(-1.5, 332, 270)"/>
+    <line x1="310" y1="270" x2="338" y2="270" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" transform="rotate(-1.5, 324, 270)"/>
 
-  <rect x="310" y="280" width="20" height="15" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
-  <line x1="292" y1="287" x2="330" y2="287" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>
+    <rect x="310" y="280" width="20" height="15" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
+    <line x1="292" y1="287" x2="330" y2="287" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>
 
-  <polygon points="324,302 344,312 324,322 304,312" fill="#0F6E56" stroke="#04342C" stroke-width="2" stroke-linejoin="round"/>
+    <polygon points="324,302 344,312 324,322 304,312" fill="#0F6E56" stroke="#04342C" stroke-width="2" stroke-linejoin="round"/>
+  </g>
 
   <text x="340" y="360" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="600" fill="#3C3489">Meta-Analysis</text>
 </svg>
