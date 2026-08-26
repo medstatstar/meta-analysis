@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """coze_integration_test.py — meta-analysis 技能 × coze 已部署工作流 联调测试器
 
-端点（2026-08-17 用户提供）：https://ct-meta.coze.site/run  （已发布的 coze 工作流）
+端点（2026-08-26 改造）：主工作流 https://ct-meta.coze.site/run（已发布的 coze 工作流）
 鉴权：Authorization: Bearer <token>   （token 来自 adapters/coze_token 或 env COZE_META_TOKEN）
 入参（Body JSON）：{task:string, data:object, params:object, figure:object}
 出参（response JSON）：{result: "<结构化结果 JSON 字符串>"}
@@ -32,25 +32,25 @@ import urllib.request
 
 # ---- 凭据解析（与 coze_client 同优先级：env > 内嵌 blob；本地 .dat 曾用于覆盖，发布后被剥） ----
 try:
-    from coze_token import get_token as _embedded_get_token
+    from coze_token import get_token_for as _embedded_get_token_for
 except Exception:  # 平铺运行
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from coze_token import get_token as _embedded_get_token
+        from coze_token import get_token_for as _embedded_get_token_for
     except Exception:
-        _embedded_get_token = None
+        _embedded_get_token_for = None
 
 DEFAULT_ENDPOINT = "https://ct-meta.coze.site/run"
 DEFAULT_CASES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coze_cases")
 REQUEST_TIMEOUT = 300  # 秒（coze 建议单次 5 分钟内）
 
 
-def resolve_token() -> str:
+def resolve_token(endpoint: str = DEFAULT_ENDPOINT) -> str:
     env = os.environ.get("COZE_META_TOKEN")
     if env:
         return env
-    if _embedded_get_token is not None:
-        return _embedded_get_token() or ""
+    if _embedded_get_token_for is not None:
+        return _embedded_get_token_for(endpoint) or ""
     return ""
 
 
@@ -156,7 +156,7 @@ def main() -> int:
     ap.add_argument("--only", default="")
     args = ap.parse_args()
 
-    token = resolve_token()
+    token = resolve_token(args.endpoint or DEFAULT_ENDPOINT)
     if not token:
         print("❌ 无法解析 coze token（env COZE_META_TOKEN 与内嵌 blob 皆空）。")
         return 2

@@ -3,10 +3,10 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: 医学Meta分析 / Meta Analysis
-version: 2.1.5
-summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
+version: 2.1.8
+summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
 license: MIT
-description: "基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。 / Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code."
+description: "基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。 / Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta, for a total of 23 analysis figures. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code."
 
 required_commands: [python]
 invocable: true
@@ -20,11 +20,9 @@ triggers:
   - "异质性"
   - "发表偏倚"
   - "元回归"
-  - "网络meta"
   - "network meta"
   - "贝叶斯meta"
   - "效应量转换"
-  - "单组率meta"
   - "TSA"
   - "诊断meta"
 permissions:
@@ -37,7 +35,7 @@ metadata:
   {
     "openclaw": { "emoji": "📊", "icon": "assets/icon.svg" },
     "authors": ["medstatstar", "phoe-zip"],
-    "version": "2.1.5",
+    "version": "2.1.8",
     "license": "MIT",
     "homepage": "https://github.com/medstatstar/meta-analysis",
     "tags": ["meta-analysis", "systematic-review", "clinical-trials", "R", "biostatistics", "evidence-based-medicine", "forest-plot", "network-meta-analysis", "bayesian", "metafor", "meta", "netmeta", "gemtc", "revman", "robumeta", "clubSandwich", "esc", "dosresmeta", "mada", "metagear", "forestploter"],
@@ -50,7 +48,7 @@ metadata:
 
 ## Language
 
-- **English guide** → [README.md](https://github.com/medstatstar/meta-analysis/blob/main/README.md) · **中文指南** → [README_zh-CN.md](https://github.com/medstatstar/meta-analysis/blob/main/README_zh-CN.md)
+- **English guide** → [README.md](https://github.com/medstatstar/meta-analysis/blob/main/README.md) · **Chinese guide** → [README_zh-CN.md](https://github.com/medstatstar/meta-analysis/blob/main/README_zh-CN.md)
 - Bilingual auto-switch: the answer language follows the user's question language (English question → English answer, Chinese question → Chinese answer).
 
 ## 1. Triage — First step: classify the user's intent
@@ -99,12 +97,19 @@ Module → R-package/function matrix (single-group / pairwise / effect-size / fo
 
 **Artifacts**: `analysis_complete.R` + forest/funnel (`.svg`) + `results_summary.md` + `data_backup.csv` (written to `output/`); PNG only generated in local conversion mode.
 
-**Rendering**: all `figures[].svg` are **inlined into the conversation** and also saved to `output/` for download. Figures keep original size (no scaling); overflow → horizontal scrollbar (x pad=8, y pad_y=24). Inline-rendering standard → `references/inline_rendering.md`; SVG editing/journal-format conversion → `references/svg_editing.md`.
+**Rendering (inline by default, mandatory)**: All `figures[].svg` are **rendered inline into the conversation stream by default** (agent uses `show_widget` to display figures inline), while also being written to `output/` for download/editing. **Inline rendering is the default and a mandatory requirement — figures must NOT be delivered merely as file cards/attachments.** Figures keep their original size (no scaling); on overflow → horizontal scrollbar (x pad=8, y pad_y=24).
+> ⚠️ S3 offloading is transport-only: the coze side uploads `figures[].svg` / `repro.r` to S3 and returns a `url`; the local `coze_client._fill_external_svgs` **backfills the inline SVG by default** (`figures[].svg` remains usable as normal), so inline presentation is unaffected.
+> ⚠️ Since 2026-08-26, `figures[].svg` is the **raw svglite output with no simplification/minify** (output verbatim per user request); XML validity is guaranteed by the downstream `rendering._fix_xml` (PNG path) and the browser's lenient parsing (inline path).
+> 📦 **Aggregated HTML report (added 2026-08-26, optional supplementary deliverable)**: On every successful analysis, `run_analysis` writes a single-file HTML report path to `out['html_report']` (inline SVG + detailed stats table + `<details>` collapsible R reproduction code); the agent opens it with `present_files` for the built-in preview, serving as the "full version" beyond the inline main figures in the conversation stream. Consolidation is done **locally** — the coze response body contains only `stats` + S3 `url`, and is **unaffected by the 4000-char truncation or S3 link expiry**; when `_coze_truncated` is present, a truncation warning is appended at the top of the report. Implementation: `adapters/rendering.render_html_report`.
+Inline-rendering spec → `references/inline_rendering.md`; SVG editing / journal-format conversion → `references/svg_editing.md`.
+
+> ⚠️ **coze endpoint fallback (2026-08-26)**: If the primary workflow endpoint `https://ct-meta.coze.site/run` returns 401/403 due to **token mismatch** (body contains token/auth/invalid keywords), the client automatically retries with the fallback endpoint `https://ct-meta2.coze.site/run` (**the fallback endpoint uses its own dedicated legacy token**; the two JWTs differ and must not be mixed); on successful fallback, the result carries a `_coze_endpoint_notice` field + a `notes` appendix: "Primary analysis workflow address switched; this analysis was auto-fallback to the backup coze endpoint." Non-token errors (400 generic, 5xx, network unreachable) do not trigger fallback and are reported directly. Implementation: `adapters/coze_client.py` (`FALLBACK_ENDPOINT` / `get_token_for` / `run_meta`).
 
 **LLM presentation-layer hard constraints (mandatory)**:
 1. **Quote numbers verbatim**: values in `stats`/`pooled`/`heterogeneity`/`bias` MUST be cited exactly — no rewriting, rounding, or recomputation.
 2. **Prefer verbatim standard labels**: adopt coze's bilingual template wording directly; do not re-translate.
 3. **Do only two things**: organize the template wording into fluent user language + add one explanatory sentence as needed; the explanation must not override or alter template numbers.
+4. **Figures inline by default (mandatory)**: figures MUST be rendered inline (agent uses `show_widget` to render into the conversation stream); they must not degrade into mere file cards/attachments; S3 offloading only affects transport and does not change the inline default behavior.
 
 **Quality Gate (human sign-off)**: before presenting pooled estimates, the R side runs `run_quality_gate()` → gate JSON; red (k<3 / I²>75% / missing bias check) **blocks** presentation — released only after manual confirmation. Numeric judgments are made by R, never read by the LLM.
 

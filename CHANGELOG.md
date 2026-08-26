@@ -4,6 +4,90 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.2.0] — 2026-08-26 — 图形回归修复 + 扩充影响诊断 / 节点拆分 / 剪补法漏斗
+
+### Fixed（coze 端图形回归，线上实测发现）
+- **`.render_fig` 未打印 ggplot 对象**：原函数对 `function() .sucra_plot(rk)` / `.egger_plot()` / `.bubble_plot()` 这类「返回 ggplot」的工厂直接调用并丢弃返回值 → SVG 为空。线上实测 sucra/egger/bubble 三个图均返回 0 字节 SVG。改为捕获函数返回值、若为 ggplot 则 `print()`，基础绘图函数（forest/funnel/netgraph 等副作用绘制）不受影响。
+- **NMA 贡献图静默失败**：`netmeta::netgraph(fit, contribution = TRUE, seq = TRUE)` 在 netmeta 3.6.1 不支持（`contribution` 被当图形参数忽略、`seq` 触发「argument is not interpretable as logical」），原 tryCatch 静默吞错 → `figures` 为空。改用 `.contribution_plot()`：优先原生 `netgraph(contribution=TRUE)`（新版本），否则走 `decomp.design()` 取各比较对不一致性的贡献（Q.inc.design）以 ggplot 条形图呈现，version-independent。
+
+### Added（进一步扩充支持范围）
+- **影响诊断图 `influence`**（pairwise_meta 等分支，`plots:["influence"]`）：`metafor::influence(rma_fit)` 多面板（Cook 距离 / 杠杆 / CovRatio / DFFITS / hat），7×9 SVG。
+- **节点拆分图 `nodesplit`**（nma 分支，`plots:["nodesplit"]`）：`netsplit(fit)` → `forest()` 呈现局部不一致性（直接 vs 间接 vs 网络估计），netmeta 已依赖。
+- **剪补法漏斗图 `trimfill`**（pairwise_meta 分支，`plots:["trimfill"]`）：`meta::trimfill(fit)` 后画漏斗，呈现发表偏倚校正后估计。
+- 渲染层 `rendering.py` 双语图注补齐 `fig_influence` / `fig_nodesplit` / `fig_trimfill`，`type_names` 映射同步；现支持 **23 种** coze figure type 全图注。
+
+### Verified
+- R `parse()` 通过；本地 R 4.6.1 跑 `run_task.R` 真路径：sucra 5121 / egger 11439 / contribution 4903 / loo 8962 / cumulative 8963 / influence 43986 / nodesplit 12066 / trimfill 19967 / bubble 7017 字节 SVG 全部非空；`render_html_report` 23 种 type 双语自测 raw_hits=[] 且 missing=[]。
+
+---
+
+## [2.1.7] — 2026-08-26 — coze 端点重构：ct-meta2 主 / ct-meta 回退 + per-endpoint token
+
+### Added
+- **主工作流端点切换为 ct-meta2、回退 ct-meta**：`DEFAULT_ENDPOINT=https://ct-meta2.coze.site/run`（用户新 token，aud=`5v9HMQWtTSzxrEeZjI7kJJEzeMPrHXny`）；`FALLBACK_ENDPOINT=https://ct-meta.coze.site/run`（旧端点，保留旧 token，aud=`oxwSsfwdtRRfByYIM8Xg3U4RQH5OgEjO`）。
+- **token 改为按端点分别解析**：`coze_token.get_token_for(endpoint)` 按 URL 映射不同工作流 JWT（ct-meta2 用新、ct-meta 用旧），不再全局共用；`_resolve_token(endpoint)` / `_headers(endpoint)` 接收端点参数，回退时用回退端点专属 token。优先级：`COZE_META_TOKEN`（全局覆盖）> 端点专属内嵌 blob > 历史默认 blob。
+- **回退触发条件**：主端点因 token 不一致（401/403 + token/auth/invalid 关键字）失败时自动回退重试；回退成功结果附 `_coze_endpoint_notice` 并追加 notes「主分析工作流地址已切换，本次分析已自动回退到备用 coze 端点完成」。双端均 token 失败则抛错提示更新技能。
+- `config.json` 白名单：移除 `wr65rdbc4w`，加入 `ct-meta2`（现三项：ct-meta2 / ct-meta / ct-bugreport）。
+
+### Changed
+- `coze_token.get_token` 重构为 `get_token_for(endpoint)` + `ENDPOINT_TOKEN_MAP`，支持 per-endpoint 凭据；`SKILL.md` / `README*` / `coze_integration_test.py` 同步更新旧默认端点引用。
+
+### Verified
+- 模块编译；`get_token_for("ct-meta2")`→aud=`5v9HMQWtTSzxrEeZjI7kJJEzeMPrHXny`、`get_token_for("ct-meta")`→aud=`oxwSsfwdtRRfByYIM8Xg3U4RQH5OgEjO`（二者不同）；线上探测两端点均 HTTP 200 + `unknown_task`（token 被接受）。
+
+---
+
+## [2.1.8] — 2026-08-26 — 聚合 HTML 报告（结果展示改进）
+
+### Added
+- **`rendering.render_html_report(out, out_dir="output")`**：把分析结果拼成单文件聚合 HTML 报告（内联 SVG 图形 + 统计结果明细表 + `<details>` 折叠可复现 R 代码），固化在**本地 agent 侧**。coze 返回体仅含 `stats`+S3 `url`，**不受 4000 截断与 S3 链接过期影响**；`_coze_truncated` 存在时报告顶部附截断告警 banner。
+- 复用 `build_figure_widget`（含 content_bbox 扩展 viewBox、clip 移除、points 拆分与同名 CSS 变量），并自包含浅色主题 CSS（定义 `--color-text-primary` 等变量确保内联 SVG 区块在独立文件里正确着色）。
+- `run_analysis.run_analysis` 成功分支自动调用，结果 `out['html_report']` 写入报告路径；生成失败不影响主结果（try/except 静默）。
+
+### Changed
+- `run_analysis` 顶部 import 增加 `render_html_report`。
+
+### Verified
+- 离线验证：真实森林图(8056B)+漏斗图(6321B) SVG 正确固化进单文件 HTML(17.5KB)，统计表 / 折叠 R 代码 / 截断 banner / CSS 变量解析 / `.format` 占位符清理均正确；`run_analysis` import 链编译无误。
+
+### Fixed
+- **PRISMA 流程图 `prisma_flow` 渲染崩溃（线上实测 status=error：`object 'label' not found`）**：`plot_prisma_flow`（`adapters/coze_project/src/r_engine/advanced_functions.R`）把 `label` 设在 `ggplot(df, aes(..., label = label))` 的**全局美学**里，被第 3 层 `geom_segment` 继承，而该层自己的 data.frame（x/y/xe/ye）无 `label` 列 → 渲染期报错。改为把 `label = label` 移入 `geom_text(aes(label = label))` 局部美学，`geom_segment` 不再继承 `label`。本地 R 4.6.1 复现并修复：ggsave 输出 5588 字节 SVG 正常。
+- **SKILL.md `description` 与 `summary` 对齐**：`summary` 已含「等共 23 种分析图形」，`description` 中文段原缺失该表述 → 已补齐，英文段同步加「for a total of 23 analysis figures」，保留 ` / ` 双语分隔。
+
+---
+
+## [2.1.9] — 2026-08-26 — 新增四张图形（SUCRA / Egger / 贡献图 / 留一法·累积）并补齐 HTML 双语展示
+
+### Added
+- **SUCRA 排名图（`sucra`）**：NMA 排序图。在 `nma_rank` 分支接线 `if("sucra" %in% plots || (task=="nma_rank" && length(plots)==0))`；新增 `.sucra_plot(rk)`（ggplot 水平条形图，读 `rk$Pscore.random`/`Pscore`，零新增包）。
+- **Egger 回归散点图（`egger`）**：在 `pairwise_meta`/`funnel_plot`/`trimfill`/`subgroup_analysis`/`metareg` 的偏倚块内接线 `if("egger" %in% plots)`，复用已算 `rma_fit`；新增 `.egger_plot(rma_fit)`（ggplot 散点 + `geom_smooth(lm)`，x=1/SE，y=yi/SE）。
+- **NMA 贡献图（`contribution`）**：在 NMA 分支接线 `if("contribution" %in% plots)`，调用 `netmeta::netgraph(fit, contribution=TRUE, seq=TRUE)`。
+- **留一法影响图（`loo`）/ 累积 Meta 图（`cumulative`）**：分别在 `leave_one_out` / `cumulative_meta` 分支接线（默认出图），用现有 `loo_df`/`cu_df` 经 `metafor::forest` 画 forest 变体。
+- **HTML 双语展示补齐**：`rendering.py` 的 `_I18N`（zh/en）与 `type_names` 新增 `sucra`/`egger`/`contribution`/`loo`（`cumulative` 此前已在字典内，本次真正出图）。`locale="en"` 时对应英文 caption 生效。
+
+### Changed
+- 所有新增 `figs <- c(figs, list(.render_fig(...)))` 均用 `tryCatch(..., error=function(e) figs)` 包裹：单图出错仅静默降级、不影响其他图形与整体返回（`.render_fig` 自身无错误保护）。
+- 后续发布不再带本地 R 引擎，图形一律由 coze 端 R 引擎（`adapters/coze_project/src/r_engine/`）生成，故改动落在 coze_project 代码而非本地 r_engine。
+
+### Verified
+- R 语法：`parse()` 通过 `meta_analysis_core.R` / `run_task.R` / `network_meta_analysis.R`。
+- 渲染层：合成多 type figures 调 `render_html_report(locale=zh/en)`，12 项 caption 断言全 OK（含 `L'Abbe` / `Egger's` 撇号转义归一化），`type_names` 无回退到裸 type。
+- **未做**：coze 容器端到端 SVG 生成（需重新部署到 ct-meta2 端点；按发布红线未自动部署）。
+
+---
+
+## [2.1.6] — 2026-08-26 — 图形默认内联 + 停止 SVG 精简
+
+### Changed
+- **图形默认内联（强制）**：`SKILL.md` §5 明确 `figures[].svg` **默认内联渲染进对话流**，agent 须用 `show_widget` 内联展示，不得退化为仅文件卡片/附件；S3 外置仅影响传输层，不改变内联默认行为（`coze_client._fill_external_svgs` 默认回填内联 SVG）。
+- **停止 SVG 精简、原样输出**：`run_task.R` 的 `.render_fig` 移除 `minify` 形参与 `.minify_svg` 调用，直接透传 svglite 原始字符串（`.minify_svg` 保留为 DEPRECATED 死代码，不再被调用）。`coze_contract.md` §5 同步声明 `figures[].svg` 为 svglite 原始输出、不做任何 minify。
+- 4000 截断防护改为完全依赖 S3 外置（传输层）+ 字段重排 + `_trim_to_limit` 兜底，不再依赖体积精简。
+
+### Verified
+- `run_task.R` 源码自洽：`.render_fig` 透传、`minify` 调用已删、`.minify_svg` 仅注释保留，无悬空引用。
+
+---
+
 ## [2.1.5] — 2026-08-26 — README 去除内部框架注解
 
 ### Changed

@@ -54,7 +54,7 @@ adapters/
 
 | 变量 | 说明 | 默认 |
 |------|------|------|
-| `COZE_META_ENDPOINT` | coze 工作流 `/run` 地址（2026-08-19 修正，旧默认 localhost 会误报不可达） | `https://ct-meta.coze.site/run` |
+| `COZE_META_ENDPOINT` | coze 工作流 `/run` 地址（2026-08-26 改造，主工作流回切 ct-meta） | `https://ct-meta.coze.site/run` |
 | `COZE_META_TOKEN` | 可选 Bearer 鉴权令牌 | 空（不带 Authorization） |
 | `COZE_META_TIMEOUT` | 请求超时（秒） | `600` |
 

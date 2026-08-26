@@ -234,6 +234,40 @@ Tests are grouped by **analysis purpose** (7 categories below). Each row gives t
 
 ---
 
+---
+
+## 2.1 Supported Figures (23)
+
+The skill renders **23 analysis figures** on the cloud coze R engine. Pass the plot type via the `plots` field. `prisma_flow` / `prisma` and `rob` / `rob2` resolve to the same figure.
+
+| # | Plot type | 中文名 | English name | Analysis area | Purpose |
+|:---:|:---|:---|:---|:---|:---|
+| 1 | `forest` | 森林图 | Forest plot | Pairwise / NMA | Pooled effect-size summary |
+| 2 | `funnel` | 漏斗图 | Funnel plot | Pairwise | Publication-bias visual |
+| 3 | `prisma_flow` | PRISMA 流程图 | PRISMA flow diagram | Systematic review | Four-stage screening flow |
+| 4 | `rob` / `rob2` | 偏倚风险图 | RoB traffic-light / summary | Study quality | Cochrane RoB 1.0 / 2.0 |
+| 5 | `cumulative` | 累积 Meta 图 | Cumulative meta plot | Pairwise | Accumulated by study order |
+| 6 | `baujat` | Baujat 图 | Baujat plot | Heterogeneity | Heterogeneity contributor |
+| 7 | `labbe` | L'Abbe 图 | L'Abbe plot | Pairwise (binary) | Effect-consistency check |
+| 8 | `radial` | Radial 图 | Radial / Galbraith plot | Heterogeneity | Radial heterogeneity view |
+| 9 | `sucra` | SUCRA 排名图 | SUCRA ranking plot | NMA | Intervention rank probability |
+| 10 | `egger` | Egger 回归散点图 | Egger's regression plot | Bias | Quantitative bias test |
+| 11 | `contribution` | NMA 贡献图 | NMA contribution plot | NMA | Design / comparison contribution |
+| 12 | `loo` | 留一法影响图 | Leave-one-out plot | Sensitivity | Sensitivity analysis |
+| 13 | `gosh` | GOSH 图 | GOSH plot | Heterogeneity | Heterogeneity pattern clusters |
+| 14 | `bubble` | 气泡图 | Bubble plot | Meta-regression | Covariate–effect relationship |
+| 15 | `netgraph` | 网络关系图 | Network graph | NMA | Evidence-network structure |
+| 16 | `dose_resp` | 剂量反应图 | Dose-response plot | Dose-response | Dose–effect relationship |
+| 17 | `drapery` | Drapery 图 | Drapery plot | Sensitivity | α robustness |
+| 18 | `sroc` | SROC 曲线 | SROC curve | Diagnostic MA | Diagnostic accuracy |
+| 19 | `tsa` | 试验序贯分析图 | Trial sequential analysis | TSA | Evidence sufficiency / required N |
+| 20 | `power` | 功效曲线 | Power curve | Power | Statistical power |
+| 21 | `influence` | 影响诊断图 | Influence diagnostic plot | Sensitivity | Single-study omission impact |
+| 22 | `nodesplit` | 节点拆分图 | Node-splitting plot | NMA | Local inconsistency |
+| 23 | `trimfill` | 剪补法漏斗图 | Trim-and-fill funnel plot | Bias | Bias-corrected funnel |
+
+> Note: `netleague` (NMA league table) is a **tabular** output, not a figure, so it is excluded from the count of 23.
+
 ## 3. First-Time FAQ
 
 **Q: I only gave effect size and study count, no other parameters — will it still compute?**

@@ -29,7 +29,23 @@ EMBEDDED_SECRETS = {
     "meta_analysis_coze": (
         "CBw-CU8mDQgjEDk6JlcqXjQMZBwrC1kGa25wUHsJLw0uC3hTITUhSj89G0UsKC8RYyg0CmM1AERjIX9RITE9UmIlCVIhAyZYKWkAGDcMZ1ZMA1Q8QU4KK1ssBC8bBWUzGQIWFgUlQWsUDilQRw1RFkE6XGNML1sUBDwsN0YoBBEOMB5QR0lSIQA_QwsJAms8YndSLAc0OAk6LmsJACxdLEM8H2sqIS9cQz01Fn0_XR1KL181WQY3KBsuKigUNDcgQWMJCEkrRwxXKX4BWExuIAIqBwoML1cGXC44GgQmJ04aIzkvVws1L0Q5WGdDBXUPAD8ZNBstF1gEGjQCBnRRVkw_floIBERPAk8KLEABKlwcO2tYHjsrLwYNNEFTCilcXTUmCR44W04JKXYAWSseLBgvFDBdNBkwRmMZDE8sRBgLBR48W2RTCVsCOlAdAx43GzsqQBsNK38MN0gjRzZQMFcVABQJBAAXAQcYWF07Kg5fNxkKQ2I3CAIqaQgYKFcVAGNtNwctKQZAKENRQCBaM14qKXU8NzI6Zw04XmAFa25UFEAuKB0gB1xUCCYGOCI4BUEpGEoPYSwoNEY7Q2JSUVQFOB8xNHwoHiQWHDhcNkEaWBkKYl0YDlQae09wFHwpPVAGUnQjBxEqHjooRF8CDBw6XhoFI041XG5IEmsvJVYSE3kTBlVcGyYYFk5RFjkMShUrAEBBcEJKDHcZOi07UmIpBD4VICQAXlo1P0k8dzdWOWEdWlxaMHYGXzw6IhUFCTg0ChVaGlsGJis6RTUzI34yA2tXUgstBisrKRgoIQkgID05O2APKwkmRwcpNmc5ch5LHnZbCRIuG1kWKxEDOikwR08xCkwrZDYUV04sU257VGEwJw0VDBwVL1MhOAYwCkUSCTkgSQsyCV1DY1V8IwMZHxIQL0cSMVQAHREQMhVaPUpURyEIOW5bYk5IAXNOACBZO0kNBxIpIwUTNlskKwAjWg=="
     ),
+    # ct-meta2 工作流专属 token（aud=5v9HMQWtTSzxrEeZjI7kJJEzeMPrHXny）。与 ct-meta
+    # 使用不同工作流 JWT（aud=oxwSsfwdtRRfByYIM8Xg3U4RQH5OgEjO），故按 endpoint 分别内嵌，不可混用。
+    "ct_meta2_coze": (
+        "CBw-CU8mDQgjEDk6JlcqXjQMZBwrC1kGa25wUHsJClU5NWhUNxstAz8-OlUtOD8RYysgDGAfARhgHHsaITIhU2MMJ1MjPTEEKXkuWjccZ1ZMA1Q8QU4KK1ssBC8bBWUzGQIWFgUlQWsUDilQRw1RFkE6XGNML1sUBDwsN0YoBBEOMBk_QWI2BzQwewtSMGs4B0hxLHQ5OxUFMnkFHDIHCTUMHnstOjIvZDglUxg_XR1KL181WQY3KBsuKigUNDcgQWMJCEkrRwxXKX4BWExuIAIqBwoML1cGXS8WKEMnGU5WIzkvVws1L0Q5WGdDBXUPAD8ZNBstF1gEGjQCBnRRVkw_floIBERPAk8KLEABKlwcO2tYHjsrLwYNNEFTCilcXTUmCR44W04NK1g2FSsOLB4uOjgUNicOR2A3Ik4sRBgLBR48W2RTCVsCOlAdAx43GzsqQBsNK38MN0gjRzZQMFcVABQJBAAXAQcYWF07Kg5fNxkKR2AZLkoqeSIYKHk7AGBTAQMuBzwOKENRQBInKEA_NGoHIxhUeCA9LkUFfHQUHHUbGCdCNHkSA1EhLB4DIl42P0IMVCJQDXsFSEBxJGYxNykrAEtUQywHPzYsRVskCAALTAETFnoTdn9aFFoTPRZDLVtZNyocSyw4EEI0JA80eCEOUlsYRn1mCGQqHEgABXgyLSsUFT8gK1sELQIHYVcXC2c9Q3JOPFZQLFESBF4nOzAzKwEcPRUQK05UTwE6KXshRWRBBHcOGi5AMmAiPSQ6QTkiH3ImDSwgYBU0EGA1QHpfPwFXXiIYBhU4NiUoTEYLG38wVxESYzwkVWApQm99JVdSBSMCOXxMNlQiMic4EXwgLjgjSDksOUkbS2N2DnAvCisyCXpQFyo5MBgvC2E3Nz8RHB8lAE4AQkVTMmhRGS4gIFQZODcoTh4ISlckJjgRaQozPmwAd39eMHE8WRMGAEo2PlkPACAeN04HJjFWbA=="
+    ),
 }
+
+# 端点 → 内嵌凭据名 映射（per-endpoint token，2026-08-26）。
+# 每个端点使用各自专属工作流 JWT，按 endpoint 分别解析（不可混用）。
+ENDPOINT_TOKEN_MAP = {
+    "https://ct-meta2.coze.site/run": "ct_meta2_coze",
+    "https://ct-meta.coze.site/run": "meta_analysis_coze",
+}
+
+
+def _norm_url(u):
+    return (u or "").rstrip("/")
 
 # 局部落盘绝对路径（兼容历史：允许用户/作者用私有 key 覆盖内嵌默认值）。
 DEFAULT_TOKEN_PATH = os.path.expanduser(
@@ -103,3 +119,32 @@ def get_token(cli_token: str = None, token_path: str = None,
     """coze 便捷封装：等价于 get_secret("meta_analysis_coze", ...)。"""
     return get_secret("meta_analysis_coze", cli_token, token_env,
                       token_path or DEFAULT_TOKEN_PATH)
+
+
+def get_token_for(endpoint: str = None, cli_token: str = None,
+                  token_path: str = None, token_env: str = TOKEN_ENV) -> str:
+    """按 endpoint 解析 coze token（per-endpoint token 模式，2026-08-26 改造）。
+
+    优先级：cli > env(COZE_META_TOKEN，全局覆盖，对所有端点生效) >
+    端点专属内嵌 blob(ENDPOINT_TOKEN_MAP) > 历史默认 blob(meta_analysis_coze)。
+
+    - 主工作流 ct-meta2 用新 token（aud=5v9HMQWtTSzxrEeZjI7kJJEzeMPrHXny）；
+    - 回退端点 ct-meta 用旧 token（aud=oxwSsfwdtRRfByYIM8Xg3U4RQH5OgEjO）；
+    二者工作流 JWT 不同，必须按 endpoint 分别取用，不可混用。
+    """
+    if cli_token:
+        return cli_token
+    if token_env:
+        env = os.environ.get(token_env)
+        if env:
+            return env
+    if endpoint:
+        name = ENDPOINT_TOKEN_MAP.get(_norm_url(endpoint))
+        if name:
+            blob = EMBEDDED_SECRETS.get(name)
+            if blob:
+                try:
+                    return _obf_decode(blob)
+                except Exception:
+                    pass
+    return get_secret("meta_analysis_coze", cli_token, token_env, token_path)

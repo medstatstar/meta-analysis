@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from coze_client import run_meta as _coze_run
 from coze_client import AuthRequiredError
-from rendering import svg_to_png
+from rendering import svg_to_png, render_html_report
 
 # 渲染计时阈值（秒）：**本地渲染阶段**（拿到 SVG → 处理 → 界面渲染完成）超过该值，
 # 提示用户可切换图片文件模式（PNG 不内联 SVG，界面渲染通常更快）。
@@ -52,6 +52,15 @@ def run_analysis(task: str, data: dict, params: dict | None = None,
     try:
         res = _coze_run(task, data, params, figure, query_origin=query_origin)
         res["_source"] = "coze"
+        # 2026-08-26 展示改进：本地聚合 HTML 报告（内联 SVG + 统计表 + 折叠 R 代码），
+        # 作为对话内联之外的"完整版"交付物；coze 返回体不变，固化在 agent 侧完成，
+        # 不受 S3 链接过期与 4000 截断影响。生成失败不影响主结果。
+        try:
+            hp = render_html_report(res)
+            if hp:
+                res["html_report"] = hp
+        except Exception:
+            pass
         return res
     except AuthRequiredError as e_auth:
         # ct-base §5 授权门控：未授权出站不阻断、也不绕过 —— 返回明确提示，由用户确认授权后重试。
@@ -157,4 +166,11 @@ if __name__ == "__main__":
         req.get("task"), req.get("data"), req.get("params"),
         req.get("figure"),
     )
+    # 2026-08-26 设计迭代：完整结果（含内联 SVG / R）落盘，供渲染模板离线复用，
+    # 避免每次调整 HTML 样式都重复触发真实 coze 调用。
+    import os as _os
+    _ld = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "output")
+    _os.makedirs(_ld, exist_ok=True)
+    with open(_os.path.join(_ld, "last_run.json"), "w", encoding="utf-8") as _fh:
+        json.dump(out, _fh, ensure_ascii=False, indent=2)
     print(json.dumps(out, ensure_ascii=False, indent=2)[:4000])

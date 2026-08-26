@@ -148,7 +148,7 @@ meta-analysis 是**对话式技能**：用自然语言告诉助手你要做什�
 
 > 底层 R 包名（metafor / meta / netmeta …）见第 6 节「进阶参考」；普通用户无需关心。
 
-### ① 两组 Meta 分析
+### ① 成对（两臂）Meta 分析
 | 场景 | 试试这样说 |
 |:---|:---|
 | 二分类 (OR/RR/RD) | "合并这 5 项二分类研究的 OR" |
@@ -235,6 +235,40 @@ meta-analysis 是**对话式技能**：用自然语言告诉助手你要做什�
 > ⚠️ **PDF 批量下载**会访问外部网络并在本地磁盘写入文件。仅在用户明确要求时运行，并遵守版权与访问限制。
 
 ---
+
+---
+
+## 2.1 支持的分析图形（23 种）
+
+技能在云端 coze R 引擎上可渲染 **23 种分析图形**。图形类型通过 `plots` 字段传入。`prisma_flow`/`prisma` 与 `rob`/`rob2` 指向同一图形。
+
+| # | 图形类型 | 中文名 | English name | 所属分析 | 用途 |
+|:---:|:---|:---|:---|:---|:---|
+| 1 | `forest` | 森林图 | Forest plot | 两组 / NMA | 效应量合并主图 |
+| 2 | `funnel` | 漏斗图 | Funnel plot | 两组 | 发表偏倚可视化 |
+| 3 | `prisma_flow` | PRISMA 流程图 | PRISMA flow diagram | 系统评价 | 文献筛选四阶段流程 |
+| 4 | `rob` / `rob2` | 偏倚风险图 | RoB traffic-light / summary | 研究质量 | Cochrane RoB 1.0 / 2.0 |
+| 5 | `cumulative` | 累积 Meta 图 | Cumulative meta plot | 两组 | 按研究序累积合并 |
+| 6 | `baujat` | Baujat 图 | Baujat plot | 异质性 | 异质性来源诊断 |
+| 7 | `labbe` | L'Abbe 图 | L'Abbe plot | 两组（二分类） | 效应一致性检查 |
+| 8 | `radial` | Radial 图 | Radial / Galbraith plot | 异质性 | 异质性径向展示 |
+| 9 | `sucra` | SUCRA 排名图 | SUCRA ranking plot | NMA | 干预排序概率 |
+| 10 | `egger` | Egger 回归散点图 | Egger's regression plot | 偏倚 | 发表偏倚定量 |
+| 11 | `contribution` | NMA 贡献图 | NMA contribution plot | NMA | 设计/比较对贡献分解 |
+| 12 | `loo` | 留一法影响图 | Leave-one-out plot | 敏感性 | 敏感性分析 |
+| 13 | `gosh` | GOSH 图 | GOSH plot | 异质性 | 异质性模式聚类 |
+| 14 | `bubble` | 气泡图 | Bubble plot | Meta 回归 | 协变量-效应量关系 |
+| 15 | `netgraph` | 网络关系图 | Network graph | NMA | 证据网络结构 |
+| 16 | `dose_resp` | 剂量反应图 | Dose-response plot | 剂量反应 | 剂量-效应关系 |
+| 17 | `drapery` | Drapery 图 | Drapery plot | 敏感性 | α 稳健性 |
+| 18 | `sroc` | SROC 曲线 | SROC curve | 诊断 Meta | 诊断准确性 |
+| 19 | `tsa` | 试验序贯分析图 | Trial sequential analysis | TSA | 证据充分性/所需样本 |
+| 20 | `power` | 功效曲线 | Power curve | 功效 | 统计检验效能 |
+| 21 | `influence` | 影响诊断图 | Influence diagnostic plot | 敏感性 | 单研究剔除影响 |
+| 22 | `nodesplit` | 节点拆分图 | Node-splitting plot | NMA | 局部不一致性 |
+| 23 | `trimfill` | 剪补法漏斗图 | Trim-and-fill funnel plot | 偏倚 | 偏倚校正漏斗 |
+
+> 说明：`netleague`（NMA 联赛表）为表格型输出而非图形，故不计入 23 种。
 
 ## 3. 首次使用 FAQ
 
