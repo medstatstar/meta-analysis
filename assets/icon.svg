@@ -41,7 +41,7 @@
   <rect x="310" y="280" width="20" height="15" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
   <line x1="292" y1="287" x2="330" y2="287" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>
 
-  <polygon points="340,218 360,228 340,238 320,228" fill="#0F6E56" stroke="#04342C" stroke-width="2" stroke-linejoin="round"/>
+  <polygon points="324,302 344,312 324,322 304,312" fill="#0F6E56" stroke="#04342C" stroke-width="2" stroke-linejoin="round"/>
 
   <text x="340" y="360" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="600" fill="#3C3489">Meta-Analysis</text>
 </svg>
