@@ -37,7 +37,7 @@ metadata:
   {
     "openclaw": { "emoji": "📊", "icon": "assets/icon.svg" },
     "authors": ["medstatstar", "phoe-zip"],
-    "version": "2.1.1",
+    "version": "2.1.5",
     "license": "MIT",
     "homepage": "https://github.com/medstatstar/meta-analysis",
     "tags": ["meta-analysis", "systematic-review", "clinical-trials", "R", "biostatistics", "evidence-based-medicine", "forest-plot", "network-meta-analysis", "bayesian", "metafor", "meta", "netmeta", "gemtc", "revman", "robumeta", "clubSandwich", "esc", "dosresmeta", "mada", "metagear", "forestploter"],
