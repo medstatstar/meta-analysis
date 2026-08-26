@@ -10,9 +10,9 @@
   <circle cx="340" cy="195" r="82" fill="#AFA9EC"/>
 
   <g transform="translate(340 195) scale(1.31) translate(-340 -242)">
-    <path d="M252 328 L428 328 L340 150 Z" fill="#534AB7" stroke="#3C3489" stroke-width="2" stroke-linejoin="round"/>
-    <line x1="340" y1="150" x2="252" y2="328" stroke="#FFFFFF" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
-    <line x1="340" y1="150" x2="428" y2="328" stroke="#FFFFFF" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
+    <path d="M230 328 L450 328 L340 150 Z" fill="#534AB7" stroke="#3C3489" stroke-width="2" stroke-linejoin="round"/>
+    <line x1="340" y1="150" x2="230" y2="328" stroke="#FFFFFF" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
+    <line x1="340" y1="150" x2="450" y2="328" stroke="#FFFFFF" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
     <line x1="340" y1="150" x2="340" y2="328" stroke="#FFFFFF" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.6"/>
     <line x1="308" y1="230" x2="372" y2="230" stroke="#FFFFFF" stroke-width="1" opacity="0.4"/>
     <line x1="286" y1="276" x2="394" y2="276" stroke="#FFFFFF" stroke-width="0.7" opacity="0.3"/>
