@@ -1,28 +1,46 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" style="background:transparent;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="186 41 308 340" width="100%" style="background:transparent;">
   <defs>
     <marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
   </defs>
 
-  <!-- 漏斗图基底：三层同心圆（占画布 ~82%，左右留白收紧） -->
-  <circle cx="100" cy="92" r="80" fill="#EEEDFE"/>
-  <circle cx="100" cy="92" r="60" fill="#CECBF6"/>
-  <circle cx="100" cy="92" r="40" fill="#AFA9EC"/>
+  <circle cx="340" cy="195" r="148" fill="#EEEDFE"/>
+  <circle cx="340" cy="195" r="115" fill="#CECBF6"/>
+  <circle cx="340" cy="195" r="82" fill="#AFA9EC"/>
 
-  <!-- 漏斗三角（funnel），apex 朝上 -->
-  <path d="M32 150 L168 150 L100 26 Z" fill="#534AB7" stroke="#3C3489" stroke-width="2" stroke-linejoin="round"/>
-  <line x1="100" y1="26" x2="32" y2="150" stroke="#FFFFFF" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
-  <line x1="100" y1="26" x2="168" y2="150" stroke="#FFFFFF" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
+  <path d="M248 328 L432 328 L340 150 Z" fill="#534AB7" stroke="#3C3489" stroke-width="2" stroke-linejoin="round"/>
+  <line x1="308" y1="230" x2="372" y2="230" stroke="#FFFFFF" stroke-width="1" opacity="0.4"/>
+  <line x1="286" y1="276" x2="394" y2="276" stroke="#FFFFFF" stroke-width="0.7" opacity="0.3"/>
+  <line x1="340" y1="150" x2="252" y2="328" stroke="#FFFFFF" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
+  <line x1="340" y1="150" x2="428" y2="328" stroke="#FFFFFF" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
 
-  <!-- 森林图研究方块（白底紫框，叠在内侧圆） -->
-  <rect x="72" y="74" width="56" height="10" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.4"/>
-  <rect x="72" y="90" width="56" height="10" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.4"/>
-  <rect x="72" y="106" width="56" height="10" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.4"/>
+  <text x="270" y="248" font-family="sans-serif" font-size="8" font-weight="400" fill="#FFFFFF" opacity="0.85">SE</text>
+  <text x="270" y="259" font-family="sans-serif" font-size="8" font-weight="400" fill="#FFFFFF" opacity="0.85">↑</text>
+  <text x="400" y="196" font-family="sans-serif" font-size="8" font-weight="400" fill="#FFFFFF" opacity="0.85">precision</text>
 
-  <!-- 汇总估计菱形（pooled estimate） -->
-  <polygon points="100,124 116,136 100,148 84,136" fill="#0F6E56" stroke="#04342C" stroke-width="2" stroke-linejoin="round"/>
+  <rect x="320" y="162" width="20" height="16" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(-1, 330, 170)"/>
+  <line x1="300" y1="170" x2="340" y2="170" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" transform="rotate(-1, 320, 170)"/>
 
-  <!-- 词标：字号放大到 17（在 240px 显示下约 20px，原稿仅 ~6px） -->
-  <text x="100" y="190" text-anchor="middle" font-family="sans-serif" font-size="17" font-weight="700" fill="#3C3489">Meta-Analysis</text>
+  <rect x="292" y="176" width="26" height="20" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
+  <line x1="270" y1="186" x2="318" y2="186" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>
+
+  <rect x="332" y="206" width="24" height="18" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(1, 344, 215)"/>
+  <line x1="310" y1="215" x2="356" y2="215" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" transform="rotate(1, 333, 215)"/>
+
+  <rect x="300" y="222" width="16" height="13" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
+  <line x1="284" y1="228" x2="316" y2="228" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+
+  <rect x="316" y="244" width="28" height="22" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(0.5, 330, 255)"/>
+  <line x1="290" y1="255" x2="344" y2="255" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" transform="rotate(0.5, 317, 255)"/>
+
+  <rect x="324" y="264" width="16" height="12" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5" transform="rotate(-1.5, 332, 270)"/>
+  <line x1="310" y1="270" x2="338" y2="270" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" transform="rotate(-1.5, 324, 270)"/>
+
+  <rect x="310" y="280" width="20" height="15" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
+  <line x1="292" y1="287" x2="330" y2="287" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>
+
+  <polygon points="340,302 360,312 340,322 320,312" fill="#0F6E56" stroke="#04342C" stroke-width="2" stroke-linejoin="round"/>
+
+  <text x="340" y="360" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="600" fill="#3C3489">Meta-Analysis</text>
 </svg>
