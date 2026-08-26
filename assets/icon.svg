@@ -17,9 +17,9 @@
     <line x1="308" y1="230" x2="372" y2="230" stroke="#FFFFFF" stroke-width="1" opacity="0.4"/>
     <line x1="286" y1="276" x2="394" y2="276" stroke="#FFFFFF" stroke-width="0.7" opacity="0.3"/>
 
-    <text x="270" y="248" font-family="sans-serif" font-size="8" font-weight="400" fill="#FFFFFF" opacity="0.85">SE</text>
-    <text x="270" y="259" font-family="sans-serif" font-size="8" font-weight="400" fill="#FFFFFF" opacity="0.85">↑</text>
-    <text x="400" y="196" font-family="sans-serif" font-size="8" font-weight="400" fill="#FFFFFF" opacity="0.85">precision</text>
+    <text x="270" y="236" font-family="sans-serif" font-size="10" font-weight="400" fill="#FFFFFF" opacity="0.85">SE</text>
+    <text x="270" y="247" font-family="sans-serif" font-size="10" font-weight="400" fill="#FFFFFF" opacity="0.85">↑</text>
+    <text x="388" y="196" font-family="sans-serif" font-size="10" font-weight="400" fill="#FFFFFF" opacity="0.85">precision</text>
 
     <rect x="322" y="184" width="16" height="12" rx="2" fill="#FFFFFF" stroke="#3C3489" stroke-width="1.5"/>
     <line x1="305" y1="190" x2="355" y2="190" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>
