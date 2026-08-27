@@ -508,6 +508,49 @@ def _quality_gate_card(qg: dict, T: dict) -> str:
     return _group_card(T["group_quality"], "✅", body)
 
 
+def _render_subgroup_test(sgt, T: dict) -> str:
+    """组间差异检验卡片：Q_between / df / p_between / n_groups / model + 显著性徽章。
+
+    纯展示 coze 返回的 stats.subgroup_test 数值（2026-08-27 新增字段），零计算，
+    符合契约红线（数值一律由 R 算，本地仅转述）。
+    """
+    if not isinstance(sgt, dict):
+        return ""
+    sgt = {str(k): v for k, v in sgt.items()}
+
+    def _f(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    q = _f(sgt.get("Q_between"))
+    df = _f(sgt.get("df"))
+    p = _f(sgt.get("p_between"))
+    ng = sgt.get("n_groups")
+    model = sgt.get("model")
+    sig = (p is not None and p < 0.05)
+    if sig:
+        badge = f'<span class="badge ok"><span class="dot"></span>组间差异有统计学意义</span>'
+    else:
+        badge = f'<span class="badge warn"><span class="dot"></span>组间差异无统计学意义</span>'
+    p_txt = f"p = {p:.4f}" if p is not None else T["p_missing"]
+    q_txt = f"{q:.3f}" if q is not None else "—"
+    df_txt = f"{df:.0f}" if df is not None else "—"
+    ng_txt = _html_escape(ng) if ng is not None else "—"
+    model_txt = _html_escape(model) if model else "—"
+    rows = (
+        f'<div class="kv">'
+        f'<div class="k">Q<sub>between</sub>（组间异质性 Q）</div><div class="v">{q_txt}</div>'
+        f'<div class="k">自由度 df</div><div class="v">{df_txt}</div>'
+        f'<div class="k">p 值</div><div class="v">{_html_escape(p_txt)}</div>'
+        f'<div class="k">亚组数</div><div class="v">{ng_txt}</div>'
+        f'<div class="k">模型</div><div class="v">{model_txt}</div>'
+        f'</div>'
+    )
+    return _group_card("亚组间差异检验", "🔬", badge + rows)
+
+
 def _render_hero(stats, task, T: dict) -> str:
     """顶部结论 Hero：合并效应量 + 95%CI + p + 显著性徽章（一眼看到核心结果）。"""
     pooled = stats.get("pooled") or {}
@@ -561,13 +604,16 @@ def _render_stats_groups(stats, T: dict) -> str:
     if isinstance(qg, dict):
         groups.append(_quality_gate_card(qg, T) if qg.get("checks") else
                       _group_card(T["group_quality"], "✅", _kv_rows(qg)))
+    sgt = stats.get("subgroup_test")
+    if isinstance(sgt, dict):
+        groups.append(_render_subgroup_test(sgt, T))
     rest = {k: v for k, v in stats.items()
-            if k not in ("pooled", "heterogeneity", "bias", "quality_gate")
+            if k not in ("pooled", "heterogeneity", "bias", "quality_gate", "subgroup_test")
             and not isinstance(v, dict)}
     if rest:
         groups.append(_group_card(T["group_summary"], "📋", _kv_rows(rest)))
     for k, v in stats.items():
-        if k not in ("pooled", "heterogeneity", "bias", "quality_gate") and isinstance(v, dict):
+        if k not in ("pooled", "heterogeneity", "bias", "quality_gate", "subgroup_test") and isinstance(v, dict):
             groups.append(_group_card(_html_escape(str(k)), "📦", _kv_rows(v)))
     return "".join(groups)
 
@@ -691,6 +737,8 @@ main>*{{animation:fade .35s ease both;}}
 .figure-card .cap{{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;color:var(--text);margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border);}}
 .figure-card .cap .ico{{font-size:16px;}}
 .figure-card .svg-wrap{{overflow-x:auto;}}
+.fig-note{{margin:10px 2px 0;padding:9px 13px;font-size:13px;line-height:1.6;color:#334155;background:#eef6f4;border:1px solid #bfe3da;border-radius:var(--radius);}}
+.fig-note.warn{{background:#fef6e7;border-color:#f3d28a;color:#8a5a00;}}
 .group{{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px 16px;box-shadow:var(--shadow);}}
 .group h3{{font-size:16px;margin:0 0 12px;display:flex;align-items:center;gap:8px;color:var(--text);}}
 .group h3 .ico{{font-size:16px;}}
@@ -741,7 +789,7 @@ function copyR(btn){{
 </body></html>"""
 
 
-def render_html_report(out, out_dir: str = "output", titles: list | None = None,
+def render_html_report(out, out_dir: str = ".", titles: list | None = None,
                        locale: str = "zh") -> str | None:
     """把分析结果拼成单文件聚合 HTML 报告（内联 SVG + 统计表 + 折叠 R 代码）。
 
@@ -784,6 +832,38 @@ def render_html_report(out, out_dir: str = "output", titles: list | None = None,
             titles.append(type_names.get(t, t))
 
     figures_html = build_figure_widget(inline, titles, card=True) if inline else ""
+
+    # 2026-08-27 防御 / 口径说明（task #5 / 问题二防护）：
+    # 随机效应模型下，森林图头条菱形 = 随机效应(REML)合并估计，与 stats.pooled 对齐；
+    # 此前 coze 默认把固定效应画成头条、造成读图误导。现 coze 端已修复头条口径，
+    # 此处再补一行文字说明，避免用户重复困惑。仅当存在 forest 图且模型为 random 时追加。
+    has_forest = any((f.get("type") == "forest") for f in inline)
+    model_is_random = isinstance(stats, dict) and stats.get("model") == "random"
+    if has_forest and model_is_random:
+        figures_html += (
+            '<div class="fig-note">'
+            '📌 森林图头条菱形为<strong>随机效应（REML）</strong>合并估计，'
+            '与上方"合并效应量"卡片口径一致；固定效应估计不单独显示。'
+            '</div>'
+        )
+
+    # 2026-08-27 防御 / 缺失告警（task #4 / 问题一防护）：
+    # 亚组分析/ meta 回归请求了组间差异检验，但 coze 未返回 subgroup_test（历史 bug：静默 null）——
+
+    # 此时 stats.subgroups 应有值而 subgroup_test 为 null。给出告警提示「需重建 coze 镜像」，
+    # 而非让用户误以为没有组间差异。仅作展示层兜底，不替代 R 端计算。
+    req_task = str(out.get("task") or "")
+    is_subgroup_req = req_task in ("subgroup_analysis", "metareg")
+    sg_present = isinstance(stats, dict) and isinstance(stats.get("subgroups"), dict) and len(stats.get("subgroups")) > 0
+    sgt_missing = isinstance(stats, dict) and not isinstance(stats.get("subgroup_test"), dict)
+    if is_subgroup_req and sg_present and sgt_missing:
+        figures_html += (
+            '<div class="fig-note warn">'
+            '⚠️ 已识别到亚组合并结果，但 coze 未返回<strong>组间差异检验（subgroup_test）</strong>。'
+            '这是 2026-08-27 前镜像的已知缺陷（Q_between 静默漏序列化）。'
+            '请确认 coze 镜像已重建至含本修复的版本；当前报告的组间差异需以重建后结果为准。'
+            '</div>'
+        )
 
     hero_html = _render_hero(stats, out.get("task"), T) if stats else ""
     stats_html = _render_stats_groups(stats, T) if stats is not None else ""

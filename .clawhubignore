@@ -23,3 +23,6 @@ assets/icon.png
 # 废弃 R 脚本（实际位于 scripts/，adapters/coze_project 镜像的重复件，不进发布包）
 scripts/r_*.py
 scripts/check_integrity.sh
+
+# coze 运行产物（repro.r 等），属会话期调试产出，不进发布包
+adapters/coze_out/

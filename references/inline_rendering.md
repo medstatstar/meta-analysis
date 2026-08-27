@@ -1,15 +1,15 @@
-# Inline Rendering / 内联渲染规范（SVG 直接显示在对话流）
+# Figure Rendering / 图形渲染规范（SVG 展示在 HTML 报告中）
 
-> 生效：2026-08-19（v1.9.5+）｜ 呈现层默认规范
-> 范围：meta-analysis 分析结果的所有 `figures[].svg`。**默认方式 = 内联渲染进对话**，同时另存 `output/` 供下载/编辑。
+> ⚠️ **2026-08-26 修订：内联 `show_widget` 渲染已取消**。所有 `figures[].svg` 一律展示在 `run_analysis` 生成的**聚合 HTML 报告**里（agent 用 `present_files` 打开预览），不再内联进对话流。本文档原"内联优先"原则废止；保留其中的 SVG 净化 / viewBox / 宽度处理技术细节，供 HTML 报告渲染链（`adapters/rendering.py` 的 `build_figure_widget` / `render_html_report`）复用。
+> 生效：2026-08-19（v1.9.5+）｜ 范围：meta-analysis 分析结果的所有 `figures[].svg`。**唯一展示面 = HTML 报告**，同时另存 `output/` 供下载/编辑。
 
 ## 1. 原则
 
 | 原则 | 要求 |
 |---|---|
-| **内联优先** | 图的 `figures[].svg` 字符串**直接渲染在对话流**中（可选中、可缩放、可检查），不是附件文件 |
+| **HTML 报告唯一面** | 图的 `figures[].svg` 一律嵌入 HTML 报告展示（agent 用 `present_files` 打开），**不再内联 widget** |
 | **矢量可编辑** | 所有图保持 `<text>` 文本元素，禁止转位图；编辑工具见 `references/svg_editing.md` |
-| **原尺寸保真** | 图**固定原始尺寸不缩放**（文字始终 1:1 清晰）；容器装不下即出**横向滚动条**（见 §3）——任何场景都不缩小图 |
+| **原尺寸保真 · 不放大** | 图**保持自然内容尺寸，绝不放大到固定画幅**（如 680px）。容器装不下即出**横向滚动条**（见 §3）——任何场景都不缩小、也不强制拉伸图 |
 | **主题适配** | SVG 内容为深色文字，容器一律浅底（`#fff`）+ 细边框，明暗主题下均清晰 |
 
 ## 2. 标准容器模板（HTML fragment）
@@ -38,7 +38,7 @@
 
 **问题一：内容超界（更根本）**——svglite 输出固定 viewBox（如 `0 0 504 360`），但内容**可能超出该区域**：meta 包 forest() 把 Study/Events/OR/95%CI/Weight 列画在图形区外（实测 x∈[-140, 644]，实际宽 **785px**）。按原 viewBox 渲染会被浏览器裁剪两侧文字。**必须先扩展 viewBox**。
 
-**问题二：宽度**——任何情况下不缩小图（缩小使文字不可读），装不下就滚动。
+**问题二：宽度**——任何情况下不缩小图（缩小使文字不可读），也**绝不放大到固定画幅**（如因容器要求 680px 而把 504px 的图拉伸）。始终按 `content_bbox` 算出的自然内容宽度（`max_x - min_x`，森林图约 785px）嵌入，**“提供刚好贴合内容宽度的画幅”**即可，装不下就出横向滚动条。
 
 **策略（默认，`adapters/rendering.py` 已实现）**：
 
@@ -145,8 +145,8 @@ def extract_svg(svg_str: str):
 
 | 模式 | 行为 | 适用场景 |
 |---|---|---|
-| `svg_inline`（默认） | `figures[].svg` 原样保留，agent 用内联 widget 渲染 | 普通场景，可编辑文本需求 |
-| `png_file` | 本地 cairosvg 转 PNG（同一处理链：strip clip → fix xml → bbox → viewBox → 光栅化）存 `out_dir`，figures 替换为 `{type, format:"png", path}` | SVG 内联渲染慢或体量超大时（界面渲染快、不占 LLM 上下文，但变位图） |
+| `svg_inline`（默认） | `figures[].svg` 原样保留，agent 用 HTML 报告展示（不再内联 widget） | 普通场景，可编辑文本需求 |
+| `png_file` | 本地 cairosvg 转 PNG（同一处理链：strip clip → fix xml → bbox → viewBox → 光栅化）存 `out_dir`，figures 替换为 `{type, format:"png", path}` | SVG 体量超大或嵌入慢时（界面渲染快、不占 LLM 上下文，但变位图） |
 
 **渲染计时（★ 本地渲染阶段，非 coze 计算）**：
 - `render_elapsed_seconds` = 拿到 SVG → 处理 → widget/PNG 就绪的秒数
@@ -157,6 +157,6 @@ def extract_svg(svg_str: str):
 
 ## 8. 与 Output 章节的关系
 
-- **对话流**：内联渲染（本文档）
+- **HTML 报告（唯一展示面）**：`run_analysis` 生成的聚合 HTML 报告（`out['html_report']`），agent 用 `present_files` 打开预览（本文档技术细节服务于该渲染链）
 - **output/ 落盘**：仍保存原始 `.svg` 文件供下载/编辑/期刊转换（`references/svg_editing.md`）
-- 两者并行：内联=查看，落盘=交付物
+- 报告=查看，落盘=交付物

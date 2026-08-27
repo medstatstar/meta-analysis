@@ -16,6 +16,7 @@ Python 3.8+ standard library only. No third-party dependencies.
 """
 
 import argparse
+import html
 import json
 import sys
 from datetime import date
@@ -247,7 +248,8 @@ def build_quick_card(d):
 # ---------------------------------------------------------------------------
 
 def _html_escape(s):
-    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    # 标准库 html.escape：完整转义 & < > 及引号（quote=True），避免手动 replace 漏引号
+    return html.escape(str(s), quote=True)
 
 
 def md_to_html(md):

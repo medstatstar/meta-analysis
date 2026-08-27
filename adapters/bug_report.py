@@ -39,6 +39,10 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
+# coze_token 提供通用 XOR+base64 混淆（算法单份，key 各自维护）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from coze_token import obf_decode
+
 # ── 报告信封：硬白名单字段（§20.3.2 脱敏铁律）───────────────────────────
 # 只允许这些键；值类型固定。任何未列入信封的用户数据键（原始数据表/受试者记录）都会在 sanitize 时被剔除。
 # description 例外：唯一自由文本字段，用户把关制披露——可写现象/复现/期望 vs 实际/所用算法或函数/
@@ -73,20 +77,12 @@ _EMBEDDED_SECRETS = {
 }
 
 
-def _obf_decode(blob: str) -> str:
-    """XOR+base64 解码（§5 公共凭据混淆的逆操作）。"""
-    import base64
-    data = base64.urlsafe_b64decode(blob.strip())
-    key = _OBFUSCATION_KEY
-    return bytes(b ^ key[i % len(key)] for i, b in enumerate(data)).decode("utf-8")
-
-
 def get_endpoint_token() -> str:
     """取 bugreport 端点访问 token（内嵌混淆 blob 解码；解析失败回退空串）。"""
     blob = _EMBEDDED_SECRETS.get("ct_bugreport_coze")
     if blob:
         try:
-            return _obf_decode(blob)
+            return obf_decode(blob, _OBFUSCATION_KEY)
         except Exception:  # pragma: no cover
             return ""
     return ""

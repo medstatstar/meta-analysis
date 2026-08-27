@@ -283,6 +283,10 @@ def run_meta(task: str, data: dict, params: dict | None = None,
     # （coze 端零 png 路径，避免 png_base64 占用带宽/上下文）。
     fig = dict(figure or {})
     fig["format"] = "svg"
+    # 兼容性兜底（2026-08-26 契约实测）：历史 spec 可能用 `byvar` 字段名，
+    # coze 端点只认 `subgroup`（`byvar`/`group`/`by` 静默失效）；此处归一化，避免静默失效。
+    if params and "byvar" in params:
+        params = {**params, "subgroup": params.pop("byvar")}
     payload = {
         "task": task,
         "data": data or {},

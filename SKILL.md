@@ -3,9 +3,8 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: 医学Meta分析 / Meta Analysis
-version: 2.1.8
+version: 2.2.16
 summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
-license: MIT
 description: "基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。 / Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta, for a total of 23 analysis figures. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code."
 
 required_commands: [python]
@@ -27,16 +26,12 @@ triggers:
   - "诊断meta"
 permissions:
   scope: "user-space-only"
-  network: "optional"
-  network_note: "All numerical computation runs in the coze cloud R engine (requires network). There is no local-R fallback — if coze is unreachable or unauthorized, the skill returns a structured error instead of silently computing locally. End users need no local R install. Network is also touched if the user explicitly requests PDF full-text download from DOI/PMID lists (external services), which requires opt-in confirmation of the target list."
+  network: "required (all computation via coze cloud R engine; params/summary stats sent to coze, no local-R fallback; IPD only if user opts in)"
   filesystem: "writes only to the current working directory (meta_analysis/ and output/ report artifacts: generated .R scripts, .svg/.png figures, .csv tables); otherwise read-only"
-  data: "By default, analysis parameters / summary statistics (event counts, sample sizes, effect sizes) are transmitted to the coze cloud R engine for computation. Raw datasets / individual-patient records are only transmitted if the user explicitly chooses to send IPD to the cloud; otherwise processing stays local. There is no local-R fallback — if coze is unreachable or unauthorized, the skill returns a structured error. R package installation is never performed by this skill (the coze-side engine manages its own packages)."
 metadata:
   {
     "openclaw": { "emoji": "📊", "icon": "assets/icon.svg" },
     "authors": ["medstatstar", "phoe-zip"],
-    "version": "2.1.8",
-    "license": "MIT",
     "homepage": "https://github.com/medstatstar/meta-analysis",
     "tags": ["meta-analysis", "systematic-review", "clinical-trials", "R", "biostatistics", "evidence-based-medicine", "forest-plot", "network-meta-analysis", "bayesian", "metafor", "meta", "netmeta", "gemtc", "revman", "robumeta", "clubSandwich", "esc", "dosresmeta", "mada", "metagear", "forestploter"],
   }
@@ -48,152 +43,143 @@ metadata:
 
 ## Language
 
-- **English guide** → [README.md](https://github.com/medstatstar/meta-analysis/blob/main/README.md) · **Chinese guide** → [README_zh-CN.md](https://github.com/medstatstar/meta-analysis/blob/main/README_zh-CN.md)
+- **English guide** → [README.md](https://github.com/medstatstar/meta-analysis/blob/main/README.md) · **中文指南** → [README_zh-CN.md](https://github.com/medstatstar/meta-analysis/blob/main/README_zh-CN.md)
 - Bilingual auto-switch: the answer language follows the user's question language (English question → English answer, Chinese question → Chinese answer).
+
+## 0. Execution discipline (speed-first)
+
+> 🚀 **Top-level red line — higher priority than any "thinking/polishing" impulse. Violation = wasting the user's time.** Full boundaries/exceptions/anti-patterns in `references/speed-discipline.md`.
+
+### Two-track gating (code-driven routing, no LLM decision)
+The first message goes through `python scripts/classify.py` for **deterministic triage** (zero LLM decision):
+- **Compute track (compute)**: clear Simple / Complex → describe and immediately run `run_meta.py --query --data`; three steps to completion, fully bound by this discipline.
+- **Topic track (topic)**: vague / topic selection / feasibility → `literature_probe.py` + `generate_topic_report.py`; code-grounded, zero free-form improvisation.
+- Both tracks forbid reading source via Read/Grep/Bash to "confirm how to tune / which task to use" — that is `classify.py`'s job.
+
+### Agent operation card (copy verbatim, no variations)
+```bash
+# Compute track one-shot: report lands in --out-dir (user workspace); in-conversation data uses --data-json to skip file writes.
+# If data comes from a file, pass --data <csv|json absolute path> (csv auto-converts to JSON before sending to coze).
+python scripts/run_meta.py --query "<user original request>" --data-json '<[{"study":"S1",...}]>' --out-dir "<user workspace>/meta_analysis"
+```
+Read `META_HTML_REPORT=<path>` from stdout and pass directly to `present_files`; across turns, carve a subset into a new csv/json and re-issue the same command (always include `--out-dir`). Do NOT use this card for the topic track. Fallback `META_STATUS=build_failed` → re-run with `--colmap` per the hint.
+
+### Five iron rules
+1. **Execute, don't think**: when running the skill, only perform the workflow; no reasoning/trade-off/review/self-explanation; if a field is missing, ask only about that field.
+2. **Zero number rewriting**: cite `stats`/`pooled`/`heterogeneity`/`bias` verbatim; no rounding/conversion/re-formatting.
+3. **HTML report is the sole presentation surface**: `out['html_report']` is the final deliverable; no further processing; inline `show_widget` is deprecated, figures only appear in the HTML.
+4. **No local computation**: disable local R/Python self-computation; always forward to coze; if coze is unreachable, raise a structured error per §6, never fall back to local.
+5. **Call-count invariant**: compute track ≤1 call before fire (only `build_request`), ≤1 call after fire (only `present_files`); topic track ≤2; no retry loops. Cross-turn `--data-json` refill is input construction and does not count.
+
+### Already automated / anti-patterns (see `references/speed-discipline.md`)
+Subgroup columns auto-pass-through, column-name aliases auto-matched, artifact completeness guaranteed by `run_analysis` — the agent must not read source to verify, must not hand-assemble subgroup into request.json, must not declare "missing Q_between" each round (go straight to metareg).
 
 ## 1. Triage — First step: classify the user's intent
 
-On first user message, classify into one of three:
+> **Routing is already done in code (§0 two-track gating)**: track / task judgment is delegated to `build_request.py` (which calls `classify.py`); the LLM no longer makes routing decisions and does not hand-write request.json. The table below is for understanding only — the LLM calls `run_analysis` directly from the generated `request.json` and `present_files(html)`.
 
 | Classification | Condition | Action |
 |---|---|---|
 | **Simple** | Single, specific intent (e.g., "pool OR from these 5 studies") | Reply directly, no menu |
-| **Complex** | Multi-decision / multi-parameter (e.g., "network meta with 3 interventions, subgroup, check inconsistency") | Present level-1 routing menu incl. "③ Can't decide? → explain the differences between these choices" entry; full menu → `references/interactive_menu.md` |
-| **Vague** | Unclear what user wants (e.g., "I need meta-analysis help") | Grill-me style branch questions, 1–3 per round; "no topic / feasibility check" → **Topic Selection** (section 2.2) |
+| **Complex** | Multi-decision / multi-parameter (e.g., "network meta with 3 interventions, subgroup, check inconsistency") | Present level-1 routing menu incl. "③ Can't decide? → explain the differences"; full menu → `references/interactive_menu.md` |
+| **Vague** | Unclear what user wants (e.g., "I need meta-analysis help") | Grill-me branch questions, 1–3 per round; "no topic / feasibility" → **Topic Selection** (§2.2) |
 
 If unsure between Simple and Complex → give short reply + optional expansion hint.
 
 ## 2. Conversation guide
 
 ### 2.1 Interactive menu
-Vague → Level 1 menu (7 categories). Select → Level 2 with data-format hints. Sufficient info → skip menu, run analysis directly. Full menu tree + data formats → `references/interactive_menu.md`.
+Vague → Level 1 menu (7 categories). Select → Level 2 with data-format hints. Sufficient info → skip menu, run directly. Full menu tree + data formats → `references/interactive_menu.md`.
 > **Other formats?** Install `@skill:statdata-transfer` for 50+ format conversion.
 
 ### 2.2 Topic Selection (upstream gate, self-contained)
-Trigger: user wants a meta-analysis but has no topic ("I want to do a meta-analysis but have no topic") / feasibility check / "rejected as a duplicate" / pre-PROSPERO audit → `references/topic-selection.md`. Two paths:
-- **Quick** (≤30 min): 1-page decision card — 4-dim scores (clinical/feasibility/data/novelty, 0–5 each, 0–20, any ≤2 = veto) + screen verdict. No final go/no-go.
-- **Full** (5 stages + gates): PICO (`pico-guide.md`) → scoring + cross-checks R1–R6 → dedup (`dedup-search.md`) → PRISMA 2020/AMSTAR-2 (`compliance-precheck.md`) → 11-section report via `python scripts/generate_topic_report.py input.json output.md|html` (template + PROSPERO mapping → `topic-report-template.md` / `prospero-mapping.md`).
-- **Dedup is self-contained (no other skill needed)**: Stage 4 runs the in-skill Europe PMC probe `adapters/literature_probe.py` (Cochrane + PubMed layers) by **DEFAULT** — it returns real hit counts + top titles, so the novelty ranking (R7) is grounded in actual literature. No delegation to other skills; templates are only a fallback when the network is unavailable. PROSPERO / non-English DBs remain guided manual steps (no clean public API).
-  - ⚠️ The probe is a **quick dedup check** (real hit counts + top titles), **not** a full retrieval. For comprehensive retrieval — anti-hallucination verification / merge-dedupe / Excel·HTML report / PRISMA screen — use the **ct-literature** skill first (same Europe PMC journal filter, consistent Cochrane counts; its `--cochrane` flag is the counterpart of this probe). The probe's JSON already emits a `ct_handoff` block with the ready-to-run commands.
+Trigger: no topic / feasibility check / "rejected as duplicate" / pre-PROSPERO audit → `references/topic-selection.md`. Two paths:
+- **Quick** (≤30 min): 1-page decision card — 4-dim scores (clinical/feasibility/data/novelty, 0–5, any ≤2 = veto) + screen verdict.
+- **Full** (5 stages + gates): PICO (`pico-guide.md`) → scoring + cross-checks R1–R6 → dedup (`dedup-search.md`) → PRISMA 2020/AMSTAR-2 (`compliance-precheck.md`) → 11-section report via `python scripts/generate_topic_report.py input.json output.md|html` (templates → `topic-report-template.md` / `prospero-mapping.md`).
+- **Dedup self-contained**: Stage 4 runs in-skill Europe PMC probe `adapters/literature_probe.py` (real hit counts + top titles) by default; novelty ranking grounded in actual literature. Comprehensive retrieval → use **ct-literature** skill first.
+  - ⛔ **Topic-track red line**: candidate ranking **must** be based on the probe's real hit counts + 4-dim score card; the LLM only paraphrases, strictly no free-form "which direction is good". Quick is ranked by the probe card; Full is reported by `generate_topic_report.py`, the LLM does not rewrite.
 
 ## 3. Initialization & execution backend
 
-**Execution model (coze-only)**: all numerical computation runs through the coze meta-analysis workflow (R engine on the coze side); the local LLM only normalizes the request, tidies data, and presents results + SVG figures — **end users need no R install and no local compute**. Every analysis returns a `repro` field (reproducible R script + R + package versions).
-
-**On startup**:
-1. **Backend**: default coze endpoint `https://ct-meta.coze.site/run` (overridable via `COZE_META_ENDPOINT`). Probe reachability with `coze_client.health()`.
-2. **Workspace**: create `meta_analysis/` + `output/` (⚠️ writes files: reports and SVG/CSV).
-3. **Memory**: read R-related config keys from `~/.workbuddy/MEMORY.md` (R config only; unrelated personal content is ignored and never sent).
-
-Endpoint self-test, coze-side R engine & package details (developer details) → `references/ADVANCED.md` · `references/ADVANCED_zh-CN.md`.
+**Execution model (coze-only, absolute)**: all numerical computation runs through the coze meta-analysis workflow (R engine on coze side); local LLM only normalizes request + presents results/SVG. End users need no R install. Every analysis returns a `repro` field (R script + versions). No local computation — see §0 iron rule 4.
+**On startup**: 1. Backend default `https://ct-meta.coze.site/run` (override `COZE_META_ENDPOINT`); probe via `coze_client.health()`. 2. Workspace: create `meta_analysis/` + `output/`. 3. Memory: read R config from `~/.workbuddy/MEMORY.md` (R only).
+Endpoint self-test / R engine details → `references/ADVANCED.md` · `references/ADVANCED_zh-CN.md`.
 
 ## 4. Core functions & API
 
-Module → R-package/function matrix (single-group / pairwise / effect-size / forest·funnel / heterogeneity / publication-bias / subgroup·meta-reg / sensitivity / Bayesian pairwise·NMA / multilevel·MV / survival / TSA / dose-response / diagnostic / RVE / RoB+GRADE / power / quality-gate) → `references/advanced_api.md` · `references/ADVANCED.md`.
-
-**Rule (mandatory)**: any analysis MUST call existing functions — never rewrite inline. Unified entry `adapters/run_analysis.py` (default: coze). Function list + call examples → `references/advanced_api.md`.
+Module → R-package/function matrix → `references/advanced_api.md` · `references/ADVANCED.md`.
+**Rule (mandatory)**: any analysis MUST call existing functions — never rewrite inline. Unified entry `adapters/run_analysis.py` (default: coze). List + examples → `references/advanced_api.md`.
 
 ## 5. Output specification
 
-**Artifacts**: `analysis_complete.R` + forest/funnel (`.svg`) + `results_summary.md` + `data_backup.csv` (written to `output/`); PNG only generated in local conversion mode.
+**Artifacts**: `analysis_complete.R` + forest/funnel (`.svg`, inlined in HTML) + `results_summary.md` + `last_run.json` (full request+result echo, in `output/`). Per-round dataset CSV is an *input* the agent carves (e.g. `filtered_mdd.csv`); `run_analysis.py` does NOT auto-write `data_backup.csv`.
 
-**Rendering (inline by default, mandatory)**: All `figures[].svg` are **rendered inline into the conversation stream by default** (agent uses `show_widget` to display figures inline), while also being written to `output/` for download/editing. **Inline rendering is the default and a mandatory requirement — figures must NOT be delivered merely as file cards/attachments.** Figures keep their original size (no scaling); on overflow → horizontal scrollbar (x pad=8, y pad_y=24).
-> ⚠️ S3 offloading is transport-only: the coze side uploads `figures[].svg` / `repro.r` to S3 and returns a `url`; the local `coze_client._fill_external_svgs` **backfills the inline SVG by default** (`figures[].svg` remains usable as normal), so inline presentation is unaffected.
-> ⚠️ Since 2026-08-26, `figures[].svg` is the **raw svglite output with no simplification/minify** (output verbatim per user request); XML validity is guaranteed by the downstream `rendering._fix_xml` (PNG path) and the browser's lenient parsing (inline path).
-> 📦 **Aggregated HTML report (added 2026-08-26, optional supplementary deliverable)**: On every successful analysis, `run_analysis` writes a single-file HTML report path to `out['html_report']` (inline SVG + detailed stats table + `<details>` collapsible R reproduction code); the agent opens it with `present_files` for the built-in preview, serving as the "full version" beyond the inline main figures in the conversation stream. Consolidation is done **locally** — the coze response body contains only `stats` + S3 `url`, and is **unaffected by the 4000-char truncation or S3 link expiry**; when `_coze_truncated` is present, a truncation warning is appended at the top of the report. Implementation: `adapters/rendering.render_html_report`.
-Inline-rendering spec → `references/inline_rendering.md`; SVG editing / journal-format conversion → `references/svg_editing.md`.
+**Rendering (HTML report sole surface)**: `figures[].svg` embedded into the single-file HTML report (`run_analysis`→`out['html_report']`), opened with `present_files`. Inline `show_widget` cancelled; SVG keeps natural width (never upscale to 680px; overflow scrolls). S3 offloading is transport-only — `_coze_truncated` present → truncation warning atop report.
+**LLM presentation hard constraints**: ① numbers verbatim (stats/pooled/heterogeneity/bias, no rewrite); ② figures only via HTML report.
+**Quality Gate**: R-side `run_quality_gate()` → gate JSON; red (k<3 / I²>75% / missing bias check) **blocks** presentation until manual confirmation. Numeric judgment by R, never read by LLM.
+figure_mode / render-timing → `references/ADVANCED.md`; inline/figure spec → `references/inline_rendering.md`.
 
-> ⚠️ **coze endpoint fallback (2026-08-26)**: If the primary workflow endpoint `https://ct-meta.coze.site/run` returns 401/403 due to **token mismatch** (body contains token/auth/invalid keywords), the client automatically retries with the fallback endpoint `https://ct-meta2.coze.site/run` (**the fallback endpoint uses its own dedicated legacy token**; the two JWTs differ and must not be mixed); on successful fallback, the result carries a `_coze_endpoint_notice` field + a `notes` appendix: "Primary analysis workflow address switched; this analysis was auto-fallback to the backup coze endpoint." Non-token errors (400 generic, 5xx, network unreachable) do not trigger fallback and are reported directly. Implementation: `adapters/coze_client.py` (`FALLBACK_ENDPOINT` / `get_token_for` / `run_meta`).
+## 5.1 Cross-turn Continuity (mandatory)
 
-**LLM presentation-layer hard constraints (mandatory)**:
-1. **Quote numbers verbatim**: values in `stats`/`pooled`/`heterogeneity`/`bias` MUST be cited exactly — no rewriting, rounding, or recomputation.
-2. **Prefer verbatim standard labels**: adopt coze's bilingual template wording directly; do not re-translate.
-3. **Do only two things**: organize the template wording into fluent user language + add one explanatory sentence as needed; the explanation must not override or alter template numbers.
-4. **Figures inline by default (mandatory)**: figures MUST be rendered inline (agent uses `show_widget` to render into the conversation stream); they must not degrade into mere file cards/attachments; S3 offloading only affects transport and does not change the inline default behavior.
+> **Runtime is stateless.** coze R engine re-supplies `task`+`data`+`params` each call, never persists config/column mapping. Semantic drift (model/method silently changing) = highest-risk failure.
 
-**Quality Gate (human sign-off)**: before presenting pooled estimates, the R side runs `run_quality_gate()` → gate JSON; red (k<3 / I²>75% / missing bias check) **blocks** presentation — released only after manual confirmation. Numeric judgments are made by R, never read by the LLM.
-
-figure_mode (`svg_inline` / `png_file`) and render-timing thresholds (implementation details) → `references/ADVANCED.md`.
-
-### 5.1 Cross-turn Continuity (mandatory)
-
-> **Runtime is stateless.** The coze R engine is stateless: each `run_analysis.py` call re-supplies `task` + `data` + `params`, and the engine never persists the analysis config or column mapping. Semantic drift (model / method / measure changing silently between rounds) = silently inconsistent results — the highest-risk failure mode in this prompt-driven flow.
-
-When the user follows up across rounds (subgroup / sensitivity / meta-regression / NMA / diagnostic meta / TSA …), the prior round's analysis spec MUST be inherited losslessly — **never rely on the LLM's memory alone**.
-
-#### Cross-turn spec (minimal unit maintained inside the conversation thread)
+#### Cross-turn spec (minimal unit maintained within the conversation thread)
 ```
-{
-  "task": "forest",                       # analysis task (forest/sensitivity/subgroup/metareg/nma/diagnostic/tsa…)
-  "data_path": "output/data_backup.csv",  # dataset pointer (persisted on disk; only the path is inherited across rounds, not the data body)
-  "measure": "OR",                        # R sm (OR/RR/SMD/MD/HR…)
-  "model": "random",                      # fixed / random
-  "method": "REML",                       # estimation method (DL/REML/HE/SJ…)
-  "yi": "eff", "sei": "se", "slab": "study",  # column mapping: dataset columns → effect size / SE / study label
-  "byvar": "—",                           # subgroup / meta-reg variable column (— if none)
-  "...": "other params passed through"    # subgroup / reference_group / k_min etc., vary by task
-}
+{"task":"pairwise_meta","data_path":"<current-round csv>","measure":"OR","model":"random","method":"REML","subgroup":"—"}
 ```
+(yi/sei/slab column mapping is already auto-derived by `build_request.py`; no explicit inheritance needed; `run_meta.py` is self-sufficient from query+data each time.)
 
 #### Three hard rules
-1. **Echo a "Current analysis settings" block after every analysis (mandatory, placed after this round's numbers/figures):**
-   `## Current analysis settings: data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | byvar=— | task=forest`
-   No field may be omitted (use `—` as placeholder). This lets the LLM locate the "most recent settings block" via the `## Current analysis settings:` prefix when the user follows up.
-2. **On follow-up, change only the changed fields:** the LLM MUST first locate the most recent `## Current analysis settings:` block in the conversation, read all its fields, and override only what changed (e.g. `task←subgroup / byvar←age`, `task←sensitivity`). **Column mapping (yi/sei/slab) and model/method/measure are inherited verbatim** — dropping the column mapping = effect-size mismatch = silently inconsistent results (a statistical-conclusion-level defect, the highest-risk point).
-3. **Dataset is inherited by pointer, not re-transmitted:** `data_backup.csv` is already on disk. On follow-up the LLM re-reads the CSV via `data_path` (to get column names + rows); the column mapping (yi/sei/slab) is inherited from the settings block (the CSV carries only column names, no "which column is the effect size" semantic annotation, so it cannot be inferred by reading the CSV).
+1. **Echo a "Current analysis settings" block after every analysis (mandatory, after this round's numbers/figures):**
+   `## Current analysis settings: data=<csv> | measure=OR | model=random | method=REML | subgroup=— | task=pairwise_meta`
+   No field omitted (`—` placeholder) — lets LLM locate "most recent settings" on follow-up.
+2. **On follow-up, change only the changed fields:** locate most recent `## Current analysis settings:` block, read all fields, override only what changed (e.g. `task←subgroup_analysis`, `subgroup←region`); yi/sei/slab + model/method/measure inherited verbatim — dropping column mapping = effect-size mismatch.
+3. **Dataset supplied per round, not by magic pointer:** no auto `data_backup.csv`; carve subset into new csv + re-issue `run_meta.py` at it.
 
-#### Deterministic fallback (recommended, not optional)
-When worried about dropping config / column mapping, use `scripts/merge_spec.py` (bundled in this skill's `scripts/`) for a deterministic merge:
-prior-round spec JSON (`prev`) + this-round partial (`cur`) via stdin → complete merged spec; state passes only through the conversation thread, never persisted.
+#### Deterministic fallback
+Worried about dropping config? `scripts/merge_spec.py` (prev+cur via stdin → merged spec):
 ```bash
-echo '{"prev":{"task":"forest","data_path":"output/data_backup.csv","measure":"OR","model":"random","method":"REML","yi":"eff","sei":"se","slab":"study","byvar":"—"},"cur":{"task":"subgroup","byvar":"age"},"required":["task","data_path","measure","model","method","yi","sei","slab"]}' \
-  | python scripts/merge_spec.py
-# → merged inherits all fields, byvar overridden to age; if both prev/cur miss yi/sei/slab → missing_required error
+echo '{"prev":{"task":"pairwise_meta","data_path":"<csv>","measure":"OR","model":"random","method":"REML","subgroup":"—"},"cur":{"task":"subgroup_analysis","subgroup":"region"},"required":["task","data_path","measure","model","method","subgroup"]}' | python scripts/merge_spec.py
 ```
-Field inheritance / reset conventions when switching `task` (forest→subgroup / →metareg / →nma / →diagnostic / →tsa) → `references/interactive_menu.md` §6.4.
 
-> Full few-shot continuity samples (with each round's echo block) → `references/interactive_menu.md` §6.
+#### Endpoint capability boundaries (per coze `run_task.R` / `coze_contract.md` §3)
+- `pairwise_meta` ✅ complete (I²/τ², Egger/Begg, funnel plot, quality gate)
+- `subgroup_analysis` ✅ subgroup column **must** be passed as the param key `subgroup` (writing byvar/group/by silently fails)
+- `metareg` ✅ requires effect-size columns te/sete + covariate column `params.cov` (passing only raw columns degrades to pairwise_meta)
+- `nma` ✅ (≥2 arms per study); `nma_rank` ✅ (SUCRA/P-score); `survival_meta` ✅ (loghr/seloghr); `diagnostic_meta` ✅ (tp/fp/fn/tn, task name is not "diagnostic")
+- publication bias is embedded in pairwise_meta/funnel_plot; `sensitivity`/`pub_bias` are not registered tasks
+- default figures adapt to the task (`build_request` requests per `figure.plots`; override via `params_extra.plots`)
+> Few-shot samples → `references/interactive_menu.md` §6.
 
 ## 6. Security & scope
 
-**Execution model**: numeric computation via the coze workflow (R engine; the LLM only normalizes requests and presents results — numbers are judged by R, never read by the LLM). **Data-exfiltration decision belongs to the user**: the skill only implements the function + transparent disclosure, never a safety/compliance gate — whether data (incl. IPD) may go to coze is the user's call.
+**Execution model**: numeric computation via coze (LLM only normalizes + presents; numbers judged by R). **Data-exfiltration decision belongs to the user** — skill implements function + transparent disclosure, never a compliance gate.
 
 **Outbound disclosure (global mandatory)**:
-- **What is sent**: analysis data (study event counts / sample sizes / effect sizes; no personal identifiers) POSTed to the coze endpoint. Payloads are sanitized by `sanitize_payload()` (strips PII: ID numbers / phone / email) before sending.
-- **Authorization**: the default endpoint is pre-approved in the whitelist (`adapters/config.json` `auto_approve_endpoints`, author-preapproved, invisible to the user); a **custom endpoint (`COZE_META_ENDPOINT`) asks for AUTH-BLOCK confirmation on first call**, then is written to the whitelist, no confirmation needed for the rest of the session. **Unauthorized does not block**: `run_analysis` returns `_source=auth_blocked` with an explicit "cloud analysis not used" message.
-- **First outbound notice each session (exactly one, never repeated)** — bilingual copy (auto-switch by locale); output verbatim. EN: `I will send your analysis parameters to the cloud service https://ct-meta.coze.site/run for computation, together with a hostname hash (query_origin, used only for server-side attribution / rate-limiting, not your plaintext hostname). Please wait…`. No repeat disclosure for later outbound calls in the same session.
-- **Coze failure diagnosis requires prior consent**: when coze returns failure/timeout/proxy error, **first ask the user** (bilingual, auto-switch by locale). EN: `The coze cloud service is temporarily unavailable. May I automatically diagnose the issue?`; allowed → diagnose and fix + retry; declined → deliver the local answer with a prominent warning (bilingual). EN: `Unable to reach the coze service; this answer has not been curated and should be used with caution`.
+- **What is sent**: analysis data (event counts / sample sizes / effect sizes; no PII) POSTed to coze; sanitized by `sanitize_payload()` (strips ID/phone/email) first.
+- **Authorization**: default endpoint pre-approved in whitelist; custom `COZE_META_ENDPOINT` asks AUTH-BLOCK on first call, then whitelisted. Unauthorized → `_source=auth_blocked` with "cloud analysis not used" message.
+- **First outbound notice each session (once, bilingual)**: `I will send your analysis parameters to the cloud service https://ct-meta.coze.site/run for computation, together with a hostname hash (query_origin, for attribution/rate-limiting only). Please wait…` No repeat.
+- **Coze failure needs consent**: on failure/timeout, first ask (bilingual) `The coze cloud service is temporarily unavailable. May I automatically diagnose the issue?`; allowed → diagnose+retry; declined → deliver local answer with warning.
 
-**Other boundaries**:
-- PDF full-text download from external services ONLY on **explicit user instruction** (`adapters/pdf_fetch.py`, opt-in).
-- **Not clinical judgment**: results require professional interpretation.
-- **No literature DB search**: does not search literature databases; only downloads full text when the user provides DOI/PMID.
+**Other boundaries**: PDF full-text download ONLY on explicit user instruction (`adapters/pdf_fetch.py`, opt-in). Not clinical judgment. No literature DB search (downloads full text only when user provides DOI/PMID).
 
 ## 7. User-uploaded files
 
-Two upload types, two paths:
-1. **Structured data files (`.csv` / `.xlsx` / `.xls`)** → **Type 4 data template** (`references/data_templates.md`: encoding detection / zh-en column matching / missing-value detection / row-count confirmation). These are analysis data — the doc→md conversion tier does not apply; the pre-conversion transparency notice and confidentiality boundary still apply.
-2. **Document / template files (`.docx` / `.pptx` / `.pdf` / `.doc`)** → convert to md/text first, then extract study data: `.docx`/`.pptx` via `scripts/office_to_md.py`; `.pdf` via the `pdf` skill (OCR for scans; prompt to install if absent — never write a custom parser); `.doc`/scanned images → prompt the user for a text version.
-
-**🔔 Pre-conversion user notice (show before converting)** — bilingual copy (auto-switch by locale). EN: `⚠️ All uploaded documents will be converted to md format. PPT conversion can lose a lot of information (images, layout, animations, charts, etc.). We recommend converting to md yourself and checking the content first.`
-
-**Confidentiality:** the skill **never proactively judges/blocks** upload confidentiality — documents convert and data reads as usual; whether it leaves the machine is the user's decision. Content sent to coze is disclosed on first outbound; **whether IPD and other individual data goes to the cloud is the user's call**.
+1. **Structured data (`.csv`/`.xlsx`/`.xls`)** → Type 4 template (`references/data_templates.md`: encoding / zh-en column match / missing-value / row-count).
+2. **Document/template (`.docx`/`.pptx`/`.pdf`/`.doc`)** → convert to md first: `.docx`/`.pptx` via `scripts/office_to_md.py`; `.pdf` via `pdf` skill (OCR for scans); `.doc`/scans → ask user for text version.
+**🔔 Pre-conversion notice (bilingual)**: `⚠️ All uploaded documents will be converted to md. PPT conversion can lose images/layout/animations/charts. We recommend converting yourself and checking first.`
+**Confidentiality**: skill never proactively judges/blocks upload confidentiality; whether IPD goes to coze is the user's call.
 
 ## 8. Bug Reporting
 
 Agent behavior only; implementation → `adapters/bug_report.py`, protocol → `references/bug_report_endpoint.md`.
-
-- **Trigger (strong signal, max 1 proposal/session):** unexpected non-zero exit / engine or compute error / user explicitly questions the result — **and** the same operation was retried ≥1. Weak signal (repeated tuning) never triggers. Explicit user request (e.g., "report a bug") also triggers, without the once-per-session limit.
-- **Two-stage confirmation:** ① propose-with-preview — show the bilingual `confirm_prompt` **with** the full sanitized report (`render_report_text`); user may add a `description` (re-render & re-show before consent) → ② on explicit consent, `send_to_endpoint` (action=report, endpoint `https://ct-bugreport.coze.site/run`). If declined, never re-propose this session.
-- **Sanitization is hard:** report carries only the 11-key whitelist (skill / version / error_type / error_code / engine_status / description / locale / query_origin / session_hash / attempts / test) — never raw data or subject records. `description` is the only free-text field, **user-reviewed**; hard boundary: no identifiable person/institution/subject info. If the session had **no** cloud call, `save_local_report()` writes locally (data never leaves the machine).
-- **Client-only:** send `report` only. Governance actions (get/update/download/delete) are reserved for `ct-update`; never call them here.
+- **Trigger (≤1 proposal/session):** unexpected non-zero exit / engine error / user questions result — **and** retried ≥1. Explicit "report a bug" also triggers (no limit).
+- **Two-stage confirmation:** ① propose-with-preview (bilingual `confirm_prompt` + full sanitized report) → ② on consent `send_to_endpoint` (`https://ct-bugreport.coze.site/run`). Declined → never re-propose.
+- **Sanitization hard:** 11-key whitelist only, never raw data/subject records; `description` is the only free-text field, user-reviewed. No cloud call → `save_local_report()` (stays local).
 
 ## 9. Meta information
 
-**Traceability / Grounding**: all factual/assertive claims must cite source — a specific `ref-*.md` section or official guideline. An unverifiable claim → mark `⚠️ official verify` and ask the user to confirm.
-
-**References**: full index → `references/references.md`. Key files: `interactive_menu.md`, `ADVANCED.md`/`ADVANCED_zh-CN.md`, `advanced_api.md`, `topic-selection.md`, `data_templates.md`, `svg_editing.md`. Units schema (input / output / dependency / AI autonomy / consumer units) → `references/units.md`.
-
+**Traceability**: all factual claims cite a `ref-*.md` section or official guideline; unverifiable → mark `⚠️ official verify`.
+**References**: full index → `references/references.md`. Key: `interactive_menu.md`, `ADVANCED.md`/`ADVANCED_zh-CN.md`, `advanced_api.md`, `topic-selection.md`, `data_templates.md`, `svg_editing.md`. Units → `references/units.md`.
 **Project Files**: `README.md` | `README_zh-CN.md` | `CHANGELOG.md` | `AGENTS.md` | `LICENSE` (MIT © 2025 medstatstar) | `requirements.txt` | `assets/icon.svg`.
-
-**Changelog**: version/fix log → `CHANGELOG.md`.
+**Changelog**: → `CHANGELOG.md`.

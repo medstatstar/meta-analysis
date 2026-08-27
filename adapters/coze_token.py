@@ -56,20 +56,28 @@ DEFAULT_TOKEN_PATH = os.path.expanduser(
 TOKEN_ENV = "COZE_META_TOKEN"
 
 
-def _obf_encode(plain: str) -> str:
-    """XOR 每个字节与滚动密钥，再做 URL-safe base64。"""
+def obf_encode(plain: str, key: bytes) -> str:
+    """XOR 每个字节与滚动密钥，再做 URL-safe base64（通用、key 参数化）。"""
     data = plain.encode("utf-8")
-    key = OBFUSCATION_KEY
     xored = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
     return base64.urlsafe_b64encode(xored).decode("ascii")
 
 
-def _obf_decode(blob: str) -> str:
-    """_obf_encode 的逆操作。"""
+def obf_decode(blob: str, key: bytes) -> str:
+    """obf_encode 的逆操作（通用、key 参数化）。同一算法只此一份，
+    bug_report 与 coze_token 各自传入自己的混淆 key，杜绝双份实现漂移。"""
     data = base64.urlsafe_b64decode(blob.strip())
-    key = OBFUSCATION_KEY
     plain = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
     return plain.decode("utf-8")
+
+
+# 兼容包装：coze_token 自身用主 key（OBFUSCATION_KEY）
+def _obf_encode(plain: str) -> str:
+    return obf_encode(plain, OBFUSCATION_KEY)
+
+
+def _obf_decode(blob: str) -> str:
+    return obf_decode(blob, OBFUSCATION_KEY)
 
 
 def default_token_path() -> str:
