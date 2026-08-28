@@ -227,15 +227,99 @@ def sanitize_payload(payload: dict) -> dict:
 
 
 def _fill_external_svgs(parsed: dict, timeout: int = 30) -> dict:
-    """方案 B（2026-08-26）：coze 端已把 figures[].svg 与 repro.r 外置 S3 并返回 url 引用，
-    此处按 url 下载回填，使下游（run_analysis.render_figures / 复现脚本）契约不变
-    （figures[].svg、repro['r'] 照常可用）。
+    """coze 返回体重组入口（2026-08-28 重构，用户提案的统一 manifest 方案）。
 
-    - figures[].url → 填 fig['svg']
-    - repro 为 dict 且含 url、无 'r' → 填 repro['r']（r_version/packages 已内联，不受影响）
-    - 超时 / 网络失败 → 保留 url 并标记 _svg_fetch_failed / _repro_fetch_failed，绝不抛错中断分析。
-    - 已含内容（coze 降级内联）或不是 dict → 原样跳过。
+    优先走**新契约**：若响应含 `_coze_manifest`（coze 端把超 4000 的 figures/repro/stats
+    子块统一移进单个 manifest 文件并挂链接），则 GET manifest → 逐 path 写回原值 →
+    重组为原始 JSON（含 svg/r 代码/统计值），一次还原、零数据丢失。
+
+    **向后兼容**：无 `_coze_manifest`（旧 coze 响应）时，走旧契约——figures[].url→svg、
+    repro.url→r、以及 `_coze_externalized` 逐块回填。
+
+    - 超时 / 网络失败 → 保留引用并标记 _*_fetch_failed，绝不抛错中断分析。
     """
+    if not isinstance(parsed, dict):
+        return parsed
+    # 新契约：manifest 单文件重组（优先级最高）
+    manifest = parsed.get("_coze_manifest")
+    if isinstance(manifest, dict) and manifest.get("storage") == "s3" and manifest.get("url"):
+        return _reassemble_from_manifest(parsed, manifest, timeout=timeout)
+    # 旧契约（向后兼容）：figures[].url / repro.url / _coze_externalized 逐项回填
+    return _fill_external_svgs_legacy(parsed, timeout=timeout)
+
+
+def _reassemble_from_manifest(parsed: dict, manifest: dict, timeout: int = 30) -> dict:
+    """按 manifest 重组原始 JSON（2026-08-28，用户提案）：
+    coze 端把超 4000 的最大块（figures/repro/stats 子块）统一移进单个 S3 manifest 文件，
+    manifest 为 [{path, value}, ...]，主返回体挂 `_coze_manifest = {storage:"s3", url}`。
+    此处 GET manifest → 按 path 写回 value → 重组为原始 JSON。
+
+    - path 支持 `figures[i]`（列表下标）与 `stats.xxx` 点路径。
+    - 写回时若该位置当前仍是 {storage:"s3",type:"block"} 引用（未被本地改动）才覆盖。
+    - 超时 / 网络失败 → 保留 manifest 引用并在主返回体标 _manifest_failed，绝不抛错中断。
+    - 重组完成后移除 `_coze_manifest`（下游见到的即原始结构）。
+    """
+    url = manifest.get("url")
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            manifest_list = json.loads(r.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        parsed["_manifest_failed"] = True
+        return parsed
+    if not isinstance(manifest_list, list):
+        parsed["_manifest_failed"] = True
+        return parsed
+
+    def _resolve_target(root, path):
+        """返回 (容器, key) 或 (list, idx) 以便写回；找不到返回 None。"""
+        if path.startswith("figures["):
+            # figures[i]
+            m = path[8:-1]
+            if not m.isdigit():
+                return None
+            idx = int(m)
+            figs = root.get("figures")
+            if not isinstance(figs, list) or idx >= len(figs):
+                return None
+            return figs, idx
+        # stats.a.b 点路径
+        parts = path.split(".")
+        node = root
+        for p in parts[:-1]:
+            if not isinstance(node, dict) or p not in node:
+                return None
+            node = node[p]
+        if not isinstance(node, dict) or parts[-1] not in node:
+            return None
+        return node, parts[-1]
+
+    for entry in manifest_list:
+        if not isinstance(entry, dict):
+            continue
+        p = entry.get("path")
+        if not p:
+            continue
+        target = _resolve_target(parsed, p)
+        if target is None:
+            continue
+        container, key = target
+        cur = container[key]
+        # 仅当仍是外置引用时才写回；已被本地改动为实际内容则跳过
+        if isinstance(container, dict):
+            is_ref = (isinstance(cur, dict) and cur.get("storage") == "s3"
+                      and cur.get("type") == "block")
+            if is_ref:
+                container[key] = entry.get("value")
+        else:  # list
+            if isinstance(cur, dict) and cur.get("storage") == "s3" and cur.get("type") == "block":
+                container[key] = entry.get("value")
+    # 重组完成，移除 manifest 引用（下游见原始结构）
+    parsed.pop("_coze_manifest", None)
+    return parsed
+
+
+def _fill_external_svgs_legacy(parsed: dict, timeout: int = 30) -> dict:
+    """旧契约（2026-08-28 起仅向后兼容）：figures[].url→svg、repro.url→r、_coze_externalized 逐块回填。"""
     if not isinstance(parsed, dict):
         return parsed
     figs = parsed.get("figures")
@@ -256,6 +340,55 @@ def _fill_external_svgs(parsed: dict, timeout: int = 30) -> dict:
                 repro["r"] = r.read().decode("utf-8")
         except Exception:  # noqa: BLE001
             repro["_repro_fetch_failed"] = True
+    # 旧契约的 stats 逐块回填
+    refs = parsed.get("_coze_externalized")
+    if isinstance(refs, list):
+        _inflate_externalized(parsed, refs, timeout=timeout)
+    return parsed
+
+
+def _inflate_externalized(parsed: dict, refs: list | None = None, timeout: int = 30) -> dict:
+    """（旧契约，2026-08-28 起仅向后兼容）回填 _coze_externalized 逐块外置的引用。"""
+    if not isinstance(parsed, dict):
+        return parsed
+    if refs is None:
+        refs = parsed.get("_coze_externalized")
+    if not isinstance(refs, list):
+        return parsed
+
+    def _get_ref_node(node, parts):
+        cur = node
+        for p in parts[:-1]:
+            if not isinstance(cur, dict) or p not in cur:
+                return None
+            cur = cur[p]
+        if not isinstance(cur, dict) or parts[-1] not in cur:
+            return None
+        return cur, parts[-1]
+
+    for ref in refs:
+        path = ref.get("path")
+        url = ref.get("url")
+        if not path or not url:
+            continue
+        loc = _get_ref_node(parsed, path.split("."))
+        if loc is None:
+            continue
+        node, key = loc
+        cur_val = node.get(key)
+        if not (isinstance(cur_val, dict) and cur_val.get("storage") == "s3"
+                and cur_val.get("type") == "block"):
+            continue
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as r:
+                raw = r.read().decode("utf-8")
+            val = json.loads(raw)
+            node[key] = val
+        except Exception:  # noqa: BLE001
+            if not isinstance(cur_val, dict):
+                cur_val = {"storage": "s3", "type": "block", "url": url}
+            cur_val["_inflate_failed"] = True
+            node[key] = cur_val
     return parsed
 
 

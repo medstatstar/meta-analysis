@@ -4,6 +4,76 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.2.26] — 2026-08-28 — figures/repro 无条件外置（无论是否超 4000）
+
+### Changed（coze 端 `meta_analysis.py::_externalize_to_manifest`）
+- **figures/repro 恒外置**：不再「仅超限才外置」——**只要存在** svg 图元素 / repro.r，就**无条件**移出主返回体（原位替换为 `{storage:s3,type:block}` 引用），原值入 manifest。主返回体恒为「stats 数值 + manifest 链接」，更轻、更一致。
+- **stats 子块按需外置**：figures/repro 移完后仍 > 4000，才依次把 stats 子元素从大到小移入同一 manifest，直到 < 4000。
+- 契约不变：`_coze_manifest={storage:s3,url}` + manifest list `[{path,value}]`；本地 `_reassemble_from_manifest` **无需改动**。
+
+### Verified（R 引擎 + mock HTTP server）
+- 324 字符（未超限）+ 有 svg/repro → 两者**仍被无条件外置**，stats.pooled 内联，manifest 挂载；本地重组 **FULLY EQUAL=True**。
+- 无 figures/repro + 未超限 → 原样、无 manifest、0 上传。
+- 无 figures/repro + 超限 → stats 子块（big_str）外置为 block、k 保留、无丢弃。
+- 本地/coze 衔接契约（path/占位/manifest 结构）与 2.2.25 完全一致，发布前已核验。
+
+### 部署
+- coze 端 `meta_analysis.py` → 重新上传 coze 包（`meta-analysis-coze_project-20260828e.zip`）。本地端无改动（契约未变）。
+
+## [2.2.25] — 2026-08-28 — coze 截断收敛为「统一 manifest」方案（svg/r/stats 单文件外置）
+
+### Changed（coze 端 `meta_analysis.py` + 本地 `coze_client.py`）
+用户进一步提案的**统一 manifest 方案**取代 2.2.24 的「逐块外置 `_coze_externalized`」：
+
+- **coze 端**：`_externalize_to_manifest()`（替代 `_externalize_figures`/`_externalize_repro`/`_trim_to_limit` 三套）。
+  超 4000 时——先把 figures（含 svg）、repro（含 r 代码）移动为 `{storage:s3,type:block}` 引用，再依次把
+  `stats` 下一级元素从**最大开始**移动，直到总量 < 4000；所有被移元素（含 path+原值）组成一个 list，
+  **存为单个 S3 文件**，主返回体挂 `_coze_manifest={storage:s3,url}`。核心数值（pooled/heterogeneity/k/sm）始终内联。
+- **本地端**：`_reassemble_from_manifest()`——GET manifest → 按 path 逐项写回 → **重组为原始 JSON**（含 svg/r/统计值），
+  一次还原、零丢失。`_fill_external_svgs` 作为入口：优先走 manifest，无则回退旧契约（figures.url/repro.url/`_coze_externalized`）。
+- **删旧代码**：`_externalize_figures`/`_externalize_repro`/`_trim_to_limit`/`_externalize_all_with_timeout` 及其
+  `_coze_externalized` 逐块契约全部移除（用户约定：不留遗留实现）。
+
+### Verified（单测 + mock HTTP server，含 svg/r 代码）
+- 5652 字符超限体 → 外置 figures[0] 等块至 2861 字符（<4000），pooled/k 内联，manifest 挂载；
+  本地重组后 **FULLY EQUAL = True**（figures[0].svg / figures[1].svg / repro.r / stats.subgroups 全部还原）。
+- 未超限响应：原样返回、不产生 manifest、不上传 S3、svg/r 保持内联。
+- 只移必要的块（够小就不动，如 repro 未触及）。
+
+### 部署
+- coze 端 `meta_analysis.py`（manifest 外置）→ 重新上传 coze 包（`meta-analysis-coze_project-20260828d.zip`）。
+- 本地 `coze_client.py`（manifest 重组 + 兼容）→ 随技能本体发布。
+
+## [2.2.24] — 2026-08-28 — coze 4000 截断改为「超限外置最大块」，零数据丢失
+
+### Changed（coze 端 `meta_analysis.py` + 本地 `coze_client.py`）
+用户提案的**泛化截断兜底**取代原「按优先级丢弃」：超 4000 时**不再丢数据**，而是迭代「找最大字符块 → 外置 S3 → 原位替换为 `{storage:s3,type:block,url}` 引用」，直到 < 4000，被外置路径记入 `out['_coze_externalized']=[{path,url}]`。
+
+- **核心内联**：`status`/`task`/标记 + `stats` 容器（pooled/heterogeneity/k/sm/model…）整体永不外置，只下钻其子块（subgroups/quality_gate.checks/bias…）——关键数值始终内联可取。
+- **兜底丢弃**：仅当 S3 不可用或所有可外置块已外置仍超限，才从大到小丢 stats 子字段并记 `_coze_truncated`（保 status 与最小数值核心）。
+- **本地回填**：`coze_client.py` 新增 `_inflate_externalized()`（对称于 `_fill_external_svgs`），按 `_coze_externalized` 的 `{path,url}` 逐个 GET 回填还原；失败保留 url 并标 `_inflate_failed`，绝不中断分析。`run_meta` 在 `_fill_external_svgs` 末尾自动调用。
+
+### Verified（单测 + R 4.6.1 真实数据）
+- 单测：4169 字符超限体 → 外置 `stats.subgroups`、pooled/k 保持内联、回填后与原始完全相等（零丢失）。
+- 真实 `_inflate_externalized` + mock HTTP server：从 url 正确还原 `stats.subgroups`，k/pooled 未动。
+- R 引擎真实跑用户 7-RCT 亚组数据：figures/repro 外置后返回体 1783 字符 < 4000，`subgroups` 内联、Q_between=3.8522 完整。
+- 用户案例截断根因（gate_json 冗余）已在 2.2.23 删除；本方案提供**任意胖字段**的通用兜底（不再依赖人工预判优先级）。
+
+### 部署
+- coze 端改 `meta_analysis.py`（外置逻辑）→ 需重新上传 coze 包（`meta-analysis-coze_project-20260828c.zip`）生效。
+- 本地改 `coze_client.py`（回填）→ 随技能本体发布。
+
+## [2.2.23] — 2026-08-28 — 修复亚组分析 coze 4000 截断裁掉 stats.subgroups
+
+### Fixed（coze 端 R / Python，需重新上传 coze 部署包生效）
+- **删除 `quality_gate.gate_json` 冗余**：`run_quality_gate` 不再生成 quality_gate 结构的字符串化 JSON 副本，`.quality_gate` 转发去掉 `gate_json`。该字段是 `checks/status/k/I2` 的重复，每次分析徒增 ~400 字符，是 `subgroup_analysis` 等 stats 较胖任务触发 coze 4000 字符截断、尾部裁掉 `stats.subgroups` 的主因。已 grep 确认本地渲染层无任何 `.py` 依赖 gate_json。
+- **重排 `_trim_to_limit` 截断优先级**（`src/graphs/nodes/meta_analysis.py`）：亚组数值 `stats.subgroups / subgroup_test / bias` 列为高保真对象（亚组分析核心交付物），仅先丢 null 的 `notes/warnings/task` 与补充性 `stats.quality_gate`；超限时 subgroups 不再被优先丢弃。
+
+### Verified（R 4.6.1 本地实测，非假设）
+- 跑用户同款 7-RCT 按 PD-L1 分亚组案例：修复后 `stats` 序列化 979 字符、gate_json 消失，估算 coze 返回体 **~3459 < 4000**，`subgroups`（high/low 含 estimate/CI/k）完整返回。
+- Python 单测：构造 4311 字符超限体，`_trim_to_limit` 丢弃顺序 `notes→warnings→task→quality_gate`，**subgroups 保留**、pooled/heterogeneity 完好。
+- 注：本修复属 coze 端代码，未含在 SkillHub 2.2.22 发布包（coze_project 被 gitignore）；需重新打 coze 部署 zip 上传。
+
 ## [2.2.22] — 2026-08-28 — coze 部署复测全绿 + §8.5 门控两处修复
 
 ### Fixed（`tests/deploy_retest.py` 部署复测门控 §8.5）
