@@ -57,10 +57,13 @@ MODEL_MAP = {
 # 设计原则（2026-08-27 整理）：
 #   1) 有专属图名且 coze 认该名 → 显式列名（如 nma→netgraph+netleague、tsa→tsa）。
 #   2) coze 端按 task 自动渲染主图、参考 case 用 `plots:[]` 触发者
-#      （nma_rank / dose_resp / influence / selmodel / rve_meta / multilevel_meta /
+#      （nma_rank / dose_resp / selmodel / rve_meta / multilevel_meta /
 #       multivariate_meta / nnt / esc / prisma_checklist / grade / leave_one_out /
-#       cumulative_meta）→ 登记为 []，由 coze 自渲染**该 task 的恰当主图/表格**，
-#       **绝不强行森林图**。这是旧版 `DEFAULT_PLOTS.get(task, ["forest"])` 兜底的最大隐患：
+#       cumulative_meta / drapery / tsa / power / rob2 / prisma_flow / gosh）→ 登记为 []，
+#       由 coze 按 task 自渲染**该 task 的恰当主图/表格**，**绝不强行森林图**。
+#       注意（2026-08-28 修正）：`influence` 不在该组——coze 端 `if ("influence" %in% plots)`
+#       才出图，故 DEFAULT_PLOTS["influence"] 须显式给 ["influence"]，不能留空。
+#       这是旧版 `DEFAULT_PLOTS.get(task, ["forest"])` 兜底的最大隐患：
 #       未登记方法一律被塞森林图，覆盖掉 coze 自身更合适的默认。
 #   3) pairwise_meta 默认 forest+funnel+baujat+radial；**二元结局**（OR/RR/RD/IR/IRR/PETO）
 #      再追加 labbe+trimfill（labbe/trimfill 仅二元 2×2 适用，连续型自动跳过，避免空图）。
@@ -85,9 +88,11 @@ def _default_plots_for(task, sm):
 DEFAULT_PLOTS = {
     # —— 主分析 / 配对 ——
     "pairwise_meta": ["forest", "funnel", "baujat", "radial"],  # 二元再追加 labbe+trimfill（见 _default_plots_for）
-    "single_group_meta": ["forest"],
-    "subgroup_analysis": ["forest"],                            # 含 by-subgroup 分层森林图
-    "metareg": ["forest"],                                      # bubble 仅 bubble_plot task 生效
+    # 以下三个 task 同处 coze 共用渲染大块（run_task.R 382-660），plots 带名即渲染，
+    # 与 task 无关 → 可安全追加伴侣图（见 2026-08-28 增强）。
+    "single_group_meta": ["forest", "funnel", "influence"],     # 主森林图 + 漏斗图 + 影响诊断（均引擎支持；baujat/radial 对 metaprop 不稳，不强行加）
+    "subgroup_analysis": ["forest", "funnel", "baujat", "radial", "trimfill", "influence"],  # 含 by-subgroup 分层森林图 + 异质性/发表偏倚/剪补/敏感性全套诊断
+    "metareg": ["forest", "funnel", "bubble"],                  # 2026-08-28 放宽 coze bubble gate 后 metareg 亦可渲染气泡图
     # —— 单图 task（1:1 映射） ——
     "forest_plot": ["forest"],
     "funnel_plot": ["funnel"],
@@ -100,16 +105,20 @@ DEFAULT_PLOTS = {
     "gosh": ["gosh"],
     "leave_one_out": ["loo"],
     "cumulative_meta": ["cumulative"],
-    "influence": [],                                            # coze 自动渲染影响力诊断面板
+    # 2026-08-28 修正：coze 端 run_task.R 第 574 行 `if ("influence" %in% plots)` 才出图，
+    # 空 plots 仅返回 stats（诊断面板不显示）。旧值 [] 导致 influence 主图永不出现，
+    # 与下方注释"coze 自动渲染影响力诊断面板"不符。改为显式 ["influence"] 方能触发出图。
+    "influence": ["influence"],
     # —— NMA ——
     "nma": ["netgraph", "netleague"],
     "nma_rank": [],                                             # coze 自动渲染 SUCRA/P-score 图
     # —— 其他结局 ——
-    "survival_meta": ["forest"],
-    "diagnostic_meta": ["sroc"],
-    "bayesian_pairwise": ["forest"],
+    "survival_meta": ["forest", "funnel", "radial"],            # 2026-08-28 增补漏斗图 + Radial（rma 对象引擎支持）
+    "diagnostic_meta": ["sroc", "sens_forest", "spec_forest"],   # 2026-08-28 增补敏感度/特异度森林图
+    "bayesian_pairwise": ["forest"],                             # 2026-08-28 修复：R 端补 forest 渲染（此前空跑）
     "dose_resp": [],                                            # coze 自动渲染剂量-反应图
-    "metainc": ["forest"],                                      # 发生率 Meta（二分类率）
+    "metainc": ["forest", "funnel", "radial", "influence"],     # 2026-08-28 增补漏斗/Radial/影响诊断
+    "ipd_meta": ["forest", "funnel", "influence"],              # 2026-08-28 补条目并增补漏斗/影响诊断（rma.glmm 对象）
     # —— 专用分析（coze 自动主图 或 无图） ——
     "tsa": ["tsa"],                                             # 显式名（case36 实测）
     "power": ["power"],                                         # 显式名（case37 实测）
@@ -131,7 +140,7 @@ VALID_PLOTS = frozenset({
     "forest", "funnel", "labbe", "baujat", "radial", "trimfill", "influence",
     "bubble", "netgraph", "contribution", "nodesplit", "netleague", "sucra",
     "sroc", "dose_resp", "loo", "cumulative", "drapery", "tsa", "power",
-    "rob2", "gosh", "prisma_flow",
+    "rob2", "gosh", "prisma_flow", "sens_forest", "spec_forest",
 })
 
 

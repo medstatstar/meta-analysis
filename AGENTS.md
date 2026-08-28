@@ -154,6 +154,15 @@ meta-analysis/
 
 ---
 
+## Decision Records / 决策记录
+
+### DR-2026-08-28 · Figure transport: keep per-file return, do NOT bundle into one archive
+- **Decision**: coze returns figures as **separate S3 objects** (`figures[].url`, one GET each, downloaded + backfilled by `coze_client._fill_external_svgs`); **do NOT** switch to "bundle all figures into one file, split locally".
+- **Why rejected (bundling)**: ① 4000-char truncation was already solved by S3 externalization — unrelated to 1-vs-N files; ② figures are tiny SVGs (~14KB forest, ~112KB for 8) so the saved round-trips are negligible vs. the cost of introducing unpack coupling + single-point failure + contract alignment; ③ bundling breaks the existing "fail-one-keep-rest" robustness (`run_task.R` `.safe_fig` + `_fill_external_svgs` which only marks `_svg_fetch_failed` on a per-figure download error, never aborts).
+- **Only worthwhile optimization**: parallelize `_fill_external_svgs` downloads via `concurrent.futures` (keeps isolation, collapses RTT) — local-only, no coze-side change.
+- **Scope limit**: applies to small text assets (SVG/JSON < tens of KB). Re-evaluate if figures become hi-res PNG / multi-MB, or if coze S3 enforces strict billing/rate limits.
+- **Canonical record**: ct-base `docs/07-coze-engine.md` §20.7.
+
 ## Changelog Sync / 变更日志同步
 
 All version bumps and fixes must be recorded in `CHANGELOG.md`. Security-related fixes are mandatory entries.

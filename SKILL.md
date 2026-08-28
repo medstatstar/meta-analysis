@@ -3,7 +3,8 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: 医学Meta分析 / Meta Analysis
-version: 2.2.16
+version: 2.2.22
+license: MIT
 summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
 description: "基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。 / Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta, for a total of 23 analysis figures. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code."
 
@@ -176,6 +177,10 @@ Agent behavior only; implementation → `adapters/bug_report.py`, protocol → `
 - **Trigger (≤1 proposal/session):** unexpected non-zero exit / engine error / user questions result — **and** retried ≥1. Explicit "report a bug" also triggers (no limit).
 - **Two-stage confirmation:** ① propose-with-preview (bilingual `confirm_prompt` + full sanitized report) → ② on consent `send_to_endpoint` (`https://ct-bugreport.coze.site/run`). Declined → never re-propose.
 - **Sanitization hard:** 11-key whitelist only, never raw data/subject records; `description` is the only free-text field, user-reviewed. No cloud call → `save_local_report()` (stays local).
+
+## 8.5 Deploy Retest Gate (mandatory before publish / deploy)
+
+**Mandatory before publishing / deploying** to GitHub → SkillHub → ClawHub: run `python tests/deploy_retest.py` (`--live` to actually hit the network; publish allowed only on all-green). This gate strictly verifies that the coze response is **genuinely valid** (HTTP 200 ≠ success; it rejects `status=ok` empty shells / `NaN` / no-figure (svg/url) false greens — coze externalizes SVG to S3 `url`, so a present+reachable `url` counts as a valid figure), writes `tests/deploy_retest_report.json`, and exits non-zero on any failure to block publishing. Use `--mock` for local logic self-check (no network) and `--offline` for envelope-contract validation. Full rules and red lines → `outputs/deploy_retest_gate.md`.
 
 ## 9. Meta information
 

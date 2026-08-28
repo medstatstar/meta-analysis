@@ -54,7 +54,7 @@ def extract_svg(svg_str: str) -> tuple[str, str]:
 
 
 def content_bbox(
-    svg_inner: str, pad: float = 8.0, pad_y: float = 24.0
+    svg_inner: str, vb: str = "0 0 504 360", pad: float = 8.0, pad_y: float = 24.0
 ) -> tuple[float, float, float, float]:
     """扫描 SVG 内容元素，返回 (min_x, min_y, max_x, max_y) 含 padding。
 
@@ -62,7 +62,16 @@ def content_bbox(
     森林图等绘图区上下贴近内容时保持呼吸空间，见用户偏好 2026-08-19）。
     覆盖元素：text（含 textLength/text-anchor 计算文本宽度；transform 文本解析
     translate 锚点双向扩展）、rect（跳过 width=100% 白底）、line、circle、
-    polyline/polygon points。无内容时回退原画布 (0, 0, 504, 360)。
+    polyline/polygon points、**path（解析 d 属性绝对坐标对）**。
+
+    2026-08-28 加固：将计算结果与**原始 viewBox** 取并集（union）。依据——
+    ① svglite 内容偶发超出 viewBox（如 forest 左右文字列 x∈[-140,644]），
+      text 扫描已能捕获该溢出；
+    ② 但 ggplot2 / 网络图主内容多为 <path>（曲线、edge），若未被上列元素类型
+      完全捕获，union 原始 viewBox 可保证不裁掉 svglite 实际绘制的区域
+      （设备坐标恒落在原 viewBox 内，除已知的负坐标溢出）。
+    二者取并集 = 既不妨碍 forest 溢出扩展，也不因漏扫而裁图。
+    无内容且无合法 viewBox 时回退原画布 (0, 0, 504, 360)。
     """
     xs: list[float] = []
     ys: list[float] = []
@@ -134,6 +143,30 @@ def content_bbox(
                 pts = [_num(v) for v in a["points"].replace(",", " ").split()]
                 xs += pts[0::2]
                 ys += pts[1::2]
+
+    # ---- path（d 属性绝对坐标对） ----
+    # svglite 对曲线 / 网络图 edge 多输出 <path d="M.. L.. C..">；低层命令字母与逗号
+    # 非数值，直接抽全部浮点 token 按 (x,y) 配对即可覆盖 bounding box。相对坐标
+    # （小写命令）会被误当绝对、可能略放大，但仅增留白、绝不裁图（且下方 union
+    # 原始 viewBox 进一步兜底）。
+    for m in re.finditer(r"<path\b([^>]*)/?>", svg_inner):
+        a = dict(re.findall(r"([a-zA-Z:_-]+)=['\"]([^'\"]*)['\"]", m.group(1)))
+        d = a.get("d")
+        if not d:
+            continue
+        nums = re.findall(r"-?\d+\.?\d*(?:[eE][+-]?\d+)?", d)
+        coords = [_num(v) for v in nums]
+        for i in range(0, len(coords) - 1, 2):
+            xs.append(coords[i])
+            ys.append(coords[i + 1])
+
+    # ---- 与原始 viewBox 取并集（防漏扫裁图） ----
+    try:
+        vbx, vby, vbw, vbh = (float(t) for t in str(vb).split())
+        xs += [vbx, vbx + vbw]
+        ys += [vby, vby + vbh]
+    except (ValueError, AttributeError, TypeError):
+        pass
 
     if not xs or not ys:
         return (0.0, 0.0, 504.0, 360.0)
@@ -278,7 +311,7 @@ def build_figure_widget(
             # 无实际内容的图形（如 coze 静默降级返回的空 svg）→ 隐藏标签，不渲染任何卡片
             continue
         inner = _strip_clip(inner)          # ★ 先移除内部 clipPath（否则左右文字列被裁）
-        min_x, min_y, max_x, max_y = content_bbox(inner, pad=pad, pad_y=pad_y)
+        min_x, min_y, max_x, max_y = content_bbox(inner, vb, pad=pad, pad_y=pad_y)
         vb_fit = f"{min_x:g} {min_y:g} {max_x - min_x:g} {max_y - min_y:g}"
         w = max_x - min_x
         svg_block = (
@@ -324,7 +357,7 @@ def svg_to_png(svg_str: str, out_path: str, scale: float = 2.0,
     inner = _strip_clip(inner)
     inner = _fix_xml(inner)  # svglite 偶发缺 </g>，严格 XML 解析前补齐
     inner = _fix_cjk_fonts(inner)  # 2026-08-20: 含中文的 text 换中文字体族（英文不动）
-    min_x, min_y, max_x, max_y = content_bbox(inner, pad=pad, pad_y=pad_y)
+    min_x, min_y, max_x, max_y = content_bbox(inner, vb, pad=pad, pad_y=pad_y)
     vb_fit = f"{min_x:g} {min_y:g} {max_x - min_x:g} {max_y - min_y:g}"
     full = (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb_fit}" '
@@ -429,6 +462,9 @@ _I18N = {
         "fig_influence": "影响诊断图",
         "fig_nodesplit": "节点拆分图",
         "fig_trimfill": "剪补法漏斗图",
+        "fig_netleague": "网络证据表",
+        "fig_sens_forest": "敏感度森林图",
+        "fig_spec_forest": "特异度森林图",
     },
     "en": {
         "html_lang": "en",
@@ -477,6 +513,9 @@ _I18N = {
         "fig_influence": "Influence diagnostic plot",
         "fig_nodesplit": "Node-splitting plot",
         "fig_trimfill": "Trim-and-fill funnel plot",
+        "fig_netleague": "Network evidence table",
+        "fig_sens_forest": "Sensitivity forest plot",
+        "fig_spec_forest": "Specificity forest plot",
     },
 }
 
@@ -689,13 +728,55 @@ def _pretty_r(code: str) -> str:
 
 
 def _highlight_r(code: str) -> str:
-    """R 代码语法高亮（注释/字符串/函数/数字），先转义再加 span，避免破坏标签。"""
-    esc = _html_escape(code)
-    esc = re.sub(r"(#.*)$", r'<span class="c">\1</span>', esc, flags=re.M)
-    esc = re.sub(r"(&#x27;.*?&#x27;|\".*?\")", r'<span class="s">\1</span>', esc)
-    esc = re.sub(r"\b([a-zA-Z_][a-zA-Z0-9_.]*)\s*\(", r'<span class="f">\1</span>(', esc)
-    esc = re.sub(r"\b(\d+\.?\d*)\b", r'<span class="n">\1</span>', esc)
-    return esc
+    """R 代码语法高亮（注释/字符串/函数/数字）。
+
+    单遍扫描：注释（#...）与字符串（"…"/'…'）先隔离成 span，再对普通代码段
+    做函数/数字高亮。避免「先整体 escape 再正则加 span」导致后一个 pattern
+    匹配前一个生成的 class="c" 等标签属性、产生嵌套损坏 span（2026-08-28 实测
+    `<span class=<span class="s">"c"</span>>`，meta-analysis 与 ct-samplesize
+    同源缺陷）——单遍隔离后 span 标签不再进入后续正则的输入。
+    """
+
+    def _hl_plain(seg: str) -> str:
+        esc = _html_escape(seg)
+        esc = re.sub(r"\b([a-zA-Z_][a-zA-Z0-9_.]*)\s*\(", r'<span class="f">\1</span>(', esc)
+        esc = re.sub(r"\b(\d+\.?\d*)\b", r'<span class="n">\1</span>', esc)
+        return esc
+
+    out = []
+    buf = []
+    i, n = 0, len(code)
+    while i < n:
+        ch = code[i]
+        if ch == "#":  # 注释 → 隔离成 .c span，普通段 flush
+            j = code.find("\n", i)
+            if j == -1:
+                j = n
+            out.append(_hl_plain("".join(buf)))
+            buf = []
+            out.append('<span class="c">%s</span>' % _html_escape(code[i:j]))
+            i = j
+            continue
+        if ch in ('"', "'"):  # 字符串（含转义）→ 隔离成 .s span
+            quote = ch
+            j = i + 1
+            while j < n:
+                if code[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if code[j] == quote:
+                    j += 1
+                    break
+                j += 1
+            out.append(_hl_plain("".join(buf)))
+            buf = []
+            out.append('<span class="s">%s</span>' % _html_escape(code[i:j]))
+            i = j
+            continue
+        buf.append(ch)
+        i += 1
+    out.append(_hl_plain("".join(buf)))
+    return "".join(out)
 
 
 _REPORT_TEMPLATE = """<!DOCTYPE html>
@@ -823,7 +904,8 @@ def render_html_report(out, out_dir: str = ".", titles: list | None = None,
         "drapery": T["fig_drapery"], "sroc": T["fig_sroc"],
         "tsa": T["fig_tsa"], "power": T["fig_power"],
         "influence": T["fig_influence"], "nodesplit": T["fig_nodesplit"],
-        "trimfill": T["fig_trimfill"],
+        "trimfill": T["fig_trimfill"], "netleague": T["fig_netleague"],
+        "sens_forest": T["fig_sens_forest"], "spec_forest": T["fig_spec_forest"],
     }
     if titles is None:
         titles = []

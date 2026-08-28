@@ -4,6 +4,151 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.2.22] — 2026-08-28 — coze 部署复测全绿 + §8.5 门控两处修复
+
+### Fixed（`tests/deploy_retest.py` 部署复测门控 §8.5）
+- **图形 judge 只认内联 `svg` → 误杀所有图形案例**：coze 生产响应把 svg **外置为 S3 `url`**（不含内联 svg）。原规则「至少一个 figure 含有效 svg」会把图形任务全判空壳失败。改为**图形有效 = 内联 `svg` 或可达的外置 `url`**，新增 `_verify_fig_url()` GET 校验（HTTP 非 200 判死链失败，网络抖动不误杀）。
+- **`_has_nan` 把 R 合法缺失标注 `"NA"` 当失败 → 误杀单组 meta / selmodel**：R 在 p 值缺省（单组无对照）、子模型 CI 缺失时输出字符串 `"NA"`，属预期缺失而非计算崩溃。改为**只拦 `NaN`/`Inf` 字面量 + 裸 NaN/Inf**，把 `"NA"` 移出失败判定。
+
+### Verified（coze 主站点 `ct-meta` 部署后全量 `--live` 门控）
+- **46/46 通过，0 失败**。确认本次 R 引擎修复已上云生效：
+  - `diagnostic_meta` 现返回 sroc + **sens_forest + spec_forest**（escalc `PLO` 修复）；
+  - `bayesian_pairwise` 森林图正常出图（`metafor::forest(x=)` 修复）；
+  - netleague 中文映射、各方法默认图形扩充、函数化重构均随部署生效。
+- 验证方法遵循 §20.2.5 / §20.6：开 `result` 字段真内容确认，不看 HTTP 200 假绿。
+
+## [2.2.21] — 2026-08-28 — 端到端回归测试发现并修复 bayesian_pairwise 森林图 bug
+
+### Fixed（`adapters/coze_project/src/r_engine/run_task.R`）
+- **`bayesian_pairwise` 森林图不渲染（真实 bug）**：v2.2.20 新增的 bayes 森林图用
+  `metafor::forest(yi = res$y, ...)`，但 **metafor 5.0.1 的 `forest()` 要求位置参数 `x`**（效应量），
+  不认 `yi=` 具名参数（那是 `meta::forest` 的约定）→ 报 "argument 'x' is missing"，被 `.safe_fig`
+  静默吞掉 → 返回 figures=0。改为 `metafor::forest(x = res$y, vi = res$sigma^2, ...)` 后正常出图。
+
+### Verified（全量端到端回归，重构后引擎真实 R subprocess 跑 46 coze_cases + 4 增强 case）
+- 全部 task 正确分发、`status ∈ {ok,warn}`；重构核心 task 逐项实测：
+  - `metainc`（forest+funnel+radial+influence 4 图）、`survival_meta`（forest+funnel+radial 3 图 +
+    **bias 正常填充** egger_p/begg_p）、`diagnostic_meta`（sroc+sens_forest+spec_forest 3 图）、
+    `bayesian_pairwise`（修复后 forest 出图）。
+  - 共享块 pairwise/单组/亚组/metareg/nma/留一/累积/剂量反应/TSA/power 等全部 status=ok。
+- **说明**：测试框架报告的 case12/19 "NaN/NA" 与 case16 "netleague 缺失" 均为**误报**——stats 里的
+  `"NA"` 是字符串（非数值 NaN，metamean 路径 p 值缺省，既有行为）；`netleague` 按设计进
+  `stats.extra.league_table`（表格）而非 figure。`case38_rob2` 报 error 因本地缺 `robvis` 包
+  （coze 服务端才有），非重构回归。
+- 测试框架经验：`subprocess.run` 反复 spawn R 在本机触发资源耗尽崩溃、且共享 temp 文件会交叉污染；
+  改为 bash 分批（每批 5 案例）+ 唯一 temp 文件后稳定。临时文件用后即清。
+
+---
+
+## [2.2.20] — 2026-08-28 — sens/spec 改 PLO 规范写法 + R 引擎函数化去重
+
+### Changed（`adapters/coze_project/src/r_engine/run_task.R`）
+- **`diagnostic_meta` sens/spec forest 修正 measure**：coze 直连实测 + 本地验证确认 `metafor::escalc`
+  全 family（OR/SMD/PR/PLO 等）正常；`PLOD` 非合法 measure（metafor 报 Unknown measure），
+  敏感度/特异度森林图改用标准的 **`escalc(measure="PLO")`**（logit 比例，xi=TP/ni=TP+FN 等），
+  与 `meta_analysis_core.R` 既有 PLO 用法一致。
+- **R 引擎函数化去重（纯机械提取，零行为改变）**：
+  - 新增 `.safe_fig(figs, draw, type, w, h)`：收敛全库 13 处 `tryCatch(c(figs, list(.render_fig(...))))`
+    出图安全包装 → 统一调用（sucra/contribution/nodesplit/egger/loo/cumulative/forest/sens/spec/influence 等）。
+  - 新增 `.meta_to_rma(fit, model)`：收敛 meta 对象 → metafor::rma.uni 桥接（供 radial/influence 诊断），
+    已传 rma 对象则原样返回；应用于 metainc 与共享块 influence 分支。
+  - 新增 `.bias_test(fit, model, warns, plots, figs)`：收敛共享块与 survival_meta 两处 ~30 行几乎重复的
+    Egger/Begg `regtest`/`ranktest` + egger_p<0.10 警告 + egger 图逻辑 → 一处定义两处调用。
+  - 新增 `.quality_gate(fit, te_vec, se_vec, df, stats, bias_gate)`：收敛两处 `es_gate` 构造 +
+    `run_quality_gate` 调用 + 结果回填 → 一处定义两处调用。
+  - 新增 `.bayes_summary(res)`：收敛 bayesian_pairwise 分支 20+ 行 bayesmeta $summary 矩阵解析
+    （兼容版本间行列方向差异）→ 一处定义一处调用。
+  - 新增 `.col_name(colmap, role, default)`：列名解析（区别于 .col 的取值），dose_resp 手写 7 行
+    `tolower(cm$x %||% ...)` 改用该 helper。
+
+### Verified
+- 本机 R 4.6.1 + metafor 5.0.1 实测：`escalc`（OR/SMD/PR/PLO）全部正常，**无段错误**——此前段错误
+  为 Git Bash `-e` 多行引号破坏假象，非真实问题。PLO 版 sens/spec 森林图完整跑通（rma.uni 合并 + forest 绘制）。
+- 冒烟测试通过：`.bias_test`（meta 对象 → rma 桥接 + bias + warns + egger 图）、`.bayes_summary`（NA 兜底）、
+  `.col_name`（含 default 回退）、sens/spec PLO 森林图绘制。
+- `run_task.R` Rscript `parse()` 通过；`.safe_fig` 14、`.meta_to_rma` 2、`.bias_test` 2、`.quality_gate` 2、
+  `.bayes_summary` 1、`.col_name` 7 处调用确认。
+
+### 说明
+- 本次改动均为本地代码镜像 `adapters/coze_project`，**未部署到 coze 云端**（云端 `run_task.R` 仍是旧版，
+  实测 `diagnostic_meta` 只返回 sroc，未含 sens_forest/spec_forest）。需在 coze 平台侧同步代码后生效。
+
+---
+
+## [2.2.19] — 2026-08-28 — 直接改 coze R 引擎，为单分支 task 增加默认伴侣图
+
+### Changed（`adapters/coze_project/src/r_engine/run_task.R` + `scripts/build_request.py` + `adapters/rendering.py`）
+上一版（2.2.18）核查发现 `survival_meta`/`diagnostic_meta`/`metainc`/`ipd_meta`/`bayesian_pairwise` 在 coze
+R 引擎各自独立分支只渲染一种图。本次**直接改 coze 端 R 代码**（用户授权）为这些 task 补默认伴侣图：
+
+- **`metareg`**：放宽 `run_task.R:577` 的 bubble gate（`task == "bubble_plot"` → `task %in% c("bubble_plot","metareg")`），
+  让 metareg 也能渲染气泡图（meta 回归标志性图）。默认 `["forest","funnel"]` → `["forest","funnel","bubble"]`。
+- **`survival_meta`**：R 分支补 `funnel` + `radial`（rma.uni 对象，引擎支持）。默认 → `["forest","funnel","radial"]`。
+- **`diagnostic_meta`**：新增 `.diag_sens_forest` / `.diag_spec_forest` helper（手算 logit + 0.5 连续性校正，
+  规避 escalc measure 兼容性，规避弃用依赖），补敏感度/特异度森林图。默认 → `["sroc","sens_forest","spec_forest"]`。
+- **`bayesian_pairwise`**：该分支此前从未调用 `render_fig`，默认 `["forest"]` 实为空跑不出图。现用
+  `res$y`/`res$sigma` 绘制个体研究森林图（metafor 已依赖），默认出图。
+- **`metainc`**：补 `funnel`/`radial`/`influence`（meta 对象经 `rma.uni(fit$TE, fit$seTE)` 桥接）。默认 →
+  `["forest","funnel","radial","influence"]`。
+- **`ipd_meta`**：补 `funnel`/`influence`（rma.glmm 对象）。默认 → `["forest","funnel","influence"]`。
+
+同步更新：`build_request.py` 的 `DEFAULT_PLOTS` 与 `VALID_PLOTS`（新增 `sens_forest`/`spec_forest`）、
+`rendering.py` 的 `_I18N`/`type_names`（新增敏感度/特异度森林图中英文标题）。
+
+### Verified
+- `py_compile` 通过；`_default_plots_for` 输出确认（见下方表格）。
+- `run_task.R` 经 Rscript `parse()` 通过；敏感度/特异度森林图 helper 在本地 R 4.6.1 + metafor 5.0.1 完整跑通
+  （rma.uni 合并 + forest 绘制，敏感度 pooled=0.857 / 特异度=0.894 合理）。
+- ⚠️ 说明：本机 metafor 5.0.1 经 `Rscript -e` 多行传参曾误报段错误，实为 Git Bash 引号破坏所致；
+  改用临时 `.R` 文件执行全部正常，非代码问题。
+
+---
+
+## [2.2.18] — 2026-08-28 — 默认图形增强 + netleague 中文映射
+
+### Added / Changed（`scripts/build_request.py` + `adapters/rendering.py`）
+- **`netleague` 中文/英文标题映射补全**：`rendering.py::_I18N` 新增 `fig_netleague`（zh=网络证据表 /
+  en=Network evidence table），`type_names` 取值 `netleague` → 该图在 HTML 模板中不再回退显示原始英文 type 名。
+- **默认图形增强（仅动 coze 共用渲染大块内、引擎已支持的 task，不碰 R 端）**：
+  - `single_group_meta`：`["forest"]` → `["forest","funnel","influence"]`（主森林图 + 漏斗图 + 影响诊断；
+    baujat/radial 对 metaprop/metacor 对象不稳，不强行加）。
+  - `subgroup_analysis`：`["forest"]` → `["forest","funnel","baujat","radial","trimfill","influence"]`
+    （含 by-subgroup 分层森林图 + 异质性/发表偏倚/剪补/敏感性全套诊断，与 pairwise_meta 诊断集对齐）。
+  - `metareg`：`["forest"]` → `["forest","funnel"]`（bubble 被锁死在 `bubble_plot` task，metareg 拿不到，
+    见下方"需 R 端改动"项；此处加 funnel 作发表偏倚诊断）。
+- **引擎能力核查结论**：`survival_meta`/`diagnostic_meta`/`metainc`/`ipd_meta`/`bayesian_pairwise` 在
+  `run_task.R` 各自独立分支仅写了一种图的 `render_fig`（bayesian_pairwise 甚至无图），这些 task 想再加默认图
+  需改 R 端，不在本次纯默认值调整范围内。
+
+### Verified
+- `py_compile` 通过；`_default_plots_for` 输出确认：single_group_meta=[forest,funnel,influence]、
+  subgroup_analysis=[forest,funnel,baujat,radial,trimfill,influence]、metareg=[forest,funnel]、
+  pairwise_meta(OR)=[forest,funnel,baujat,radial,labbe,trimfill]、nma=[netgraph,netleague]。
+- `rendering._I18N['zh']['fig_netleague']` = 网络证据表；`['en']` = Network evidence table。
+
+---
+
+## [2.2.17] — 2026-08-28 — 图形默认出图与渲染健壮性修复
+
+### Fixed（脚本 `scripts/build_request.py` + 呈现层 `adapters/rendering.py`）
+- **`influence` 任务默认图不显示（核心 bug）**：旧 `DEFAULT_PLOTS["influence"] = []`，但 coze 端
+  `run_task.R` 第 574 行 `if ("influence" %in% plots)` 才出影响力诊断面板——空 plots 仅返回 stats，
+  面板永不显示，与注释"coze 自动渲染影响力诊断面板"不符。改为 `DEFAULT_PLOTS["influence"] = ["influence"]`，
+  显式请求后 coze 正常出图；同步修正设计注释（influence 不再归入"空 plots 自渲染"组）。
+- **`content_bbox` 健壮性加固（呈现层）**：原仅扫描 text/rect/line/circle/polyline。ggplot2 / 网络图
+  主内容多为 `<path>`（曲线、edge），若漏扫会导致动态 viewBox 裁掉内容。新增：
+  ① 解析 `<path d=...>` 绝对坐标对；② 将计算 bbox 与**原始 viewBox 取并集（union）**——既保留
+  forest 负坐标溢出扩展，又保证 svglite 实际绘制区域（设备坐标恒在原 viewBox 内）不被裁。
+  `build_figure_widget` 与 `svg_to_png` 两处调用均已传入原始 `vb`。
+
+### Verified
+- 审计脚本覆盖全部 23 个 coze 实际返回的 figure `type`（forest/funnel/labbe/baujat/radial/trimfill/
+  influence/bubble/egger/netgraph/contribution/nodesplit/sucra/dose_resp/sroc/loo/cumulative/drapery/
+  prisma_flow/gosh/tsa/power/rob2）：在 `render_html_report` 中**均以本地化标题正常显示**（无原始 type 兜底）。
+- `content_bbox` 对森林图负坐标溢出（x∈[-140,644]）正确扩展；对纯 path 图形与原 viewBox 并集后不裁图。
+
+---
+
 ## [2.2.16] — 2026-08-27 — 云端二次重建回归闭环确认（两项修复端到端生效）
 
 ### Verified（云端端到端，coze 节点用 coze_project_fixed_v2.zip 重建后）
