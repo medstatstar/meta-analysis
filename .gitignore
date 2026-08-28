@@ -41,3 +41,8 @@ scripts/check_integrity.sh
 
 # coze 运行产物（repro.r 等），属会话期调试产出，不进发布包
 adapters/coze_out/
+
+# 会话期运行产物 / 噪音（不进 git 真源 / 发布包）
+learnings.md
+outputs/
+request.json

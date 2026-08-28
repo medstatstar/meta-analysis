@@ -4,6 +4,20 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.2.27] — 2026-08-28 — coze 调用纪律 + 提示收敛 + 修复
+
+### Added
+- **coze 调用并发限流**：所有出站调用串行化，相邻两次间隔 ≥1s（`coze_client.py` 模块级 `threading.Lock` + 单调时钟；主端点 + 回退端点均约束；间隔可由 `COZE_META_MIN_INTERVAL` 覆写、≤0 关闭）。已写入 ct-base §20.10 全库通用标准。
+
+### Fixed
+- **classify 全角括号缺陷**：query 含全角括号（如 `region（Asia…）`）导致 subgroup 静默退化为 None；`_extract_subgroup` 前瞻断词补全 `（）`，亚组分析恢复（case5 实测 χ²=2.40, p=0.3008）。
+- **质量评估版式**：`rendering.py` 质量卡由单列 `<ul>` 改为两列 `.kv`（左检查项带圆点、右着色状态词），所有案例两端对齐。
+
+### Changed
+- **coze 响应契约漂移 → 收敛到 HTML 唯一出口**：合并「版本漂移（`_coze_version`/旧 `_contract_version` 比对）」与「结构漂移（字段别名自适应）」为单入口 `_assess_contract`；检测到漂移时先自适应产出可用结果，**用户可见提示只在 HTML 报告顶部 `.banner` 出现一次**——删除 stderr 提示与 notes 污染；缺版本标记不误报。
+- **端点回退提示同样收敛**：主端点 token 不一致回退备用端点时，提示仅写机器标记 `_coze_endpoint_notice` 并由 HTML 横幅渲染，不再写 stderr / 不污染 notes。
+- **SKILL.md 正文翻译**：§5.1 残留中文说明按 ct-base 全英文规范译为英文（双语回显块 `当前分析设定 / Current analysis settings` 按要求保留）。
+
 ## [2.2.26] — 2026-08-28 — figures/repro 无条件外置（无论是否超 4000）
 
 ### Changed（coze 端 `meta_analysis.py::_externalize_to_manifest`）

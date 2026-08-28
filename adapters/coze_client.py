@@ -36,6 +36,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -63,9 +64,135 @@ ENDPOINT_FALLBACK_NOTICE = (
     "主分析工作流地址已切换，本次分析已自动回退到备用 coze 端点完成"
 )
 
+# 本地对 coze 响应「契约版本」的期望（与技能 version 解耦，专注"响应结构契约"）。
+# coze 端若注入版本标记（_coze_version 或旧 _contract_version），高于此值即显式升级信号。
+# 缺标记（coze 未注入）不视为漂移，避免无谓误报（见 _assess_contract）。
+EXPECTED_COZE_ENVELOPE_VERSION = "2026-08-28"
+
+# 并发调用保护（用户 2026-08-28 要求）：多次 coze 出站调用之间**必须间隔 ≥1 秒**，
+# 防止触发 coze 端限流（实测曾因密集请求被 429 限流至次日）。
+# 实现：模块级锁 + 单调时钟，串行化"间隔决策"并强制最小间隔。间隔秒数可由
+# 环境变量 COZE_META_MIN_INTERVAL（浮点秒）覆写，<=0 时关闭保护。
+_RATE_LIMIT_LOCK = threading.Lock()
+_LAST_CALL_TS = 0.0  # time.monotonic() of the most recently dispatched coze POST
+
+
+def _assess_contract(parsed: dict) -> tuple:
+    """综合「结构漂移（主·自愈）+ 版本漂移（显式）」的契约检测，统一 meta-analysis 与
+    ct-base §20.9 两套旧机制为单一入口（2026-08-28 综合定稿）。
+
+    两路信号汇入同一结果：
+      1) 结构漂移（主、自愈）：识别已知字段别名并自适应归一化（quality_gate /
+         checks / pooled / figures 形态），保证报告仍能渲染；映射发生时记 drift 说明。
+         对无法自适应的结构缺失，仅记录告警、不臆造数据。
+      2) 版本漂移（显式，若 coze 注入版本标记）：coze 返回 `_coze_version`
+         （或旧 `_contract_version`）高于本地期望 → 显式升级信号。
+
+    ⚠️ 缺标记（coze 未注入版本）**不**视为漂移——避免每响应都误报
+    （呼应"不要反复提示"：仅在确有不一致时才提醒）。
+
+    Returns: (parsed, drift_notes, needs_upgrade)
+      drift_notes 非空 => 已自适应或检测到不一致，交给 rendering.py 在 HTML 横幅提示升级；
+      needs_upgrade 仅为机器可读标记（写回 parsed），本函数**不产生任何用户可见提示**
+      （用户可见提示统一只在渲染层的 HTML 横幅，避免 stderr / notes 重复提示）。
+    """
+    if not isinstance(parsed, dict):
+        return parsed, [], False
+    notes = []
+    p = parsed
+
+    # ---- 结构漂移：已知字段别名 → 本地期望字段（仅当期望字段缺失、且别名存在时映射）----
+    # 1) 质量评估块
+    if not isinstance(p.get("quality_gate"), dict):
+        for a in ("quality_gate_v2", "qgate", "quality", "qagate"):
+            if isinstance(p.get(a), dict):
+                p["quality_gate"] = p[a]
+                if a in p:
+                    del p[a]
+                notes.append(f"coze 响应字段已变更：质量评估由 `{a}` 改为 `quality_gate`，已自动适配")
+                break
+    if isinstance(p.get("quality_gate"), dict):
+        qg = p["quality_gate"]
+        if "checks" not in qg:
+            for ca in ("items", "list", "entries", "checks_list"):
+                if isinstance(qg.get(ca), list):
+                    qg["checks"] = qg[ca]
+                    if ca in qg:
+                        del qg[ca]
+                    notes.append(f"coze 响应字段已变更：质量评估条目由 `{ca}` 改为 `checks`，已自动适配")
+                    break
+
+    # 2) 合并效应量
+    if isinstance(p.get("stats"), dict):
+        st = p["stats"]
+        if not isinstance(st.get("pooled"), dict):
+            for pa in ("estimate", "effect", "pooled_estimate"):
+                if isinstance(st.get(pa), dict):
+                    st["pooled"] = st[pa]
+                    notes.append(f"coze 响应字段已变更：合并效应量由 `{pa}` 改为 `pooled`，已自动适配")
+                    break
+
+    # 3) figures 结构兜底（dict → list；图体别名 image/svg_data/base64 → svg）
+    figs = p.get("figures")
+    if isinstance(figs, dict):
+        p["figures"] = [
+            {"type": k, "svg": v} for k, v in figs.items() if isinstance(v, str)
+        ]
+        notes.append("coze 响应结构已变更：figures 由 dict 改为 list，已自动适配")
+    elif isinstance(figs, list):
+        for i, f in enumerate(figs):
+            if isinstance(f, dict) and "svg" not in f and "url" not in f:
+                for fa in ("image", "svg_data", "base64"):
+                    if isinstance(f.get(fa), str):
+                        f["svg"] = f[fa]
+                        notes.append(f"coze 响应字段已变更：figures[{i}] 图体由 `{fa}` 改为 `svg`，已自动适配")
+                        break
+
+    # 4) 版本漂移：coze 注入标记（优先 _coze_version，兼容旧 _contract_version）
+    cv = p.get("_coze_version") or p.get("_contract_version")
+    if isinstance(cv, str) and cv > EXPECTED_COZE_ENVELOPE_VERSION:
+        notes.append(
+            f"coze 响应契约版本 {cv} 高于本地技能期望 {EXPECTED_COZE_ENVELOPE_VERSION}，"
+            f"检测到结构已升级，建议升级 meta-analysis 技能到最新版"
+        )
+
+    # 去重（保持顺序）
+    seen, uniq = set(), []
+    for n in notes:
+        if n not in seen:
+            seen.add(n)
+            uniq.append(n)
+    return p, uniq, bool(uniq)
+
 
 def _endpoint() -> str:
     return os.environ.get("COZE_META_ENDPOINT", DEFAULT_ENDPOINT).rstrip("/")
+
+
+def _acquire_rate_limit() -> None:
+    """并发调用保护：确保相邻两次 coze POST 之间**至少间隔 1 秒**（可由
+    COZE_META_MIN_INTERVAL 覆写），避免触发 coze 端限流（429）。
+
+    用模块级锁串行化"间隔决策"，仅在决策期间持锁（含必要的 sleep 占位），
+    网络请求本身在锁释放后发出——既保证 ≥1s 间距，又不把网络延迟锁在临界区内。
+
+    作用域：同一 Python 进程内的多线程并发（本技能典型调用场景）。跨进程并发
+    需另加文件锁，当前未实现（如需多进程同时调用 coze，再扩展）。
+    """
+    try:
+        interval = float(os.environ.get("COZE_META_MIN_INTERVAL", "1.0"))
+    except (TypeError, ValueError):
+        interval = 1.0
+    if interval <= 0:
+        return
+    global _LAST_CALL_TS
+    with _RATE_LIMIT_LOCK:
+        now = time.monotonic()
+        wait = interval - (now - _LAST_CALL_TS)
+        if wait > 0:
+            time.sleep(wait)
+            now = time.monotonic()
+        _LAST_CALL_TS = now
 
 
 def _resolve_token(endpoint: str = "") -> str:
@@ -447,6 +574,7 @@ def run_meta(task: str, data: dict, params: dict | None = None,
     # 主端点请求；token 不一致（401/403 + token 关键字）则回退 FALLBACK_ENDPOINT
     # （**回退端点使用自身专属 token**，见 _headers(fb_url)）
     try:
+        _acquire_rate_limit()  # 并发保护：相邻 coze 调用至少间隔 1 秒
         raw, _elapsed = _post_run(run_url, body, headers, _timeout())
     except _CozeHttpError as e:
         if _is_token_error(e.code, e.body) and ep != FALLBACK_ENDPOINT:
@@ -457,6 +585,7 @@ def run_meta(task: str, data: dict, params: dict | None = None,
                     f"coze 回退端点未授权（{fb_url} 不在 auto_approve_endpoints 白名单）。"
                 )
             try:
+                _acquire_rate_limit()  # 并发保护同样覆盖回退端点
                 raw, _elapsed = _post_run(fb_url, body, fb_headers, _timeout())
                 used_fallback = True
                 run_url = fb_url
@@ -484,6 +613,13 @@ def run_meta(task: str, data: dict, params: dict | None = None,
     # 2026-08-26 方案 B：figures[].svg 与 repro.r 已在 coze 端外置 S3，按 url 回填
     # （失败则保留 url 并标记 _*_fetch_failed，下游契约不变）
     _fill_external_svgs(parsed)
+    # 契约漂移检测 + 自适应（coze 响应结构与本地技能"对不上"时，自动归一化；
+    # 用户可见提示统一只在 rendering.py 的 HTML 横幅，此处不写 stderr / 不污染 notes）
+    if isinstance(parsed, dict):
+        parsed, _drift_notes, _needs_upgrade = _assess_contract(parsed)
+        if _drift_notes:
+            parsed["_contract_drift"] = _drift_notes
+            parsed["_needs_upgrade"] = _needs_upgrade
     # 透出飞书写入状态（coze 端 GraphOutput 顶层字段，2026-08-19）
     if isinstance(parsed, dict):
         for _k in ("feishu_write_success", "feishu_write_time"):
@@ -491,19 +627,11 @@ def run_meta(task: str, data: dict, params: dict | None = None,
                 parsed[_k] = outer[_k]
         # 仅诊断参考：coze 请求→响应往返秒数（R 计算 + 网络；非界面渲染时间）
         parsed["coze_elapsed_seconds"] = round(_elapsed, 1)
-        # 端点回退提示：原地址因 token 不一致触发回退，提示用户技能已升级、地址有变
+        # 端点回退提示：原地址因 token 不一致触发回退，提示用户技能已升级、地址有变。
+        # 用户可见提示统一只在 rendering.py 的 HTML 横幅（由 _coze_endpoint_notice 驱动），
+        # 此处不写 stderr / 不污染 notes。
         if used_fallback:
             parsed["_coze_endpoint_notice"] = ENDPOINT_FALLBACK_NOTICE
-            notes = parsed.get("notes")
-            if isinstance(notes, list):
-                notes.append(ENDPOINT_FALLBACK_NOTICE)
-            elif notes:
-                parsed["notes"] = [notes, ENDPOINT_FALLBACK_NOTICE]
-            else:
-                parsed["notes"] = [ENDPOINT_FALLBACK_NOTICE]
-            sys.stderr.write(
-                "\n[meta-analysis] 端点回退提示: " + ENDPOINT_FALLBACK_NOTICE + "\n"
-            )
     return parsed
 
 

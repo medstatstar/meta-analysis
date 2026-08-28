@@ -424,6 +424,8 @@ _I18N = {
         "copied": "已复制 ✓",
         "trunc_prefix": "⚠️ coze 返回体因 4000 字符限制截断，以下次要内容缺失：",
         "trunc_suffix": "。核心数值（status/stats）完整。",
+        "contract_drift_prefix": "⚠️ coze 返回结构与本地技能预期不一致，已在本地自动适配。如频繁出现，建议升级 meta-analysis 技能到最新版：",
+        "endpoint_fallback_prefix": "⚠️ 主分析工作流地址已切换，本次分析已自动回退到备用 coze 端点完成。",
         "effect_label": "效应量",
         "pooled_effect": "合并效应量",
         "sig_yes": "有统计学显著性",
@@ -475,6 +477,8 @@ _I18N = {
         "copied": "Copied ✓",
         "trunc_prefix": "⚠️ The coze response was truncated at the 4000-character limit; the following secondary content is missing: ",
         "trunc_suffix": ". Core values (status/stats) are complete.",
+        "contract_drift_prefix": "⚠️ The coze response structure differs from what this skill version expects; it has been auto-adapted locally. If this recurs, upgrade the meta-analysis skill to the latest version:",
+        "endpoint_fallback_prefix": "⚠️ The primary analysis workflow endpoint was switched; this analysis was automatically completed via the fallback coze endpoint.",
         "effect_label": "Effect",
         "pooled_effect": "Pooled effect",
         "sig_yes": "Statistically significant",
@@ -531,19 +535,25 @@ def _group_card(label: str, ico: str, inner_html: str) -> str:
 
 
 def _quality_gate_card(qg: dict, T: dict) -> str:
-    """质量门：状态彩色徽章 + 逐条检查（彩色圆点）。"""
-    status = str(qg.get("status") or "unknown").lower()
-    cls = {"green": "ok", "yellow": "warn", "red": "bad"}.get(status, "warn")
-    label = {"green": T["qgate_pass"], "yellow": T["qgate_warn"], "red": T["qgate_fail"]}.get(status, status)
+    """质量门：状态彩色徽章 + 逐条检查（左检查项、右状态结论，两列对齐 .kv 版式）。"""
+
+    def _lvl_map(x):
+        return {"green": "ok", "yellow": "warn", "red": "bad"}.get(str(x or "warn").lower(), "warn")
+
+    status = _lvl_map(qg.get("status") or "unknown")
+    label = {"ok": T["qgate_pass"], "warn": T["qgate_warn"], "bad": T["qgate_fail"]}.get(status, status)
+    badge = f'<span class="badge {status}"><span class="dot"></span>{label}</span>'
     checks = qg.get("checks") or []
-    items = []
+    rows = []
     for c in checks:
-        lvl = str(c.get("level") or "warn").lower()
-        dot = {"green": "ok", "yellow": "warn", "red": "bad"}.get(lvl, "warn")
+        dot = _lvl_map(c.get("level") or "warn")
+        verdict = {"ok": T["qgate_pass"], "warn": T["qgate_warn"], "bad": T["qgate_fail"]}.get(dot, dot)
         msg = _html_escape(c.get("message") or c.get("item") or "")
-        items.append(f'<li><span class="cdot {dot}"></span><span>{msg}</span></li>')
-    badge = f'<span class="badge {cls}"><span class="dot"></span>{label}</span>'
-    body = f'{badge}<ul class="checks">{"".join(items)}</ul>' if items else badge
+        rows.append(
+            f'<div class="k"><span class="cdot {dot}"></span>{msg}</div>'
+            f'<div class="v {dot}">{verdict}</div>'
+        )
+    body = f'{badge}<div class="kv checks-kv">{"".join(rows)}</div>' if rows else badge
     return _group_card(T["group_quality"], "✅", body)
 
 
@@ -830,6 +840,12 @@ main>*{{animation:fade .35s ease both;}}
 .checks li{{display:flex;align-items:flex-start;gap:8px;font-size:15px;}}
 .checks .cdot{{margin-top:5px;width:8px;height:8px;border-radius:50%;flex:none;}}
 .cdot.ok{{background:var(--ok);}} .cdot.warn{{background:var(--warn);}} .cdot.bad{{background:var(--bad);}}
+.checks-kv{{margin-top:10px;}}
+.checks-kv .k{{display:flex;align-items:center;gap:8px;color:inherit;}}
+.checks-kv .v.ok{{color:var(--ok);}}
+.checks-kv .v.warn{{color:var(--warn);}}
+.checks-kv .v.bad{{color:var(--bad);}}
+.checks-kv .cdot{{margin-top:0;}}
 details.repro{{background:#eef1f5;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);}}
 details.repro summary{{cursor:pointer;padding:13px 18px;font-size:14px;font-weight:600;color:#1e293b;outline:none;display:flex;justify-content:space-between;align-items:center;list-style:none;}}
 details.repro summary::-webkit-details-marker{{display:none;}}
@@ -978,6 +994,25 @@ def render_html_report(out, out_dir: str = ".", titles: list | None = None,
             f'<div class="banner">{T["trunc_prefix"]}{items}{T["trunc_suffix"]}</div>'
         )
 
+    # 契约漂移横幅（coze 响应结构与本地技能预期不一致时提醒升级；text 已由 coze_client 填入 _contract_drift）
+    drift = out.get("_contract_drift")
+    drift_banner = ""
+    if out.get("_needs_upgrade") and isinstance(drift, list) and drift:
+        items_html = "".join(
+            f"<div>· {_html_escape(str(d))}</div>" for d in drift
+        )
+        drift_banner = (
+            f'<div class="banner"><strong>{T["contract_drift_prefix"]}</strong>'
+            f'<div style="margin-top:6px;font-weight:400;">{items_html}</div></div>'
+        )
+
+    # 端点回退横幅（主工作流地址切换、已自动回退备用 coze 端点；用户可见提示唯一出口）
+    endpoint_banner = ""
+    if out.get("_coze_endpoint_notice"):
+        endpoint_banner = (
+            f'<div class="banner">{T["endpoint_fallback_prefix"]}</div>'
+        )
+
     task = _html_escape(str(out.get("task") or ""))
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -986,7 +1021,7 @@ def render_html_report(out, out_dir: str = ".", titles: list | None = None,
         html_lang=T["html_lang"], report_title=T["report_title"],
         result_report=T["result_report"], generated=T["generated"],
         footer_txt=T["footer"], copied_txt=T["copied"],
-        banner=trunc_banner, hero=hero_html, figures=figures_html,
+        banner=trunc_banner + drift_banner + endpoint_banner, hero=hero_html, figures=figures_html,
         stats_groups=stats_html, repro=repro_html,
     )
 

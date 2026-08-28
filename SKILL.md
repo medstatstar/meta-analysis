@@ -3,7 +3,7 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: Meta Analysis / 医学Meta分析
-version: 2.2.26
+version: 2.2.27
 license: MIT
 summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
 description: "Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta, for a total of 23 analysis figures. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code. / 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。"
@@ -131,10 +131,10 @@ figure_mode / render-timing → `references/ADVANCED.md`; inline/figure spec →
 (yi/sei/slab column mapping is already auto-derived by `build_request.py`; no explicit inheritance needed; `run_meta.py` is self-sufficient from query+data each time.)
 
 #### Three hard rules
-1. **Echo a "Current analysis settings" block after every analysis (mandatory, after this round's numbers/figures):**
-   `## Current analysis settings: data=<csv> | measure=OR | model=random | method=REML | subgroup=— | task=pairwise_meta`
-   No field omitted (`—` placeholder) — lets LLM locate "most recent settings" on follow-up.
-2. **On follow-up, change only the changed fields:** locate most recent `## Current analysis settings:` block, read all fields, override only what changed (e.g. `task←subgroup_analysis`, `subgroup←region`); yi/sei/slab + model/method/measure inherited verbatim — dropping column mapping = effect-size mismatch.
+1. **Echo a "当前分析设定 / Current analysis settings" block after every analysis (mandatory, after this round's numbers/figures):**
+   `## 当前分析设定 / Current analysis settings: data=<csv> | measure=OR | model=random | method=REML | subgroup=— | task=pairwise_meta`
+   Bilingual header (Chinese first, then English, separated by ` / `) is mandatory; field keys stay English (machine-readable for follow-up parsing). No field omitted (`—` placeholder) — lets LLM locate "most recent settings" on follow-up.
+2. **On follow-up, change only the changed fields:** locate most recent `## 当前分析设定 / Current analysis settings:` block (match by either Chinese or English token), read all fields, override only what changed (e.g. `task←subgroup_analysis`, `subgroup←region`); yi/sei/slab + model/method/measure inherited verbatim — dropping column mapping = effect-size mismatch.
 3. **Dataset supplied per round, not by magic pointer:** no auto `data_backup.csv`; carve subset into new csv + re-issue `run_meta.py` at it.
 
 #### Deterministic fallback

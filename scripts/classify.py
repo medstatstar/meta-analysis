@@ -82,7 +82,7 @@ def _extract_subgroup(text):
     # 同时 (?:...)(?:\s+by)? 吃掉「subgroup by X」里多余的 by，避免把 by 误当成列名。
     pat = re.compile(
         r'(?:按|by|分层|subgroup)(?:\s+by)?\s*([A-Za-z0-9_\u4e00-\u9fa5]{1,8}?)'
-        r'(?=做|进|行|分|析|亚组|分层|的|\(|\)|，|,|\s|$|。|；|;)',
+        r'(?=做|进|行|分|析|亚组|分层|的|\(|\)|（|）|，|,|\s|$|。|；|;)',
         re.IGNORECASE,
     )
     m = pat.search(text)

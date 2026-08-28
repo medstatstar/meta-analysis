@@ -13,7 +13,7 @@
 - **描述即自动执行**：你说清分析需求即返回真实数字/图形，不强制确认门（仅昂贵/不可逆/出域计算给轻量预览）。
 - **两层状态**：数据集可落盘（`output/data_backup.csv`）；**分析 config（model / method / measure / subgroup / task）+ 列映射（yi / sei / slab）仅在线程内**，不落盘 → 必须靠回显块 + merge_spec 兜底。
 - **状态机（计算型）**：Simple→描述即执行（不弹菜单）；Vague→grill-me 逐分支锁模型；Complex→自动执行 + 能力路由菜单（卡在"哪个设计族"时）。
-- **跨轮连续性**：每次分析后回显 `## 当前分析设定：` 块，追问只改变化字段（详见下文 §6）。
+- **跨轮连续性**：每次分析后回显 `## 当前分析设定 / Current analysis settings:` 块，追问只改变化字段（详见下文 §6）。
 
 > 下方第 1–6 节是 **meta-analysis 专属的真实对话示例与场景索引**，演示如何套用该框架。
 >
@@ -269,21 +269,21 @@ CLI 调用示例、双向求解模式、曲线模式、核心公式推导、系�
 
 **第 1 轮 · 你**：合并这 5 项二分类研究的 OR（数据已落盘 `output/data_backup.csv`）。
 **助手**：✅ 随机效应 (REML)，OR = 1.52 (95%CI 1.18–1.96)，I² = 34%
-`## 当前分析设定：data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | subgroup=— | task=pairwise_meta`
+`## 当前分析设定 / Current analysis settings: data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | subgroup=— | task=pairwise_meta`
 
 **第 2 轮 · 你**：按 age 做个亚组。
 **助手**：✅ 亚组（age）：<50 岁 OR=1.31 (1.02–1.69)；≥50 岁 OR=1.88 (1.40–2.53)；组间 Q=3.94, p=0.047
-`## 当前分析设定：data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | subgroup=age | task=subgroup_analysis`
+`## 当前分析设定 / Current analysis settings: data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | subgroup=age | task=subgroup_analysis`
 > 本轮回显块**只读第 1 轮块**、把 `task←subgroup_analysis` + `subgroup←age`，**列映射 yi/sei/slab 与 model/method/measure 原样继承**——未重贴数据、未丢列映射。
 
 **第 3 轮 · 你**：去掉效应量最大的那篇，做敏感性分析。
 **助手**：✅ leave-one-out：剔除 study-C 后 OR=1.47 (1.13–1.91)，结论稳健
-`## 当前分析设定：data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | subgroup=age | task=pairwise_meta`
+`## 当前分析设定 / Current analysis settings: data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | subgroup=age | task=pairwise_meta`
 > ⚠️ coze **无独立 `sensitivity` task**（§5.0：sensitivity/pub_bias 为 `unknown_task`）；敏感性分析以 `task=pairwise_meta` 复跑并剔除最大研究实现，`subgroup=age` 保留原亚组框架；其余字段继承。注意**未重置 subgroup**——敏感性在原亚组内做。
 
 **第 4 轮 · 你**：那把年龄当连续变量做元回归看看。
 **助手**：✅ 元回归（age 连续）：斜率 β=0.012/岁 (95%CI 0.003–0.021)，p=0.009，年龄可解释部分异质性
-`## 当前分析设定：data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | subgroup=age | task=metareg`
+`## 当前分析设定 / Current analysis settings: data=output/data_backup.csv | measure=OR | model=random | method=REML | yi=eff | sei=se | slab=study | subgroup=age | task=metareg`
 > `task←metareg`；subgroup=age 已是连续变量，直接复用（coze `metareg` 需以 `params.cov=age` 传协变量列）；列映射零丢失。
 
 **⚠️ 反例（必须避免）**：第 4 轮若助手忘了读第 1 轮块、漏带 `yi=eff`，coze 端会把错误的列当效应量 → OR 数值"算出来了"但**静默错配**，统计结论直接翻车。回显块 + 读最近块是唯一的本地防线（见本文 §6 的列映射继承规则）。
