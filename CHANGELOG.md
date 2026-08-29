@@ -4,6 +4,89 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.2.30] — 2026-08-29 — coze 回传结构迁移 §20.8 模式 B（完整 JSON 单文件外置，删除 manifest 外置）
+
+> 触发：ct-base §20.8 由「两种已批准模式（A manifest / B 完整 JSON 单文件）」收窄为**仅模式 B**（2026-08-29 用户拍板删除模式 A）。meta-analysis 原 coze 端实现模式 A（manifest 外置），现迁移到模式 B 以对齐单一标准；coze 端需重新部署。
+
+### Changed（coze 端 `adapters/coze_project/src/graphs/nodes/meta_analysis.py`）
+- **删除 `_externalize_to_manifest`**（含 `_collect_always` / `_collect_stats` / `_move` / `_discard_fallback` 及其 `_coze_manifest` 契约），整体替换为 §20.8 模式 B 三函数：
+  - `_build_inline(out)`：内联轻量信封 = 删 `figures`/`repro`，其余字段（status/stats/warnings/notes/task）保留，恒内联 `_coze_version`。
+  - `_trim_inline_to_limit(inline)`：内联超 4000 时从大到小丢 `stats` 子块直到 < 4000；**循环条件与 narrative 额度均把 `_coze_truncated` 标记自身大小计入预算**，末尾兜底逐条缩减标记，确保最终（含标记）恒 < 4000（沿用 ct-samplesize v5.3.14 的 ⑤ 修复）。meta-analysis 信封无顶层 narrative，故无 narrative 截断分支。
+  - `_externalize_full(out, timeout=90)`：完整信封整体写单个 S3 文件（md5 摘要命名），内联挂 `_coze_full = {storage:"s3", url}`；S3 不可用/失败/超时降级无 `_coze_full` 的内联删减版。90s daemon 超时守护不变。
+- `meta_analysis_node`：`_externalize_to_manifest` → `_externalize_full`，并在调用前注入 `out["_coze_version"]`（恒内联诊断透出，本地不再比对）。
+- 常量：`_CORE_INLINE` 由 `{status,task,_coze_truncated,_coze_manifest}` 改为 `{status,task,_coze_truncated,_coze_full,_coze_version}`；新增 `_COZE_ENVELOPE_VERSION` / `_S3_URL_EXPIRE`；删除 `_EXTERNALIZE_MIN_BYTES`。
+
+### Changed（本地 `adapters/coze_client.py`）
+- 新增 `_fetch_full_json(parsed, timeout=30)`：优先经 `_coze_full` 下载完整 JSON 作分析源（含 figures/repro，零删减）；失败/无链接返回 None。
+- `run_meta` 解析路径：`_fill_external_svgs(parsed)` → `full = _fetch_full_json(parsed); parsed = full if full is not None else _fill_external_svgs(parsed)`。内联删减版仅作飞书日志/老版本兼容。
+- `_fill_external_svgs` 降级为**兜底**入口（仅当响应无 `_coze_full` 的旧 coze 响应才走 manifest 重组 / 旧 figures[].url·repro.url 回填），保留 `_reassemble_from_manifest` 向后兼容。
+- `health()` 探测包**注入 Bearer token**：此前探测包无 token，被 coze 网关在鉴权层挡回 401、请求根本进不了 langgraph，probe 短路逻辑实际是"睡着"的（靠 401 兜底判定可达，但 probe 短路从未生效）。现经 `_resolve_token` 取 token 后挂 `Authorization` 头，probe 能越过鉴权真正进图、在 `meta_analysis` 节点短路（不调 R 引擎、不写飞书），既验证可达性又零算力零日志污染。token 解析失败 / 返回空时降级为无 token 探测（401 仍算可达，判定语义不变）。coze 端无需改动（probe 字段已于 2.2.28+ 引入）。
+
+### Verified
+- `verify_meta_full.py`（FakeS3 + file:// 全链路）**21/21 PASS**：① `_externalize_full` 内联 < 4000、无 figures/repro、含 `_coze_full`，S3 完整数据含 figures/repro 且 svg 全等；② 本地 `_fetch_full_json` 经 `_coze_full` 还原完整 JSON（figures/repro 全等、剔除 `_coze_full`）；③ 旧 `_coze_manifest` 内联 → `_fetch_full_json` 返回 None（降级旧契约）；④ S3 不可用 → 降级内联删减版（无 `_coze_full`）< 4000；⑤ 内联超 4000 → 丢 stats 子块、含标记后恒 < 4000。
+- 两侧 `py_compile` 通过；coze 端已无 `_externalize_to_manifest` 残留（本地 `_reassemble_from_manifest` 仅旧响应兜底保留）。
+
+### 部署注意
+- **coze 端已改动，必须重新部署**（旧 `20260829a.zip` 不含本次模式 B 迁移）。升级包见 `meta-analysis_coze_2.2.30.zip`。
+
+## [2.2.29] — 2026-08-29 — 契约漂移检测：移除版本号比对（对齐 ct-base §20.9 修订）
+
+> 触发：ct-base §20.9 由「版本漂移 + 结构漂移」双信号修订为**仅数据内容/结构不一致触发**——版本号不同不再提醒。
+
+### Changed
+- **`_assess_contract` 移除版本漂移检测**：删除 `EXPECTED_COZE_ENVELOPE_VERSION` 常量与 `_coze_version` / `_contract_version` 的比对分支（原第 4 项）。版本由 coze 端随发布同步，本地不比对 —— 任何**仅版本号差异**（无数据内容/结构变化）一律不提示，避免无谓打扰。检测信号自此只剩一条：**coze 返回的数据内容/结构与本地消费接口是否一致**（字段别名自适应归一化）。
+- **零噪音边界写入 docstring**：`_coze_version` 高于/低于本地、coze 未注入版本标记、结构一致且无别名映射 —— 三种情况均不提示。
+
+### Unchanged（刻意保留，勿"顺手改回去"）
+- 结构漂移自适应（`quality_gate` / `checks` / `pooled` / `figures` 别名映射）、`_needs_upgrade` / `_contract_drift` 机器标记、`rendering.py` 的 HTML 横幅唯一出口 —— 均按 ct-base §20.9 原样保留，横幅文案本就只描述"结构不一致"，无需改动。
+- meta 的 coze 端本就**未注入** `_coze_version`（实测 `grep -r _coze_version adapters/coze_project/src` 无匹配），故本次是纯本地清理：**coze 端无需改动、无需重新部署**，已出的 `20260829a.zip` 不受影响。
+
+### Verified
+- `_assess_contract` 单测 9 例全通过：版本更高 / 更低 / 旧标记 / 缺标记 / 结构一致 → 全部 **零 drift**；`pooled` 别名 / `qgate` 别名 / `figures` dict→list → **触发 drift**；「版本更高 + 结构漂移」混合场景**只报结构**，断言文案不含"版本"字样。
+- `py_compile` 通过；`deploy_retest --offline` / `--mock` 各 46/46 回归通过。
+
+---
+
+## [2.2.28] — 2026-08-29 — 归因不再为空 + 短窗幂等去重
+
+> 触发：飞书后台发现 02:54 两条几乎同时、且 `query_origin` 均为空的 `pairwise_meta` 记录（数据完全相同，仅 `figure.plots` 差一个 `funnel`）。
+
+### Fixed
+- **空归因（主因）**：`query_origin` 此前只在 `run_analysis.py` 计算并作为参数传入；直接调 `coze_client.run_meta` 的路径（`__main__` 自测入口 / `coze_integration_test` / `deploy_retest --live` / 外部脚本）都不传 → coze 端 `state.query_origin or ""` 兜底成空串。后果不止"日志无法溯源"——**空值会绕过按 `query_origin` 计的限流**。现把计算下沉为 `coze_client._default_query_origin()`，`run_meta` 在入参为 `None` 时自动填充；`run_analysis.py` 改为复用同一函数（单一实现，消除两处逻辑漂移）。
+- **调试/冒烟流量污染生产日志表**：`coze_integration_test.run_one` 与 `deploy_retest.call_one` 原为裸 POST（46 个 case 全空归因）。现统一经新增的 `with_trace()` 注入归因 + `request_id` + `_debug: true`，归因带 `debug:` 前缀——飞书归因列可直接筛出非生产流量。
+
+### Added
+- **短窗幂等去重**：对 `(task, data, params, figure)` 做 SHA-256 指纹（忽略 `request_id`/`_debug`/`query_origin` 等观测字段），`COZE_META_DEDUP_WINDOW`（默认 60s，≤0 关闭）内同指纹直接复用上次结果、不再打 coze。命中时结果附 `_dedup_hit: true` + `_dedup_original_request_id`。**仅缓存 ok/warn 结果**，失败不入缓存（避免偶发失败毒化窗口内的真实重试）；上限 32 条、按最旧淘汰；返回深拷贝，调用方互不影响。作用域为进程内（与 `_acquire_rate_limit` 同级；跨进程需文件锁，未实现）。
+- **请求追踪 ID**：每次调用生成 UUID 写入 `request_id`，随结果以 `_request_id` 返回——相邻两条飞书记录可据此区分「两次独立调用」还是「一次调用的重放」。coze 端 `state.py` 未加该字段（pydantic `extra='ignore'` 静默忽略，实测不报错），故**暂不进飞书**；如需落表须改 `state.py` + `feishu_write_node` 并重新部署（发布动作，待授权）。
+
+- **连通性探测标记 `probe`（coze 端消费 → 需重新上传部署包才生效）**：客户端 `health()` 每次启动都 POST 一次 `/run`（SKILL.md 要求启动探测），此前 coze 端照单全收 → 飞书日志表被空 `querystr` 记录污染，排查时无法与真实调用区分。现 `health()` 探测包带 `probe: true` + `debug:` 归因；coze 端 `meta_analysis` 节点识别后**直接返回探针结果、不调用 R 引擎**，`feishu_save` 节点**跳过飞书写入**。兜底：老客户端发 `{}`（无 `probe` 字段）时，靠 `data`/`params`/`figure` 三者全空的"空信封"特征识别。规则抽在 `src/graphs/nodes/_skip_rules.py`（**零第三方依赖，可本地单测**——节点模块依赖 langchain/langgraph，本地 import 不了）。
+  - ⚠️ **未部署前不生效**：老 coze 端不认识 `probe` 字段（pydantic `extra='ignore'`），仍会写一条记录，但带 `debug:` 归因前缀可筛出，不再是空白归因 —— 平滑过渡，两侧独立发布互不影响。
+
+### Removed
+- **`coze_client.py` 的 `__main__` 自测入口**：删除原「硬编码 sample 调 `run_meta`」逻辑 —— 它就是飞书 08-29 两条空归因记录的来源（注释还停留在「需要本地已启动 coze 服务」的年代，端点早已换成公网，于是调试动作直接往生产日志表写记录），且与 `case1_pairwise_binary` 完全重复、无独立价值。CLI 保留 `--health` 子命令（仅探测可达性，不发起分析请求）；无参数时只打印用法、**零副作用**。冒烟改用 `python scripts/run_meta.py <request.json>`（走生产路径，自动带归因 + 去重）。
+
+### Changed
+- **调用方收敛（4 入口 → 3 入口，凭据/端点重复逻辑清零）**：`coze_integration_test` 与 `deploy_retest` 不再自建 `resolve_token` 与 `DEFAULT_ENDPOINT` 字面量，统一 `from coze_client import _resolve_token / _endpoint / DEFAULT_ENDPOINT`（保留 import 失败时的等价兜底实现）。端点从「模块导入时固化」改为**运行时**解析，与生产路径行为一致——旧写法在运行中途改 `COZE_META_ENDPOINT` 时生产生效、测试不生效。
+- **`--endpoint` 默认留空**，由 `_endpoint()` 运行时读取；`deploy_retest` 报告记录**实际**端点（旧写法会把 `endpoint` 写成空字符串，事后看不出这一轮跑的是哪个端点）。
+- **语义差异就地固化注释**：测试侧 `_post`（300s / 捕获 HTTPError 继续跑 / payload 原样发送）与生产侧 `_post_run`（600s / 抛异常触发端点回退 / 归一化+脱敏+强制 svg+指纹去重）的差异是**有意保留**的 —— 测试必须绕过客户端加工才能测到 coze 端真实行为（典型：`run_meta` 的 `byvar→subgroup` 归一会让「coze 只认 subgroup、byvar 静默失效」这个坑永远测不出来）。差异已写成对照表注释，避免后人误「统一」。
+- 文档同步：`references/ADVANCED.md` / `ADVANCED_zh-CN.md` 的自测命令由 `python adapters/coze_client.py` 改为 `--health` + `scripts/run_meta.py`。
+
+### Verified（mock + 真实 coze 链路）
+- 归因：`sha256:<64hex>` 71 字符；`debug=True` → `debug:sha256:...`；`run_analysis` 与 `coze_client` 同源一致。
+- 指纹：换 `request_id` 同指纹、换 `figure.plots` 不同指纹。
+- 去重：第二次完全相同调用 **POST 次数保持 1**（`_dedup_hit=True`，复用自首次 `request_id`）；改 `figure` 后正常发起第二次；失败结果不入缓存；窗口置 0 可关闭。
+- 真实链路：`python adapters/coze_client.py` 端到端 `status=ok`，统计值与飞书历史记录逐字一致（pooled logOR −0.626 / OR 0.5347，k=2，I²=0），coze 端对新增字段无 422/报错。
+- 编译：`py_compile` 四个改动文件全通过。
+- 收敛后回归：`python adapters/coze_client.py`（无参数）零副作用、不发请求；集成测试端点/token 解析走 `coze_client` 实现（端点 `https://ct-meta.coze.site/run`、token 739 字符）；`deploy_retest --offline` / `--mock` 各 46/46 通过；`COZE_META_ENDPOINT` 覆盖在报告中生效（`https://example.invalid/run`）；屏蔽 `coze_client` 导入后兜底分支功能完整（token 739 字符、归因与主路径同源 `sha256:b8cae3d46…`）。
+- `probe` 跳过规则单测 9 例全通过：probe / 空信封 / 空信封+probe（probe 优先）/ 真实 rows 请求 / 仅 params / 仅 figure / csv_path / `{"rows":[]}` / 仅 colmap —— 前 3 例跳过，后 6 例**照常写入**（数据为空但结构完整的请求有排查价值）。
+- `health()`：探测包实测 `{"probe": true, "query_origin": "debug:sha256:…"}`；端点不可达仍返回 `False`、4xx/5xx 仍视为可达 —— **判定语义未因包体变化而改变**。
+- 部署包 `meta-analysis-coze_project-20260829a.zip`：70 文件 = 基准 69 + `_skip_rules.py`，内容变化 4 个（`state.py` / `meta_analysis.py` / `feishu_save_node.py` / `coze_contract.md`），无 `__pycache__`、无 `Rplots.pdf`，包内关键改动自校验通过，整包 MD5 `711446dbf3b2dd95de50482da3943cd9`。
+
+### Fixed
+- **部署包夹带 R 垃圾产物**：`src/r_engine/Rplots.pdf`（R 默认图形设备的落盘产物）此前会进部署包。打包时已排除，并同步排除 `__pycache__` / `*.pyc` / `.Rout` / `.RData` / `.Rhistory` / `.venv`。
+
+---
+
 ## [2.2.27] — 2026-08-28 — coze 调用纪律 + 提示收敛 + 修复
 
 ### Added

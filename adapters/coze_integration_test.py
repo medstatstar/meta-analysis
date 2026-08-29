@@ -29,6 +29,40 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
+
+# ---- 复用 coze_client 的单一实现：归因 / 凭据 / 端点（2026-08-29）----
+# 背景：本脚本此前自建 resolve_token 与 DEFAULT_ENDPOINT 字面量，与 coze_client
+# 形成两套凭据优先级和端点解析（端点还在**模块导入时**固化，运行中改 env 不生效，
+# 而 coze_client 是每次调用动态读）。现统一 import，消除漂移。
+# ⚠️ `_post`（裸协议 POST）**刻意保留在本文件、不走 coze_client.run_meta**：
+# 测试必须绕过客户端加工（byvar→subgroup 归一化 / 强制 format=svg / 契约漂移
+# 自适应 / S3 回填）才能测到 coze 端真实行为——见文件头说明与 CHANGELOG 2.2.28。
+try:
+    from coze_client import _default_query_origin
+    from coze_client import _resolve_token as resolve_token
+    from coze_client import _endpoint, DEFAULT_ENDPOINT
+except Exception:  # noqa: BLE001 — 平铺运行兜底（与 run_analysis 同款降级）
+    import hashlib
+    import socket
+
+    DEFAULT_ENDPOINT = "https://ct-meta.coze.site/run"
+
+    def _default_query_origin(debug: bool = False) -> str:
+        try:
+            host = socket.gethostname() or "unknown"
+        except Exception:
+            host = "unknown"
+        return ("debug:sha256:" if debug else "sha256:") + hashlib.sha256(
+            host.encode("utf-8")).hexdigest()
+
+    def _endpoint() -> str:
+        return os.environ.get("COZE_META_ENDPOINT", DEFAULT_ENDPOINT).rstrip("/")
+
+    def resolve_token(endpoint: str = DEFAULT_ENDPOINT) -> str:
+        if _embedded_get_token_for is not None:
+            return _embedded_get_token_for(endpoint) or ""
+        return os.environ.get("COZE_META_TOKEN", "")
 
 # ---- 凭据解析（与 coze_client 同优先级：env > 内嵌 blob；本地 .dat 曾用于覆盖，发布后被剥） ----
 try:
@@ -40,21 +74,25 @@ except Exception:  # 平铺运行
     except Exception:
         _embedded_get_token_for = None
 
-DEFAULT_ENDPOINT = "https://ct-meta.coze.site/run"
 DEFAULT_CASES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coze_cases")
-REQUEST_TIMEOUT = 300  # 秒（coze 建议单次 5 分钟内）
-
-
-def resolve_token(endpoint: str = DEFAULT_ENDPOINT) -> str:
-    env = os.environ.get("COZE_META_TOKEN")
-    if env:
-        return env
-    if _embedded_get_token_for is not None:
-        return _embedded_get_token_for(endpoint) or ""
-    return ""
+# 超时 300s（coze 建议单次 5 分钟内）。**与 coze_client 的 600s（COZE_META_TIMEOUT）
+# 刻意不同**：本脚本是批量跑 46 个 case，单个卡住要尽快失败并继续下一个，
+# 不做端点回退（回退是生产路径的行为，测试要看到原始失败）。
+REQUEST_TIMEOUT = 300
 
 
 def _post(url: str, token: str, payload: dict) -> tuple[int, str, float]:
+    """裸协议 POST —— 与 `coze_client._post_run` 的差异是**有意保留**的：
+
+    | 行为         | coze_client._post_run（生产）      | 本函数（测试）              |
+    |--------------|-----------------------------------|-----------------------------|
+    | 超时         | COZE_META_TIMEOUT，默认 600s      | 300s，尽快失败              |
+    | HTTPError    | 抛 _CozeHttpError → 触发端点回退  | 捕获并返回 code，继续下一个 |
+    | 网络层错误   | 抛 RuntimeError                   | 返回 code=-1 + 异常原文     |
+    | payload 加工 | 归一化/脱敏/强制 svg/指纹去重     | 原样发送（要测真实契约）    |
+
+    合并这两者会让测试测不到 coze 端真实行为（详见文件头注释）。
+    """
     headers = {
         "Authorization": "Bearer " + token,
         "Content-Type": "application/json",
@@ -93,8 +131,22 @@ def extract_result(resp_text: str) -> dict:
     return {"_raw": resp_text[:800]}
 
 
+def with_trace(envelope: dict, debug: bool = True) -> dict:
+    """给裸 POST 的请求体补上归因 / 追踪字段（2026-08-29）。
+
+    测试与冒烟流量默认 debug=True → query_origin 带 "debug:" 前缀，飞书日志里
+    可直接筛出，不与真实用户流量混计，也不污染按归因计的限流统计。
+    """
+    env = dict(envelope or {})
+    env.setdefault("query_origin", _default_query_origin(debug=debug))
+    env.setdefault("request_id", str(uuid.uuid4()))
+    if debug:
+        env.setdefault("_debug", True)
+    return env
+
+
 def run_one(url: str, token: str, envelope: dict) -> dict:
-    code, raw, el = _post(url, token, envelope)
+    code, raw, el = _post(url, token, with_trace(envelope))
     rec = {"http_code": code, "elapsed_s": round(el, 1)}
     if code != 200:
         rec["ok"] = False
@@ -152,15 +204,19 @@ def summarize(name: str, rec: dict) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cases", default=DEFAULT_CASES_DIR)
-    ap.add_argument("--endpoint", default=os.environ.get("COZE_META_ENDPOINT", DEFAULT_ENDPOINT))
+    # 2026-08-29：default 留空 → 运行时由 _endpoint() 解析（读 COZE_META_ENDPOINT）。
+    # 旧写法在模块导入时就固化端点，运行中途改 env 不生效，与生产路径行为不一致。
+    ap.add_argument("--endpoint", default="",
+                    help="coze /run 地址；留空则运行时取 _endpoint()")
     ap.add_argument("--only", default="")
     args = ap.parse_args()
 
-    token = resolve_token(args.endpoint or DEFAULT_ENDPOINT)
+    url = args.endpoint or _endpoint()
+    token = resolve_token(url)
     if not token:
         print("❌ 无法解析 coze token（env COZE_META_TOKEN 与内嵌 blob 皆空）。")
         return 2
-    print(f"端点: {args.endpoint}")
+    print(f"端点: {url}")
     print(f"token: Bearer {token[:18]}…{token[-12:]}  (len={len(token)})")
 
     files = sorted(glob.glob(os.path.join(args.cases, "*.json")))
@@ -192,7 +248,7 @@ def main() -> int:
             fails += 1
             continue
         print(f"\n>>> 运行案例 {name}  (task={envelope.get('task')})")
-        rec = run_one(args.endpoint, token, envelope)
+        rec = run_one(url, token, envelope)
         print(summarize(name, rec))
         # 判分（对齐 ct-base §18.4）：ok / warn / None 通过；expected 案例 error 豁免
         status = rec.get("result", {}).get("status") if rec.get("ok") else None

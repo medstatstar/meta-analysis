@@ -24,14 +24,14 @@ import os
 import sys
 import json
 import time
-import hashlib
-import socket
 
 # 让 coze_client / rendering 可被直接 import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from coze_client import run_meta as _coze_run
 from coze_client import AuthRequiredError
+# 2026-08-29：归因标识计算统一收敛到 coze_client（单一实现），避免两处逻辑漂移。
+from coze_client import _default_query_origin as _coze_default_origin
 from rendering import svg_to_png, render_html_report
 
 # 渲染计时阈值（秒）：**本地渲染阶段**（拿到 SVG → 处理 → 界面渲染完成）超过该值，
@@ -52,7 +52,10 @@ def run_analysis(task: str, data: dict, params: dict | None = None,
     """
     # §8.6 query_origin：客户端计算主机名 SHA-256 哈希（"sha256:" + 64hex = 71 字符），
     # 随请求发送，供 coze 端归因/限流；coze 端不得兜底生成（客户端唯一真相源）。
-    query_origin = "sha256:" + hashlib.sha256(socket.gethostname().encode("utf-8")).hexdigest()
+    # 2026-08-29：计算逻辑收敛到 coze_client._default_query_origin（此前仅本处实现，
+    # 直接调 coze_client 的路径拿不到归因 → 飞书空列 + 绕过限流）。此处仍显式传入
+    # 以保留本路径语义；即使不传，run_meta 也会自动填充。
+    query_origin = _coze_default_origin()
     try:
         res = _coze_run(task, data, params, figure, query_origin=query_origin)
         res["_source"] = "coze"

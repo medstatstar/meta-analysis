@@ -3,7 +3,7 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: Meta Analysis / 医学Meta分析
-version: 2.2.27
+version: 2.2.30
 license: MIT
 summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
 description: "Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta, for a total of 23 analysis figures. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code. / 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。"
@@ -160,6 +160,7 @@ echo '{"prev":{"task":"pairwise_meta","data_path":"<csv>","measure":"OR","model"
 - **What is sent**: analysis data (event counts / sample sizes / effect sizes; no PII) POSTed to coze; sanitized by `sanitize_payload()` (strips ID/phone/email) first.
 - **Authorization**: default endpoint pre-approved in whitelist; custom `COZE_META_ENDPOINT` asks AUTH-BLOCK on first call, then whitelisted. Unauthorized → `_source=auth_blocked` with "cloud analysis not used" message.
 - **First outbound notice each session (once, bilingual)**: `I will send your analysis parameters to the cloud service https://ct-meta.coze.site/run for computation, together with a hostname hash (query_origin, for attribution/rate-limiting only). Please wait…` No repeat.
+- **Attribution is never empty (v2.2.28)**: every outbound call carries `query_origin` (hostname SHA-256) and a `request_id` (UUID) — generated inside `coze_client`, so direct callers (self-test entry, integration test, `deploy_retest --live`) can no longer emit blank-attribution traffic that silently bypasses rate limiting. Debug/smoke calls add a `debug:` prefix plus `_debug: true`, so they are filterable in the log table. Identical requests within `COZE_META_DEDUP_WINDOW` (default 60 s) reuse the previous result instead of calling coze again.
 - **Coze failure needs consent**: on failure/timeout, first ask (bilingual) `The coze cloud service is temporarily unavailable. May I automatically diagnose the issue?`; allowed → diagnose+retry; declined → deliver local answer with warning.
 
 **Other boundaries**: PDF full-text download ONLY on explicit user instruction (`adapters/pdf_fetch.py`, opt-in). Not clinical judgment. No literature DB search (downloads full text only when user provides DOI/PMID).

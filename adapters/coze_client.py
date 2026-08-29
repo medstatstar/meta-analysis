@@ -32,14 +32,18 @@ adapters/coze_client.py — meta-analysis 技能 → Coze 工作流 主路径客
 依赖：标准库（urllib / json / os / re / sys）+ 同目录 coze_token（凭据解析，仅标准库）。
 """
 
+import copy
+import hashlib
 import json
 import os
 import re
+import socket
 import sys
 import threading
 import time
 import urllib.request
 import urllib.error
+import uuid
 
 try:  # 作为包导入（adapters.coze_client）
     from .coze_token import get_token_for
@@ -64,10 +68,11 @@ ENDPOINT_FALLBACK_NOTICE = (
     "主分析工作流地址已切换，本次分析已自动回退到备用 coze 端点完成"
 )
 
-# 本地对 coze 响应「契约版本」的期望（与技能 version 解耦，专注"响应结构契约"）。
-# coze 端若注入版本标记（_coze_version 或旧 _contract_version），高于此值即显式升级信号。
-# 缺标记（coze 未注入）不视为漂移，避免无谓误报（见 _assess_contract）。
-EXPECTED_COZE_ENVELOPE_VERSION = "2026-08-28"
+# 2026-08-29（ct-base §20.9 修订）：**删除版本号比对**——原 `EXPECTED_COZE_ENVELOPE_VERSION`
+# 常量与 `_coze_version` / `_contract_version` 的比对逻辑一并移除。版本由 coze 端随发布
+# 同步，本地不比对；**任何仅版本号差异（无数据内容/结构变化）一律不提示**，避免无谓打扰。
+# 契约检测自此只做一件事：coze 返回的**数据内容/结构**与本地消费接口是否一致
+# （见 _assess_contract）。coze 端 `_coze_version` 注入可保留，本地不再消费。
 
 # 并发调用保护（用户 2026-08-28 要求）：多次 coze 出站调用之间**必须间隔 ≥1 秒**，
 # 防止触发 coze 端限流（实测曾因密集请求被 429 限流至次日）。
@@ -78,18 +83,22 @@ _LAST_CALL_TS = 0.0  # time.monotonic() of the most recently dispatched coze POS
 
 
 def _assess_contract(parsed: dict) -> tuple:
-    """综合「结构漂移（主·自愈）+ 版本漂移（显式）」的契约检测，统一 meta-analysis 与
-    ct-base §20.9 两套旧机制为单一入口（2026-08-28 综合定稿）。
+    """coze 响应「数据内容/结构一致性」契约检测（单一入口，ct-base §20.9 范本）。
 
-    两路信号汇入同一结果：
-      1) 结构漂移（主、自愈）：识别已知字段别名并自适应归一化（quality_gate /
-         checks / pooled / figures 形态），保证报告仍能渲染；映射发生时记 drift 说明。
-         对无法自适应的结构缺失，仅记录告警、不臆造数据。
-      2) 版本漂移（显式，若 coze 注入版本标记）：coze 返回 `_coze_version`
-         （或旧 `_contract_version`）高于本地期望 → 显式升级信号。
+    2026-08-28 综合定稿：把 meta-analysis 的结构漂移自适应与 ct-base 的旧机制统一到
+    本函数。2026-08-29 修订（ct-base §20.9 同步）：**移除版本漂移检测**——版本号差异
+    不再触发任何提醒，只有数据内容/结构与本地接口对不上时才提示。
 
-    ⚠️ 缺标记（coze 未注入版本）**不**视为漂移——避免每响应都误报
-    （呼应"不要反复提示"：仅在确有不一致时才提醒）。
+    唯一的检测信号（自愈优先）：
+      结构/数据内容漂移：识别已知字段别名并自适应归一化（quality_gate / checks /
+      pooled / figures 形态），保证报告仍能渲染；映射发生时记 drift 说明。
+      对无法自适应的结构缺失，仅记录告警、不臆造数据。
+
+    ⚠️ 以下情况**一律不提示**（零噪音原则）：
+      - coze 返回 `_coze_version` / `_contract_version` 与本地不同（版本由发布同步，
+        本地不比对）；
+      - coze 未注入版本标记；
+      - 结构一致、无别名映射发生。
 
     Returns: (parsed, drift_notes, needs_upgrade)
       drift_notes 非空 => 已自适应或检测到不一致，交给 rendering.py 在 HTML 横幅提示升级；
@@ -148,13 +157,10 @@ def _assess_contract(parsed: dict) -> tuple:
                         notes.append(f"coze 响应字段已变更：figures[{i}] 图体由 `{fa}` 改为 `svg`，已自动适配")
                         break
 
-    # 4) 版本漂移：coze 注入标记（优先 _coze_version，兼容旧 _contract_version）
-    cv = p.get("_coze_version") or p.get("_contract_version")
-    if isinstance(cv, str) and cv > EXPECTED_COZE_ENVELOPE_VERSION:
-        notes.append(
-            f"coze 响应契约版本 {cv} 高于本地技能期望 {EXPECTED_COZE_ENVELOPE_VERSION}，"
-            f"检测到结构已升级，建议升级 meta-analysis 技能到最新版"
-        )
+    # 原「4) 版本漂移」已于 2026-08-29 移除（ct-base §20.9 修订）：
+    # coze 返回 `_coze_version` / `_contract_version` 与本地不同**不再触发提醒**——
+    # 版本由 coze 端随发布同步，本地只检测数据内容/结构一致性。
+    # 相关常量 EXPECTED_COZE_ENVELOPE_VERSION 已一并删除，避免死代码。
 
     # 去重（保持顺序）
     seen, uniq = set(), []
@@ -193,6 +199,90 @@ def _acquire_rate_limit() -> None:
             time.sleep(wait)
             now = time.monotonic()
         _LAST_CALL_TS = now
+
+
+# --------------------------------------------------------------------------
+# 归因标识（query_origin）— 2026-08-29 修复
+# --------------------------------------------------------------------------
+# 原设计把 query_origin 的计算放在 run_analysis.py，再作为参数传进 run_meta；
+# 直接调用本模块的路径（__main__ 自测 / coze_integration_test / deploy_retest
+# --live / 外部脚本）都不传 → coze 端 `state.query_origin or ""` 兜底成空串 →
+# 飞书归因列空白，且**绕过了按 query_origin 计的限流**。现下沉到本模块：
+# 任何调用路径都自动带上归因，无法为空。
+def _default_query_origin(debug: bool = False) -> str:
+    """主机名 SHA-256 作为调用发起来源标识（"sha256:" + 64hex）。
+
+    debug=True 时前缀 "debug:"——调试/冒烟流量在飞书归因列可直接筛出，
+    不与真实用户流量混计（2026-08-29：排查发现自测调用污染了生产日志表）。
+    """
+    try:
+        host = socket.gethostname() or "unknown"
+    except Exception:  # noqa: BLE001
+        host = "unknown"
+    digest = hashlib.sha256(host.encode("utf-8")).hexdigest()
+    return ("debug:sha256:" if debug else "sha256:") + digest
+
+
+# --------------------------------------------------------------------------
+# 请求指纹 + 短窗幂等去重 — 2026-08-29 新增
+# --------------------------------------------------------------------------
+# 背景：一次调试中同一份数据被连续调用两次（仅 figure.plots 不同），coze 端无
+# 去重、客户端只有 ≥1s 节流 → 算力翻倍、飞书记录翻倍、限流计数失真。现对
+# (task, data, params, figure) 做指纹，窗口内同指纹直接复用上次结果（不发请求）。
+# 作用域：进程内（与 _acquire_rate_limit 同级）；跨进程需文件锁，暂未实现。
+_DEDUP_LOCK = threading.Lock()
+_DEDUP_CACHE: dict = {}  # fingerprint -> (monotonic_ts, result_dict)
+_DEDUP_MAX_ENTRIES = 32
+
+
+def _dedup_window() -> float:
+    """去重窗口秒数（COZE_META_DEDUP_WINDOW 覆写，默认 60；<=0 关闭去重）。"""
+    try:
+        return float(os.environ.get("COZE_META_DEDUP_WINDOW", "60.0"))
+    except (TypeError, ValueError):
+        return 60.0
+
+
+def _dedup_fingerprint(payload: dict) -> str:
+    """对请求体（task/data/params/figure）做稳定指纹。
+
+    只取四个业务字段，忽略 request_id / _debug / query_origin 等观测字段——
+    否则同一分析换个 request_id 就绕过去重。
+    """
+    core = {k: payload.get(k) for k in ("task", "data", "params", "figure")}
+    blob = json.dumps(core, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _dedup_lookup(fp: str) -> dict | None:
+    """命中窗口内同指纹的历史结果则返回其深拷贝（不发出网络请求），否则 None。"""
+    if _dedup_window() <= 0:
+        return None
+    with _DEDUP_LOCK:
+        hit = _DEDUP_CACHE.get(fp)
+        if not hit:
+            return None
+        ts, cached = hit
+        if (time.monotonic() - ts) > _dedup_window():
+            _DEDUP_CACHE.pop(fp, None)
+            return None
+        return copy.deepcopy(cached)
+
+
+def _dedup_store(fp: str, result: dict) -> None:
+    """仅缓存成功结果（status=ok/warn）。
+
+    失败不缓存——否则一次偶发失败会毒化整个窗口，后续真实重试全被短路。
+    """
+    if _dedup_window() <= 0:
+        return
+    if not isinstance(result, dict) or result.get("status") not in ("ok", "warn"):
+        return
+    with _DEDUP_LOCK:
+        if len(_DEDUP_CACHE) >= _DEDUP_MAX_ENTRIES and fp not in _DEDUP_CACHE:
+            oldest = min(_DEDUP_CACHE.items(), key=lambda kv: kv[1][0])[0]
+            _DEDUP_CACHE.pop(oldest, None)
+        _DEDUP_CACHE[fp] = (time.monotonic(), copy.deepcopy(result))
 
 
 def _resolve_token(endpoint: str = "") -> str:
@@ -354,14 +444,15 @@ def sanitize_payload(payload: dict) -> dict:
 
 
 def _fill_external_svgs(parsed: dict, timeout: int = 30) -> dict:
-    """coze 返回体重组入口（2026-08-28 重构，用户提案的统一 manifest 方案）。
+    """coze 返回体重组**兜底**入口（2026-08-28 manifest 方案重构，2026-08-29 起降级为 fallback）。
 
-    优先走**新契约**：若响应含 `_coze_manifest`（coze 端把超 4000 的 figures/repro/stats
-    子块统一移进单个 manifest 文件并挂链接），则 GET manifest → 逐 path 写回原值 →
-    重组为原始 JSON（含 svg/r 代码/统计值），一次还原、零数据丢失。
+    主路径已迁移到 §20.8 模式 B：本地 `run_meta` 优先经 `_coze_full` 下载完整 JSON；
+    仅当响应**无** `_coze_full`（老 coze 响应）时才调用本函数。
 
-    **向后兼容**：无 `_coze_manifest`（旧 coze 响应）时，走旧契约——figures[].url→svg、
-    repro.url→r、以及 `_coze_externalized` 逐块回填。
+    若响应含 `_coze_manifest`（老 manifest 方案 coze 响应）：GET manifest → 逐 path 写回原值 →
+    重组为原始 JSON（含 svg/r 代码/统计值）。
+
+    **旧契约**：无 `_coze_manifest` 时走 figures[].url→svg、repro.url→r、`_coze_externalized` 逐块回填。
 
     - 超时 / 网络失败 → 保留引用并标记 _*_fetch_failed，绝不抛错中断分析。
     """
@@ -373,6 +464,33 @@ def _fill_external_svgs(parsed: dict, timeout: int = 30) -> dict:
         return _reassemble_from_manifest(parsed, manifest, timeout=timeout)
     # 旧契约（向后兼容）：figures[].url / repro.url / _coze_externalized 逐项回填
     return _fill_external_svgs_legacy(parsed, timeout=timeout)
+
+
+def _fetch_full_json(parsed, timeout=30):
+    """优先经 `_coze_full` 下载完整 JSON（2026-08-29 §20.8 模式 B 落点）。
+
+    coze 端把完整信封（含 figures/repro）整体写为单个 S3 文件并内联 `_coze_full` 链接；
+    本地收到内联删减版后，**优先**下载完整 JSON 作分析源（零删减、含 figures/repro）。
+    下载失败 / 无 `_coze_full` 链接 → 返回 None（调用方降级到 `_fill_external_svgs` 旧契约：
+    manifest 重组 + 旧 figures[].url / repro.url 回填），保持对老 coze 响应向后兼容。
+    """
+    if not isinstance(parsed, dict):
+        return None
+    full = parsed.get("_coze_full")
+    if not (isinstance(full, dict) and full.get("storage") == "s3" and full.get("url")):
+        return None
+    try:
+        with urllib.request.urlopen(full["url"], timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        parsed["_full_fetch_failed"] = True
+        return None
+    if not isinstance(data, dict):
+        parsed["_full_fetch_failed"] = True
+        return None
+    # 完整数据本身不带 _coze_full（那是内联信封的链接），移除以防下游误用。
+    data.pop("_coze_full", None)
+    return data
 
 
 def _reassemble_from_manifest(parsed: dict, manifest: dict, timeout: int = 30) -> dict:
@@ -520,7 +638,8 @@ def _inflate_externalized(parsed: dict, refs: list | None = None, timeout: int =
 
 
 def run_meta(task: str, data: dict, params: dict | None = None,
-             figure: dict | None = None, query_origin: str | None = None) -> dict:
+             figure: dict | None = None, query_origin: str | None = None,
+             debug: bool = False) -> dict:
     """调用 coze 元分析工作流，返回解析后的结果 dict。
 
     Args:
@@ -529,10 +648,18 @@ def run_meta(task: str, data: dict, params: dict | None = None,
         params: 分析参数（sm / model / subgroup / reference_group ...）
         figure: 出图控制（{"plots": [...], "width": 7, "height": 5}）
         query_origin: 调用发起来源标识（sha256:<64hex>，透传写入飞书 query_origin 列，
-                      取值方式与 ct-registry 参考项目一致，2026-08-19）
+                      取值方式与 ct-registry 参考项目一致，2026-08-19）。
+                      **留空时由本函数自动生成**（主机名 SHA-256，2026-08-29 修复：
+                      空归因会让调用绕过按 query_origin 计的限流，且飞书日志无法溯源）。
+        debug:   调试/冒烟标记（默认 False）。True 时 payload 附 `_debug: true`，
+                  归因标识加 "debug:" 前缀，便于在飞书日志里把非生产流量筛出来。
 
     Returns:
         dict: {status, stats, figures:[{type,format,svg}], warnings, notes, task}
+        另附观测字段：
+          `_request_id`                本次请求 UUID（每次调用都不同）
+          `_dedup_hit` / `_dedup_original_request_id`
+                                       命中短窗去重时出现（结果复用自哪次请求）
 
     Raises:
         RuntimeError: coze 端点不可用或返回非 2xx。
@@ -547,14 +674,31 @@ def run_meta(task: str, data: dict, params: dict | None = None,
     # coze 端点只认 `subgroup`（`byvar`/`group`/`by` 静默失效）；此处归一化，避免静默失效。
     if params and "byvar" in params:
         params = {**params, "subgroup": params.pop("byvar")}
+    # 归因标识（2026-08-29）：未显式传入时自动生成 —— 任何调用路径都不再产生空归因。
+    origin = query_origin or _default_query_origin(debug=debug)
+    # 请求追踪 ID（2026-08-29）：飞书两条相邻记录无法区分"两次独立调用"还是
+    # "一次调用的重放"，现每次调用带 UUID，随结果一并返回，便于事后对账。
+    request_id = str(uuid.uuid4())
     payload = {
         "task": task,
         "data": data or {},
         "params": params or {},
         "figure": fig,
+        "query_origin": origin,
+        "request_id": request_id,
     }
-    if query_origin:
-        payload["query_origin"] = query_origin
+    if debug:
+        payload["_debug"] = True
+    # 短窗幂等去重（2026-08-29）：窗口内完全相同的请求直接复用上次结果，
+    # 不再打 coze —— 避免误双击 / 调试连跑把算力与飞书日志翻倍。
+    fp = _dedup_fingerprint(payload)
+    cached = _dedup_lookup(fp)
+    if cached is not None:
+        original_rid = cached.get("_request_id", "")
+        cached["_dedup_hit"] = True
+        cached["_dedup_original_request_id"] = original_rid
+        cached["_request_id"] = request_id
+        return cached
     # 2026-08-19 修复：DEFAULT_ENDPOINT/COZE_META_ENDPOINT 可能已带 /run 后缀
     # （旧逻辑无条件再拼 /run → 请求打到 /run/run → 404 Not Found）
     ep = _endpoint()
@@ -605,14 +749,23 @@ def run_meta(task: str, data: dict, params: dict | None = None,
     result_str = outer.get("result") if isinstance(outer, dict) else None
     if not result_str:
         # 兼容直接返回结构化结果的情况
-        return outer if isinstance(outer, dict) else {"status": "error", "notes": "空响应"}
+        fallback = outer if isinstance(outer, dict) else {"status": "error", "notes": "空响应"}
+        fallback.setdefault("_request_id", request_id)
+        return fallback
     try:
         parsed = json.loads(result_str)
     except json.JSONDecodeError:
-        return {"status": "error", "notes": f"coze 返回非 JSON 结果：{result_str[:500]}"}
-    # 2026-08-26 方案 B：figures[].svg 与 repro.r 已在 coze 端外置 S3，按 url 回填
-    # （失败则保留 url 并标记 _*_fetch_failed，下游契约不变）
-    _fill_external_svgs(parsed)
+        return {"status": "error",
+                "notes": f"coze 返回非 JSON 结果：{result_str[:500]}",
+                "_request_id": request_id}
+    # 2026-08-29 §20.8 模式 B：优先经 `_coze_full` 下载完整 JSON（含 figures/repro，零删减）
+    # 作分析源；下载失败 / 无链接降级旧契约（_fill_external_svgs：manifest 重组 +
+    # 旧 figures[].url / repro.url 回填），保持对老 coze 响应向后兼容。
+    full = _fetch_full_json(parsed, timeout=30)
+    if full is not None:
+        parsed = full
+    else:
+        _fill_external_svgs(parsed)
     # 契约漂移检测 + 自适应（coze 响应结构与本地技能"对不上"时，自动归一化；
     # 用户可见提示统一只在 rendering.py 的 HTML 横幅，此处不写 stderr / 不污染 notes）
     if isinstance(parsed, dict):
@@ -632,6 +785,9 @@ def run_meta(task: str, data: dict, params: dict | None = None,
         # 此处不写 stderr / 不污染 notes。
         if used_fallback:
             parsed["_coze_endpoint_notice"] = ENDPOINT_FALLBACK_NOTICE
+        parsed["_request_id"] = request_id
+    # 仅成功结果入去重缓存（失败不缓存，避免偶发失败毒化窗口内后续真实重试）
+    _dedup_store(fp, parsed)
     return parsed
 
 
@@ -644,10 +800,31 @@ def health() -> bool:
     - 仅网络层错误 / 超时 / DNS 失败 → False（真正不可达）。
     """
     ep = _endpoint().rsplit("/run", 1)[0] or DEFAULT_ENDPOINT.rsplit("/run", 1)[0]
+    # 2026-08-29：探测包带 `probe` 标记 + 调试归因，不再发空信封 `{}`。
+    #   - 新 coze 端（已部署）：识别 probe → 跳过 R 计算与飞书写入，日志表零污染；
+    #   - 旧 coze 端（未部署）：不认识该字段（pydantic extra='ignore'）→ 仍会写一条，
+    #     但至少带 `debug:` 归因前缀可筛出，不再是空白归因。
+    # 2026-08-29（补）：带上 Bearer token，使 probe 能越过网关鉴权真正进 langgraph。
+    #   不带 token 时请求被网关在鉴权层挡回（401），根本进不了图，probe 短路是"睡着"的；
+    #   带 token 后 coze 端会在 meta_analysis 节点直接短路、不调 R 引擎、不写飞书，
+    #   既验证可达性，又零算力零日志污染。token 解析失败时退化为无 token 探测（401 仍算可达）。
+    try:
+        probe_body = json.dumps(
+            {"probe": True, "query_origin": _default_query_origin(debug=True)},
+            ensure_ascii=False,
+        ).encode("utf-8")
+    except Exception:  # noqa: BLE001 — 极端情况下退化为最简探测包，探测本身不应失败
+        probe_body = b'{"probe": true}'
+    headers = {"Content-Type": "application/json"}
+    try:
+        tok = _resolve_token(ep)
+        if tok:
+            headers["Authorization"] = "Bearer " + tok
+    except Exception:  # noqa: BLE001 — token 解析失败不应阻断探测
+        pass
     try:
         req = urllib.request.Request(
-            ep + "/run", method="POST", data=b"{}",
-            headers={"Content-Type": "application/json"},
+            ep + "/run", method="POST", data=probe_body, headers=headers,
         )
         with urllib.request.urlopen(req, timeout=10) as r:
             return True  # 2xx
@@ -658,16 +835,16 @@ def health() -> bool:
 
 
 if __name__ == "__main__":
-    # 自测：需要本地已启动 coze 服务并配置 COZE_META_ENDPOINT
-    import sys
-    sample = {
-        "task": "pairwise_meta",
-        "data": {"rows": [
-            {"study": "A", "event_exp": 12, "n_exp": 100, "event_ctrl": 20, "n_ctrl": 100},
-            {"study": "B", "event_exp": 8, "n_exp": 90, "event_ctrl": 15, "n_ctrl": 95},
-        ]},
-        "params": {"sm": "OR", "model": "REML"},
-        "figure": {"plots": ["forest"]},
-    }
-    out = run_meta(**sample)
-    print(json.dumps(out, ensure_ascii=False, indent=2)[:2000])
+    # 2026-08-29：删除原「硬编码 sample 调 run_meta」的自测入口。
+    # 它是飞书 08-29 两条空归因 pairwise_meta 记录的来源 —— 注释还停留在
+    # 「需要本地已启动 coze 服务」的年代，端点早已换成公网，于是**调试动作直接
+    # 往生产日志表写记录**。且它与 case1_pairwise_binary 完全重复、无独立价值。
+    # 现自测方式（都不再裸调 run_meta）：
+    #   python adapters/coze_client.py --health    仅探测端点可达性，不发起分析请求
+    #   python scripts/run_meta.py <request.json>  走生产路径冒烟（自动带归因 + 去重）
+    if "--health" in sys.argv:
+        print("coze endpoint reachable:", health())
+    else:
+        print("用法:\n"
+              "  python adapters/coze_client.py --health     探测 coze 端点可达性\n"
+              "  python scripts/run_meta.py <request.json>   走生产路径冒烟（推荐）")

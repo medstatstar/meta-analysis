@@ -10,11 +10,14 @@
 
 ### Self-test & invocation (skill side)
 ```bash
-# Self-test connectivity to the coze endpoint
-python adapters/coze_client.py
+# Probe coze endpoint reachability (sends no analysis request)
+python adapters/coze_client.py --health
 
 # Run an analysis (delegates to the coze R engine)
 python adapters/run_analysis.py ...
+
+# Smoke-test a full request through the production path (attribution + dedup applied)
+python scripts/run_meta.py <request.json>
 ```
 
 > **Coze-project R-engine maintenance commands** (package setup, dispatcher run, module help,

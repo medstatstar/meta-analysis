@@ -11,11 +11,14 @@
 ### 通过 Python helper（技能侧）
 ```bash
 cd meta-analysis
-# 自检与 coze 端点的连通性
-python adapters/coze_client.py
+# 探测 coze 端点可达性（不发起分析请求）
+python adapters/coze_client.py --health
 
 # 运行分析（委派给 coze R 引擎）
 python adapters/run_analysis.py ...
+
+# 走生产路径冒烟一次完整请求（自动带归因 + 去重）
+python scripts/run_meta.py <request.json>
 ```
 
 > **coze 项目 R 引擎维护命令**（包安装、分发器运行、模块帮助等）**不在此发布**——它们位于
