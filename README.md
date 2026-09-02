@@ -352,11 +352,9 @@ For feature requests, bug reports, or other feedback, please contact the author 
 
 ## Confidentiality Notice
 
-> The CT series consists of 20+ specialized domain skills, organized into **two tiers — A, B** — by "confidential-data-exfiltration risk + whether external retrieval is needed", providing full coverage of the entire new-drug clinical trial (Clinical Trial) lifecycle.
+> The CT series consists of 20+ specialized domain skills, organized into **two tiers — A, B** — by "whether the input contains confidential information" (network / egress / publish are independent orthogonal attributes; see ct-base §11), providing full coverage of the entire new-drug clinical trial (Clinical Trial) lifecycle.
 >
-> - **Tier A (non-confidential, public)**: inputs are ordinary data, run fully locally (`network=off`) or with external public retrieval (`network=public-retrieval`, e.g. ct-registry / ct-advisor); no confidential information involved. Tier A skills are published openly on GitHub.
-> - **Tier B (confidential, internal)**: involve strictly confidential clinical-trial data and internal information from pharma sponsors (e.g., ct-analysis, ct-sdtm, ct-eligibility); Tier B is processed locally (`egress=none`, data never leaves the boundary) or requires approval for outbound (`egress=approval-req`, e.g. ct-eligibility). Tier B skills are designated for internal enterprise use only and are not publicly released at present.
->
-> If you do have a genuine need for these confidential skills, please contact the author to request custom installation.
+> - **Tier A (non-confidential input)**: run fully locally using only ordinary data; Tier A may need external public retrieval but involves no confidential information. These skills are published openly on GitHub.
+> - **Tier B (confidential input)**: accept strictly confidential clinical-trial data / protocols / CRFs from pharma sponsors (e.g., ct-analysis, ct-sdtm, ct-protocol, ct-eligibility); Tier B is processed locally and never leaves the boundary (egress=none), or additionally requires policy approval (egress=approval-req, e.g. ct-eligibility). Tier B packages contain zero confidential data but are NOT publicly published (stays fully local) — confidential input never ships with the package or leaves the machine. For custom / on-prem deployment, contact the author.
 >
 > 📧 Contact: medstatstar@gmail.com (Wintone Zhang / 张文彤)

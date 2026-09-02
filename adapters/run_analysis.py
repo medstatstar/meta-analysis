@@ -6,9 +6,9 @@ adapters/run_analysis.py — 元分析统一调用入口（coze 唯一路径）
   - 认证未授权（AuthRequiredError）→ 返回明确提示，不绕过 ct-base §5 授权门控、不回退本地。
   - coze 调用失败 → 返回结构化错误（含 coze 错误原文），不再本地兜底。
 
-本地 R 引擎（原 adapters/local_engine.py）自 2026-08-26 起已从主路径移除，
-移至 adapters/_dev/local_engine.py（git/clawhub 忽略、不随发布包分发），
-仅作为开发者本地调试 / 复现保留，run_analysis 不再调用它。
+本地 R 引擎（原 adapters/local_engine.py）自 2026-08-26 起已从主路径移除；
+adapters/_dev/local_engine.py（调试用残留）已于 2026-09-01 按架构终态原则删除
+（原则：coze 为唯一计算真相源，本地不保留计算引擎）。run_analysis 仅走 coze，绝不回退本地。
 
 返回结果统一带 `_source` 字段：
   "coze"         — 由 coze 工作流产出
@@ -24,12 +24,15 @@ import os
 import sys
 import json
 import time
+import uuid
 
 # 让 coze_client / rendering 可被直接 import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from coze_client import run_meta as _coze_run
+from coze_client import run_stage as _coze_run_stage
 from coze_client import AuthRequiredError
+from coze_client import CONTRACT_VERSION as _CONTRACT_VERSION
+from coze_client import STAGE_SCHEMA_ID as _STAGE_SCHEMA_ID
 # 2026-08-29：归因标识计算统一收敛到 coze_client（单一实现），避免两处逻辑漂移。
 from coze_client import _default_query_origin as _coze_default_origin
 from rendering import svg_to_png, render_html_report
@@ -44,20 +47,29 @@ RENDER_SVG_KB_THRESHOLD = 200.0
 
 
 def run_analysis(task: str, data: dict, params: dict | None = None,
-                 figure: dict | None = None, out_dir: str = ".") -> dict:
-    """统一分析入口（coze-only）。coze 失败 / 未授权时返回结构化错误，不回退本地。
+                 figure: dict | None = None, out_dir: str = ".",
+                 debug: bool = False) -> dict:
+    """统一分析入口（架构重构 · per-stage pipeline）。
+
+    计算请求构造成 Block B「B1.meta_analysis」阶段信封，经 coze_client.run_stage
+    发往 ct-meta2（开发期唯一站点，见 adapters/DEV_POLICY.json），coze 端图引擎
+    返回 stage_result + 兼容性 result。无本地 R 兜底——coze 失败 / 未授权时返回
+    结构化错误（status=error），与旧 run_meta 路径行为一致（run_stage 是 run_meta 的
+    超集：旧 per-task 信封仍自动委派 run_meta，向后兼容）。
 
     out_dir: HTML 报告输出目录（默认当前工作目录 `.`）；由 run_meta.py 解析后传入，
              确保报告落在用户工作区，而非技能自身目录。
+    debug:   同 run_stage，query_origin 带 `debug:` 前缀，隔离测试流量（飞书归因列可筛）。
     """
     # §8.6 query_origin：客户端计算主机名 SHA-256 哈希（"sha256:" + 64hex = 71 字符），
     # 随请求发送，供 coze 端归因/限流；coze 端不得兜底生成（客户端唯一真相源）。
-    # 2026-08-29：计算逻辑收敛到 coze_client._default_query_origin（此前仅本处实现，
-    # 直接调 coze_client 的路径拿不到归因 → 飞书空列 + 绕过限流）。此处仍显式传入
-    # 以保留本路径语义；即使不传，run_meta 也会自动填充。
+    # 2026-08-29：计算逻辑收敛到 coze_client._default_query_origin。此处仍显式传入
+    # 以保留本路径语义；即使不传，run_stage 也会自动填充。
     query_origin = _coze_default_origin()
+    env = _build_compute_stage_env(task, data, params, figure, query_origin)
     try:
-        res = _coze_run(task, data, params, figure, query_origin=query_origin)
+        res = _coze_run_stage(env, debug=debug)
+        res = _normalize_stage(res)
         res["_source"] = "coze"
         # 2026-08-26 展示改进：本地聚合 HTML 报告（内联 SVG + 统计表 + 折叠 R 代码），
         # 作为对话内联之外的"完整版"交付物；coze 返回体不变，固化在 agent 侧完成，
@@ -76,7 +88,7 @@ def run_analysis(task: str, data: dict, params: dict | None = None,
             "notes": (
                 f"未授权出站（ct-base §5 授权门控），本次未使用云端分析。"
                 f"如同意将分析数据发送至云端，请确认授权后重试"
-                f"（端点 {_coze_run.__module__}）。"
+                f"（端点 {_coze_run_stage.__module__}）。"
             ),
             "_source": "auth_blocked",
             "_auth_required": True,
@@ -92,6 +104,54 @@ def run_analysis(task: str, data: dict, params: dict | None = None,
             "figures": [],
             "warnings": [],
         }
+
+
+def _build_compute_stage_env(task, data, params, figure, query_origin):
+    """构造 Block B 计算阶段（B1.meta_analysis）per-stage 信封。
+
+    信封 = 计算层（task/data/params/figure，原样透传给 coze R 引擎 dispatcher）
+           + 管线层（contract_version/schema/pipeline/stage/stage_context）。
+    run_stage 内部 build_stage_payload 会再补 query_origin / 强制 figure.format=svg，
+    若缺字段则按 default 填充。coze 端 meta_analysis 节点据管线字段走 per-stage 分支、
+    回 stage_result（同时 R2 仍填充兼容 result）。
+    """
+    return {
+        "task": task,
+        "data": data,
+        "params": params or {},
+        "figure": figure or {},
+        "contract_version": _CONTRACT_VERSION,
+        "schema": _STAGE_SCHEMA_ID,
+        "pipeline_id": f"run-{uuid.uuid4().hex[:8]}",
+        "pipeline": {"name": "meta_analysis", "block": "B", "cfg": {}},
+        "stage": {"id": "B1.meta_analysis", "index": 0, "total": 4,
+                  "intent": "run", "prev_stage_id": None},
+        "stage_context": {"human_decisions": [], "tool_card_outputs": [], "artifacts": []},
+        "query_origin": query_origin,
+    }
+
+
+def _normalize_stage(res: dict) -> dict:
+    """把 run_stage 返回的 stage 信封规整为 run_analysis 既有消费方
+    （scripts/run_meta.py + render_html_report）期望的形状。
+
+    parse_stage_response 在 coze 回传顶层 `result` 时已填充 status/stats/figures；
+    若 coze 仅回 stage_result（无顶层 result），则从 stage_result.result 兜底抽取，
+    避免下游渲染 / CLI 因缺字段而崩。
+    """
+    if not isinstance(res, dict):
+        return res
+    if res.get("status") is None:
+        sr = res.get("stage_result") or {}
+        inner = sr.get("result") if isinstance(sr, dict) else None
+        if isinstance(inner, dict):
+            for f in ("status", "stats", "figures", "warnings", "notes", "task", "repro"):
+                if f in inner and f not in res:
+                    res[f] = inner[f]
+    if res.get("status") is None:
+        # 仍缺 → 以 stage 模式视之，交由上层渲染 stage_result（不谎报 error）
+        res["status"] = "ok" if res.get("mode") == "stage" else res.get("status")
+    return res
 
 
 def render_figures(out: dict, mode: str = "svg_inline", out_dir: str = ".",

@@ -22,10 +22,22 @@
 - `n_ctrl`：对照组总人数（必填）
 - `event_ctrl`：对照组发生事件人数（必填）
 - `year`：发表年份（选填，用于元回归）
+- `arm`：臂标识（选填，多臂/多对照试验用；如 `BCG-Moreau` / `BCG-Prague`，区分同一试验的不同干预臂）
+
+**Covariate columns / 协变量列（选填）**:
+通过 `extract_assist.py scaffold --covariates "latitude,allocation,vaccine_type"` 追加。
+协变量与主结局列同表固化，用于**亚组分析 / 元回归**（如 BCG 效力随纬度变化）。
+- 数值型协变量（`latitude`, `followup_years`, `age_mean`, `dose` 等）→ 自动 float 校验
+- 分类型协变量（`allocation`, `vaccine_type`, `region` 等）→ 字符串透传
+- 无法定位填 `NR`（该研究在元回归中被剔除，不阻断）
 
 **Notes / 说明**:
 - Column names are case-insensitive / 列名不区分大小写
 - Chinese column names supported (e.g., "研究名称" instead of "study") / 支持中英文列名
+- **零事件单元**（event_exp=0 或 event_ctrl=0）：RR/OR 在该单元无定义，validate 会告警，
+  引擎自动做连续性校正（+0.5）；如需 risk difference 用 `--measure RD`。
+- **多臂/多对照**：同一 `study` 多行 = 同一试验多个臂/对照比较，validate 会提示独立性风险
+  （直接全纳会破坏独立性假设、低估 SE）。请用 `arm` 列区分，并考虑多臂稳健方差估计（RVE）。
 
 ---
 
@@ -126,7 +138,8 @@
 
 - `events`：发生数；`n`：总数
 
-**调用**：`ma_analyze(data, type="single_proportion", measure="PLO")` → logit 变换（默认），图自动反变换为比例；量度 `PR` 为原始比例
+**调用**：`ma_analyze(data, type="single_proportion", measure="PLOGIT")` → logit 变换（默认），图自动反变换为比例；量度 `PRAW` 为原始比例
+> 2026-09-01 口径统一：主口径 `PLOGIT`/`PRAW`（与 coze 主路径 `metaprop(sm="PLOGIT")` 一致）；旧写法 `PLO`/`PR`（metafor 名）仍作为等价别名接受。
 
 ---
 
@@ -159,7 +172,7 @@
 - Delimiter: comma / 分隔符：逗号
 - First row: column names / 首行：列名
 
-**文档 / 模板类上传（docx / pptx / pdf / doc）不属于本表范围**：非结构化文档按 **ct-base §6.7**（`ct-base/docs/02-governance-redlines.md`）处理——先转 md/文本再提取研究数据（共享转换器 `scripts/office_to_md.py`；`.pdf` 走环境 pdf 技能；`.doc` 提示安装 word-reader / antiword）；**转换前须向用户展示 §6.7.2 提示**（PPT 转换易丢非文本元素）。结构化数据（csv/xlsx/xls）仍走本表验证流程；文档内容若涉密，按 §6.7.3 由用户决定出域与否（技能不主动拦截）。⚠️ 本技能默认计算路径为 coze 云端——会向 coze 端点发送汇总统计量（事件数/样本量/效应量等，不含个人身份信息）；若用户**强制要求数据不出域**，云端路径无法满足，需明确告知并建议改用离线工具（开发调试用的 `adapters/_dev/local_engine.py` 不随发布包分发，不在运行路径内）。
+**文档 / 模板类上传（docx / pptx / pdf / doc）不属于本表范围**：非结构化文档按 **ct-base §6.7**（`ct-base/docs/03-interaction-constraints.md`）处理——先转 md/文本再提取研究数据（共享转换器 `scripts/office_to_md.py`；`.pdf` 走环境 pdf 技能；`.doc` 提示安装 word-reader / antiword）；**转换前须向用户展示 §6.7.2 提示**（PPT 转换易丢非文本元素）。结构化数据（csv/xlsx/xls）仍走本表验证流程；文档内容若涉密，按 §6.7.3 由用户决定出域与否（技能不主动拦截）。⚠️ 本技能默认计算路径为 coze 云端——会向 coze 端点发送汇总统计量（事件数/样本量/效应量等，不含个人身份信息）；若用户**强制要求数据不出域**，云端路径无法满足，需明确告知并建议改用离线工具（开发调试用的 `adapters/_dev/local_engine.py` 不随发布包分发，不在运行路径内）。
 
 ---
 

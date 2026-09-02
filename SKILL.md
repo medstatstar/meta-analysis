@@ -3,10 +3,10 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: Meta Analysis / 医学Meta分析
-version: 2.2.30
+version: 2.3.1
 license: MIT
-summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。
-description: "Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta, for a total of 23 analysis figures. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code. / 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。"
+summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。上游编排：选题方向判断 + 文献检索整理（委托 ct-literature）+ 筛选 + 人工核验数据提取助手，提取结果直连计算轨。
+description: "Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta, for a total of 23 analysis figures. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code. Upstream orchestration: topic-direction judgment + literature retrieval (delegated to ct-literature) + screening + a human-verified data-extraction assistant that feeds directly into the compute track. / 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。上游编排：选题方向判断 + 文献检索整理（委托 ct-literature）+ 筛选 + 人工核验数据提取助手，提取结果直连计算轨。"
 
 required_commands: [python]
 invocable: true
@@ -25,6 +25,21 @@ triggers:
   - "效应量转换"
   - "TSA"
   - "诊断meta"
+  - "系统综述全流程"
+  - "从检索到meta分析"
+  - "文献检索后做meta"
+  - "检索→筛选→提取→合并"
+  - "数据提取 meta"
+  - "系统综述全流程模式"
+  - "系统综述流程"
+  - "系统综述一站式"
+  - "meta 全流程"
+  - "全流程meta"
+  - "从选题到meta分析"
+  - "从选题到合并效应量"
+  - "systematic review workflow"
+  - "systematic review full pipeline"
+  - "full meta pipeline"
 permissions:
   scope: "user-space-only"
   network: "required (all computation via coze cloud R engine; params/summary stats sent to coze, no local-R fallback; IPD only if user opts in)"
@@ -69,7 +84,7 @@ Read `META_HTML_REPORT=<path>` from stdout and pass directly to `present_files`;
 1. **Execute, don't think**: when running the skill, only perform the workflow; no reasoning/trade-off/review/self-explanation; if a field is missing, ask only about that field.
 2. **Zero number rewriting**: cite `stats`/`pooled`/`heterogeneity`/`bias` verbatim; no rounding/conversion/re-formatting.
 3. **HTML report is the sole presentation surface**: `out['html_report']` is the final deliverable; no further processing; inline `show_widget` is deprecated, figures only appear in the HTML.
-4. **No local computation**: disable local R/Python self-computation; always forward to coze; if coze is unreachable, raise a structured error per §6, never fall back to local.
+4. **Coze is the sole source of truth for computation**: all numerical analysis/computation runs on the coze R engine; the local side keeps only orchestration + send/receive and retains no compute engine. If coze is unreachable/unauthorized, raise a structured error per §6 — never fall back to local. (Consequence: without coze authorization the skill cannot compute — this is intended, as it supports paid-only features.)
 5. **Call-count invariant**: compute track ≤1 call before fire (only `build_request`), ≤1 call after fire (only `present_files`); topic track ≤2; no retry loops. Cross-turn `--data-json` refill is input construction and does not count.
 
 ### Already automated / anti-patterns (see `references/speed-discipline.md`)
@@ -100,10 +115,37 @@ Trigger: no topic / feasibility check / "rejected as duplicate" / pre-PROSPERO a
 - **Dedup self-contained**: Stage 4 runs in-skill Europe PMC probe `adapters/literature_probe.py` (real hit counts + top titles) by default; novelty ranking grounded in actual literature. Comprehensive retrieval → use **ct-literature** skill first.
   - ⛔ **Topic-track red line**: candidate ranking **must** be based on the probe's real hit counts + 4-dim score card; the LLM only paraphrases, strictly no free-form "which direction is good". Quick is ranked by the probe card; Full is reported by `generate_topic_report.py`, the LLM does not rewrite.
 
+### 2.3 Upstream orchestration (检索 → 筛选 → 提取 → 分析)
+
+> **定位升级（2026-08-30）**：meta-analysis 从「只算合并效应量」扩展为「覆盖 Meta 全链路的编排器」。
+> 上游三段尽量复用现有模块与 `ct-literature`；唯一新增能力是**数据提取助手**（LLM 草稿 + 人工核验闸）。
+
+全链路编排、命令清单、接缝陷阱（含 `included_records` ≠ `included`）、守卫语义 → `references/upstream_orchestration.md`。
+
+- **① 方向判断**：本技能 `references/topic-selection.md` + `adapters/literature_probe.py`；需全面证据基础时委托 **ct-literature** 做跨库检索（见 §2.2 与 orchestration 文档 §2）。
+- **② 文献检索整理**：100% 委托 **ct-literature**（`ct_literature.py` + 多源去重），输出 `.merged.json` / Excel / HTML；meta 侧只编排不重复造轮子。
+- **③ 文献清理（初筛）**：ct-literature `screen_prisma.py` 机器初筛 + 本技能 agent 层逐条判定（`review_workflow.md §2`）；PRISMA 图经 `scripts/prisma_bridge.py` 桥接。
+- **④ 数据提取【新增】**：`scripts/extract_assist.py` 生成空白抽取表 → agent/LLM 读全文提草稿 → `validate` → 人工核验 → `stamp --confirm`；`scripts/extraction_guard.py` 在计算轨入口拦截未核验数据。
+- **⑤ Meta 计算**：现有 `scripts/run_meta.py`，抽取 CSV 经守卫核验后直通。
+
+> ⚠️ **人工核验闸是红线**：④ 的抽取精度属医学关键，且全文获取受限（付费墙），**不可无人值守直灌**。
+> 任何由 `extract_assist.py` 生成、未 `stamp --confirm` 的 CSV，`run_meta.py` 一律拦截（`META_STATUS=unverified_extraction`）。
+
+### 2.4 系统综述全流程模式（@skill 入口）
+
+> **触发**：用户以「系统综述全流程 / 从检索到meta分析 / systematic review workflow」等意图调用本技能
+> （见 frontmatter `triggers`）→ 进入端到端编排，而非直接跳计算轨。
+
+**这是 meta-analysis 作为「编排器」的统一入口**：把 选题判断 → 检索整理 → 初筛+PRISMA → 数据提取 → 合并分析 串成一条**带人工闸**的流水线。agent 完整执行 playbook → `references/systematic_review_fullflow.md`（含 Stage 0 启动确认、5 阶段命令链、两道人工闸、失败/边界处理）。
+
+- **编排纪律**：上游三段（①②）尽量复用本技能 + **ct-literature**，meta 侧只编排不重复造轮子；唯一新增能力是④「数据提取助手（LLM 草稿 + 人工核验闸）」。
+- **两道不可跳过的人工闸**：Stage 3 的最终纳入数（`included`，≠ 机器初筛的 `included_records`）、Stage 4 的提取草稿核验（`extract_assist.py stamp --confirm`）。任何闸门未过，agent 不得推进到下一阶段。
+- **与 §0 双轨的关系**：full-flow 是显式用户意图触发的端到端编排，内部仍复用 topic track（Stage 1）与 compute track（Stage 5），不新增 classify 任务类。
+
 ## 3. Initialization & execution backend
 
-**Execution model (coze-only, absolute)**: all numerical computation runs through the coze meta-analysis workflow (R engine on coze side); local LLM only normalizes request + presents results/SVG. End users need no R install. Every analysis returns a `repro` field (R script + versions). No local computation — see §0 iron rule 4.
-**On startup**: 1. Backend default `https://ct-meta.coze.site/run` (override `COZE_META_ENDPOINT`); probe via `coze_client.health()`. 2. Workspace: create `meta_analysis/` + `output/`. 3. Memory: read R config from `~/.workbuddy/MEMORY.md` (R only).
+**Execution model (coze-only, absolute)**: all numerical computation runs through the coze meta-analysis workflow (R engine on coze side); local LLM only normalizes request + presents results/SVG. End users need no R install. Every analysis returns a `repro` field (R script + versions). **Coze = sole computation source of truth; the local side retains no compute engine; no coze authorization ⇒ no computation (paid-feature model) — see §0 iron rule 4.**
+**On startup**: 1. Backend default `https://ct-meta2.coze.site/run` (dev period: ct-meta disabled, ct-meta2 sole site; override `COZE_META_ENDPOINT`); probe via `coze_client.health()`. 2. Workspace: create `meta_analysis/` + `output/`. 3. Memory: read R config from `~/.workbuddy/MEMORY.md` (R only).
 Endpoint self-test / R engine details → `references/ADVANCED.md` · `references/ADVANCED_zh-CN.md`.
 
 ## 4. Core functions & API
@@ -159,11 +201,12 @@ echo '{"prev":{"task":"pairwise_meta","data_path":"<csv>","measure":"OR","model"
 **Outbound disclosure (global mandatory)**:
 - **What is sent**: analysis data (event counts / sample sizes / effect sizes; no PII) POSTed to coze; sanitized by `sanitize_payload()` (strips ID/phone/email) first.
 - **Authorization**: default endpoint pre-approved in whitelist; custom `COZE_META_ENDPOINT` asks AUTH-BLOCK on first call, then whitelisted. Unauthorized → `_source=auth_blocked` with "cloud analysis not used" message.
-- **First outbound notice each session (once, bilingual)**: `I will send your analysis parameters to the cloud service https://ct-meta.coze.site/run for computation, together with a hostname hash (query_origin, for attribution/rate-limiting only). Please wait…` No repeat.
+- **First outbound notice each session (once, bilingual)**: `I will send your analysis parameters to the cloud service https://ct-meta2.coze.site/run for computation, together with a hostname hash (query_origin, for attribution/rate-limiting only). Please wait…` No repeat.
 - **Attribution is never empty (v2.2.28)**: every outbound call carries `query_origin` (hostname SHA-256) and a `request_id` (UUID) — generated inside `coze_client`, so direct callers (self-test entry, integration test, `deploy_retest --live`) can no longer emit blank-attribution traffic that silently bypasses rate limiting. Debug/smoke calls add a `debug:` prefix plus `_debug: true`, so they are filterable in the log table. Identical requests within `COZE_META_DEDUP_WINDOW` (default 60 s) reuse the previous result instead of calling coze again.
-- **Coze failure needs consent**: on failure/timeout, first ask (bilingual) `The coze cloud service is temporarily unavailable. May I automatically diagnose the issue?`; allowed → diagnose+retry; declined → deliver local answer with warning.
+- **Coze failure needs consent**: on failure/timeout, first ask (bilingual) `The coze cloud service is temporarily unavailable. May I automatically diagnose the issue?`; allowed → diagnose+retry; declined → deliver a textual reply explaining cloud analysis was not performed (a no-computation message — **never** run R/Python locally to substitute).
 
 **Other boundaries**: PDF full-text download ONLY on explicit user instruction (`adapters/pdf_fetch.py`, opt-in). Not clinical judgment. No literature DB search (downloads full text only when user provides DOI/PMID).
+- **Data-extraction guard (red line)**: the upstream data-extraction assistant (`scripts/extract_assist.py`) is human-in-the-loop only. Any extraction CSV it produces stays `verified_by_human=NO` until a human runs `extract_assist.py stamp --confirm`; `run_meta.py` (via `scripts/extraction_guard.py`) blocks unverified extraction CSVs with `META_STATUS=unverified_extraction`. Full-text retrieval and extraction accuracy are human responsibilities — never auto-feed extracted numbers into the compute track without verification.
 
 ## 7. User-uploaded files
 

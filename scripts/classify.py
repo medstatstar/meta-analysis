@@ -14,15 +14,24 @@ classify.py — meta-analysis 技能的双轨路由 / 归一化脚本
 输出：spec JSON（stdout）
   {
     "track": "compute" | "topic",
-    "task": "pairwise_meta" | "subgroup_analysis" | "metareg" | "nma" | "survival_meta" | "diagnostic_meta",
+    "task": "pairwise_meta" | "subgroup_analysis" | "metareg" | "nma" | "survival_meta"
+          | "diagnostic_meta" | "ipd_meta"
+          | "prisma_flow" | "prisma_checklist" | "rob2" | "rob_summary" | "grade",
     "measure": "OR" | "RR" | "RD" | "MD" | "SMD" | "HR" | null,
     "model": "REM-L" | "MH",
-    "data_type": "binary" | "continuous" | "diagnostic" | "survival" | "ipd",
-    "params_extra": {"plots": [...], "subgroup": "..."},
+    "data_type": "binary" | "continuous" | "diagnostic" | "survival" | "ipd" | null,
+    "params_extra": {"plots": [...], "subgroup": "...", "tool": "ROB2|ROB1|ROBINS-I"},
     "needs_clarify": bool,
     "missing_fields": [str],
     "colmap": [列名建议]
   }
+
+task 语义分两类（2026-08-30 划分，决定第 7 步的缺参判定）：
+  - 效应量类（pairwise_meta / ... / ipd_meta）：需要研究数据（event/n 或效应量+SE）。
+  - 综述流程类（prisma_flow / prisma_checklist / rob2 / rob_summary / grade）：
+    不需要效应量数据，各自契约见 REVIEW_TASK_MISSING；误用 has_data 判据会把
+    「对这12项研究做偏倚风险评价」这类句子放行（句含数字）→ 静默返回答非所问的
+    合并效应量，属最危险的一类误路由：不报错、给错答案。
 """
 import sys
 import json
@@ -54,6 +63,40 @@ METAREG_WORDS = ["元回归", "metareg", "meta regression", "回归分析"]
 NMA_WORDS = ["网络", "network", "nma", "网状"]
 FUNNEL_WORDS = ["漏斗", "funnel"]
 EGGER_WORDS = ["发表偏倚", "egger", "begg", "pub bias", "publication bias"]
+
+# ---- 综述流程类关键词（2026-08-30 新增）----
+# 背景：run_task.R 早已注册 prisma_flow / prisma_checklist / rob2 / grade / ipd_meta，
+#   但 classify 长期只认 6 个效应量 task，综述类一个不认 → 相关请求 100% 落到
+#   pairwise_meta，再被第 7 步要求「提供研究数据」（对综述类完全是错的指引）。
+# 判定顺序按「具体到宽泛」排：GRADE 必须在 ROB 之前（「证据质量评价」同时含
+#   GRADE 的「证据质量」与 ROB 的「质量评价」），否则会被 ROB 抢走。
+PRISMA_FLOW_WORDS = ["prisma流程图", "prisma 流程图", "prisma flow", "prisma图", "prisma 图",
+                     "flow diagram", "流程图", "四阶段图", "文献筛选图"]
+PRISMA_CHECKLIST_WORDS = ["prisma检查表", "prisma 检查表", "prisma checklist", "checklist",
+                          "检查表", "报告清单", "27项", "prisma 2020"]
+GRADE_WORDS = ["grade", "证据分级", "证据质量", "证据等级", "证据确信度", "certainty of evidence"]
+ROB_WORDS = ["偏倚风险", "风险偏倚", "risk of bias", "rob2", "rob 2", "robins", "robvis",
+             "质量评价", "质量评估", "方法学质量", "文献质量"]
+IPD_META_WORDS = ["ipd meta", "ipd", "个体数据meta", "个体患者数据", "individual patient data"]
+
+# RoB 判断矩阵的迹象词：命中说明用户已给出各研究的 judgement，可直接出图；
+# 未命中则应引导先产出 Study + D1..D5 判断表，而不是拿去跑效应量合并。
+ROB_JUDGEMENT_WORDS = ["低风险", "高风险", "中风险", "有一定顾虑", "不清楚", "low risk",
+                       "high risk", "some concerns", "unclear", "critical",
+                       "评价结果", "已评价", "judgement", "judgment"]
+
+# 综述流程类 task（数据契约与效应量 Meta 完全不同，走独立缺参判定）
+REVIEW_TASKS = {"prisma_flow", "prisma_checklist", "rob2", "rob_summary", "grade"}
+
+# 各综述 task 缺参时给用户的正确指引（替换掉对它们毫无意义的「study data」）
+REVIEW_TASK_MISSING = {
+    "prisma_flow": ["PRISMA counts: records / duplicates / screened / excluded_title / "
+                    "assessed / excluded_elig / included (numbers)"],
+    "rob2": ["RoB judgement table: one row per study, columns Study + D1..D5 "
+             "(Low / Some concerns / High)"],
+    "rob_summary": ["RoB judgement table: one row per study, columns Study + D1..D5 "
+                    "(Low / Some concerns / High)"],
+}
 
 # 默认列模板（data_type → 列名建议），供 agent 套用归一化
 COLMAP = {
@@ -91,6 +134,17 @@ def _extract_subgroup(text):
     return m.group(1) or None
 
 
+def _has_prisma_counts(text):
+    """是否提供了 PRISMA 筛选计数（句中含有数字）。
+
+    必须先剔除「PRISMA 2020」这类**版本短语**里的数字——它是最常见的说法
+    （「画一张 PRISMA 2020 流程图」），若直接判 `re.search(r'\\d', q)` 会把 2020
+    当成筛选计数，于是带着全 0 参数放行，coze 端静默出一张空流程图。
+    """
+    t = re.sub(r"prisma\s*20\d{2}", "prisma", text, flags=re.IGNORECASE)
+    return bool(re.search(r"\d", t))
+
+
 def classify(query):
     q = query or ""
 
@@ -98,7 +152,20 @@ def classify(query):
     track = "topic" if _hit(q, TOPIC_WORDS) else "compute"
 
     # 2) task（覆盖默认 pairwise_meta）
-    if _hit(q, NMA_WORDS):
+    #    综述流程类必须**前置**于效应量类：run_task.R 早已实现，但 classify 长期不认，
+    #    且此类问句常自带数字（「对这12项研究做偏倚风险评价」），若走效应量分支会被
+    #    第 7 步的 has_data 判据放行，直接提交 coze 拿到答非所问的合并效应量。
+    if _hit(q, PRISMA_FLOW_WORDS):
+        task = "prisma_flow"
+    elif _hit(q, PRISMA_CHECKLIST_WORDS):
+        task = "prisma_checklist"
+    elif _hit(q, GRADE_WORDS):
+        task = "grade"
+    elif _hit(q, ROB_WORDS):
+        task = "rob2"
+    elif _hit(q, IPD_META_WORDS):
+        task = "ipd_meta"
+    elif _hit(q, NMA_WORDS):
         task = "nma"
     elif _hit(q, SUBGROUP_WORDS):
         task = "subgroup_analysis"
@@ -118,6 +185,11 @@ def classify(query):
         data_type = "nma"
     elif task == "survival_meta":
         data_type = "survival"
+    elif task == "ipd_meta":
+        data_type = "ipd"
+    elif task in REVIEW_TASKS:
+        # 综述流程类没有「效应量数据类型」的概念；置 None 可让 agent 不去套 colmap
+        data_type = None
     elif _hit(q, CONT_WORDS):
         data_type = "continuous"
     elif _hit(q, BINARY_WORDS):
@@ -128,7 +200,10 @@ def classify(query):
         data_type = "binary"  # 默认二分类（最常见）
 
     # 4) measure
-    if task == "survival_meta" or _hit(q, HR_WORDS):
+    if task in REVIEW_TASKS:
+        # 综述流程类：效应量 / 合并模型 / 异质性估计全不适用，显式置空
+        measure = None
+    elif task == "survival_meta" or _hit(q, HR_WORDS):
         measure = "HR"
     elif _hit(q, OR_WORDS):
         measure = "OR"
@@ -144,15 +219,26 @@ def classify(query):
         measure = "OR" if data_type == "binary" else ("SMD" if data_type == "continuous" else None)
 
     # 5) model（默认随机效应 REML）
-    model = "MH" if _hit(q, MH_WORDS) else "REM-L"
+    model = None if task in REVIEW_TASKS else ("MH" if _hit(q, MH_WORDS) else "REM-L")
 
-    # 6) plots / subgroup var（不改 task）
+    # 6) plots / subgroup var / RoB tool（不改 task）
     params_extra = {}
     plots = []
-    if _hit(q, FUNNEL_WORDS):
-        plots.append("funnel")
-    if _hit(q, EGGER_WORDS):
-        plots.append("egger")
+    if task not in REVIEW_TASKS:
+        # 漏斗图 / Egger 只对效应量 Meta 有意义；综述类带上会让 coze 端 plots 参数失真
+        if _hit(q, FUNNEL_WORDS):
+            plots.append("funnel")
+        if _hit(q, EGGER_WORDS):
+            plots.append("egger")
+    if task in ("rob2", "rob_summary"):
+        # plot_rob_traffic / plot_rob_summary 的 tool 映射：ROB2(5域) / ROB1(6域) / ROBINS-I(7域)
+        if _hit(q, ["robins", "robins-i"]):
+            tool = "ROBINS-I"
+        elif _hit(q, ["rob1", "cochrane", "考克兰"]):
+            tool = "ROB1"
+        else:
+            tool = "ROB2"
+        params_extra["tool"] = tool
     subgroup = _extract_subgroup(q) if task == "subgroup_analysis" else None
     if plots:
         params_extra["plots"] = plots
@@ -164,12 +250,27 @@ def classify(query):
         _hit(q, ["研究", "数据", "事件", "样本", "effect", "or=", "rr=", "hr=", "md=", "se="])
         and re.search(r'\d', q)
     )
-    if track == "compute" and not has_data:
-        needs_clarify = True
-        missing_fields = ["study data (event/n per arm, or effect size + SE)"]
-    else:
-        needs_clarify = False
-        missing_fields = []
+    # 综述流程类不能套用 has_data（它是「是否给了效应量数据」的判据）：
+    #   「对这12项研究做偏倚风险评价」句含数字 + 「研究」→ has_data=True → 旧逻辑放行，
+    #   提交 coze 后 .build_df 拿到的是空/错误结构，静默返回答非所问的合并效应量。
+    #   故对 REVIEW_TASKS 走各自的契约判定。
+    needs_clarify = False
+    missing_fields = []
+    if track == "compute":
+        if task in REVIEW_TASKS:
+            if task == "prisma_flow" and not _has_prisma_counts(q):
+                # 筛选计数必然含数字；一句数字都没有就是没给计数
+                # （用 _has_prisma_counts 而非裸 \d，以排除「PRISMA 2020」的版本号）
+                needs_clarify = True
+                missing_fields = list(REVIEW_TASK_MISSING["prisma_flow"])
+            elif task in ("rob2", "rob_summary") and not _hit(q, ROB_JUDGEMENT_WORDS):
+                # 未出现任何 judgement 取值词 → 先引导产出判断表，别拿去跑合并
+                needs_clarify = True
+                missing_fields = list(REVIEW_TASK_MISSING["rob2"])
+            # prisma_checklist / grade：纯 params，全默认即可运行，不拦
+        elif not has_data:
+            needs_clarify = True
+            missing_fields = ["study data (event/n per arm, or effect size + SE)"]
 
     if track == "topic":
         # 选题轨：task/measure/model/data_type/colmap 无意义，置空避免误导 agent

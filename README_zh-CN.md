@@ -354,11 +354,9 @@ CLI 调用示例、双向求解模式、曲线模式、核心公式推导、系�
 
 ## 保密声明
 
-> CT 全系列技能由 20+ 个技能构成，按「保密信息出域风险 + 是否对外检索」分为 **A、B 两档**，完整覆盖新药临床试验（Clinical Trial）全流程的各方面需求。
+> CT 全系列技能由 20+ 个技能构成，按「输入是否涉密」分为 **A、B 两档**（network / egress / publish 为独立正交属性，详见 ct-base §11），完整覆盖新药临床试验（Clinical Trial）全流程的各方面需求。
 >
-> - **A 档（非涉密·公开）**：输入为普通数据，可完全本地运行（`network=off`）或对外公开检索（`network=public-retrieval`，如 ct-registry / ct-advisor 等）；不涉及任何保密信息。A 档技能均在 GitHub 公开发布。
-> - **B 档（涉密·内部）**：涉及药企需严格保密的临床试验数据、内部资讯等敏感内容（如 ct-analysis、ct-sdtm、ct-eligibility 等）；B 档在本地处理（`egress=none`，数据不出域）或需审批出站（`egress=approval-req`，如 ct-eligibility）。B 档技能仅限企业内部使用，目前不对外公开发布。
->
-> 若您对这些涉密技能确有实际需求，欢迎与作者联系，定制并安装相关技能。
+> - **A 档（输入非涉密）**：输入为普通数据，可完全本地运行（`network=off`）或对外公开检索（`network=public-retrieval`，如 ct-registry / ct-advisor 等）；不涉及任何保密信息。A 档技能均在 GitHub 公开发布。
+> - **B 档（输入涉密）**：输入含药企需严格保密的临床试验数据 / 方案 / CRF（如 ct-analysis、ct-sdtm、ct-protocol、ct-eligibility 等）；B 档**既能本地处理**（`egress=none`，数据不出域）**也能对外公开检索**（`network=public-retrieval`，如 ct-protocol 调 ct-registry / ct-literature 抓取公开试验设计与文献作参考——仅公开查询词出域）；或需审批出站（`egress=approval-req`，如 ct-eligibility）。但**均不对外公开发布**；涉密输入绝不随包 / 出站；若有定制 / 本地部署需求，欢迎与作者联系。
 >
 > 📧 联系方式：medstatstar@gmail.com，张文彤（Wintone Zhang）

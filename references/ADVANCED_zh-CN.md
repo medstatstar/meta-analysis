@@ -22,7 +22,7 @@ python scripts/run_meta.py <request.json>
 ```
 
 > **coze 项目 R 引擎维护命令**（包安装、分发器运行、模块帮助等）**不在此发布**——它们位于
-> `adapters/coze_project/DEV.md`（已被 git/clawhub 忽略，不进入发布包），仅供 coze 项目维护者使用。
+> `adapters/coze/DEV.md`（已被 git/clawhub 忽略，不进入发布包），仅供 coze 项目维护者使用。
 
 ### 直接调用 R（仅作参考——计算在 coze 端进行）
 ```r
@@ -105,7 +105,7 @@ y_i ~ Normal(θ_i, σ_i²)
 | dosresmeta | ≥2.0 | 剂量反应 Meta |
 | ~~survmeta~~ | — | 已下架，改用 metafor 逆方差合并 logHR |
 | mada | ≥1.0 | 诊断 Meta |
-| metagear | ≥1.0 | 系统评价流程 |
+| metagear | ≥0.7 | PRISMA 2020 流程图 (plot_PRISMA；仅 prisma_flow 任务用) |
 | ggplot2 | ≥3.0 | 可视化 |
 | gridExtra | ≥2.0 | 多面板图 |
 | forestploter | ≥1.1 | 出版级森林图（替代 ggforestplot） |
@@ -179,7 +179,7 @@ meta-analysis/
 │   ├── diagnosis_meta.md          # mada 双变量 + SROC
 │   ├── bayesian_nma.md            # gemtc (主) / multinma (可选) 工作流
 │   ├── esc_robust_meta.md         # esc 转换 + RVE
-│   ├── review_workflow.md         # metagear PRISMA / 筛选 / 数字化
+│   ├── review_workflow.md         # PRISMA 流程图 (metagear::plot_PRISMA) + agent 行为层筛选 + 数据提取
 │   ├── r_packages.md              # 包清单
 │   ├── citations.md               # 方法学引用
 │   ├── references.md              # 引用列表

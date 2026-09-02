@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(SKILL_DIR, "adapters"))
 
 from build_request import build
 from run_analysis import run_analysis
+from extraction_guard import check_verified
 
 
 def _resolve_out_dir(arg_out_dir, data_arg):
@@ -61,7 +62,19 @@ def main():
     ap.add_argument("--colmap", help="LLM 兜底回灌：列映射 JSON")
     ap.add_argument("--measure", help="LLM 兜底回灌：效应量覆盖")
     ap.add_argument("--model", help="LLM 兜底回灌：模型覆盖")
+    ap.add_argument("--language", default=None,
+                    help="用户语言（zh/en/...），覆盖自动检测；注入 coze 入参 user_language 备用")
+    ap.add_argument("--trust-data", action="store_true",
+                    help="显式担责兜底：跳过抽取人工核验闸（仅用于用户确认可信的手搓/存量 CSV）")
     a = ap.parse_args()
+
+    # 抽取核验闸：extract_assist 生成的 CSV 须人工核验（stamp --confirm）后才可进计算轨；
+    # 无同伴 .provenance.json 的存量/手搓 CSV 视为可信放行（见 extraction_guard.check_verified）。
+    if a.data:
+        ok, reason, status = check_verified(a.data, trust=a.trust_data)
+        if not ok:
+            print("META_STATUS=%s | %s" % (status, reason))
+            sys.exit(3)
 
     # 内部 request.json 默认落临时目录，绝不污染用户工作区
     out_path = a.out or os.path.join(tempfile.gettempdir(), "meta_request.json")
@@ -76,6 +89,7 @@ def main():
             colmap_override=a.colmap,
             measure_override=a.measure,
             model_override=a.model,
+            language_override=a.language,
         )
     except SystemExit as e:
         # build_request 在选题轨 / 缺字段 / 列解析失败时会 SystemExit 并打印原因

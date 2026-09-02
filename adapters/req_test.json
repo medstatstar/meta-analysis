@@ -11,5 +11,6 @@
     "colmap": {"study": "study", "event_exp": "event_exp", "n_exp": "n_exp", "event_ctrl": "event_ctrl", "n_ctrl": "n_ctrl"}
   },
   "params": {"model": "REML", "sm": "OR"},
-  "figure": {"format": "svg", "plots": ["forest", "funnel"], "width": 7, "height": 5}
+  "figure": {"format": "svg", "plots": ["forest", "funnel"], "width": 7, "height": 5},
+  "query_origin": "sha256:<64hex>"
 }

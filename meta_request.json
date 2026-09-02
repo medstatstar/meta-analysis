@@ -69,5 +69,6 @@
     "plots": [
       "forest"
     ]
-  }
+  },
+  "query_origin": "sha256:<64hex>"
 }

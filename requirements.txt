@@ -5,8 +5,8 @@
 #
 # 所有数值计算均在 coze 端 meta-analysis 工作流的 R 引擎中完成（唯一路径）。终端用户
 # 无需本地安装 R、无需本地计算。回退逻辑已于 2026-08-26 取消：coze 不可达/未授权时
-# 直接返回结构化错误，不再调用本地 R。原本地引擎代码保留于 adapters/_dev/local_engine.py
-# （git/clawhub 忽略、不随发布包分发，仅供开发调试，已不在运行路径中）。
+# 直接返回结构化错误，不再调用本地 R。历史本地引擎 adapters/_dev/local_engine.py
+# 已于 2026-09-01 按架构终态原则删除，无本地回退。
 # Python 适配器（adapters/coze_client.py、scripts/i18n.py、scripts/generate_topic_report.py）
 # 仅依赖 Python 标准库。
 

@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>meta-analysis 工作台</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --panel: #ffffff; --ink: #1f2a37; --muted: #6b7785;
+    --line: #e2e8f0; --accent: #2563eb; --accent-soft: #eff6ff;
+    --soft: #f59e0b; --soft-soft: #fffbeb; --red: #dc2626; --red-soft: #fef2f2;
+    --green: #16a34a; --green-soft: #f0fdf4; --done: #d1fae5; --pending: #f1f5f9;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--ink); font-size: 14px; }
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 20px;
+           display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  .layout { display: grid; grid-template-columns: 280px 1fr 300px; gap: 16px; padding: 16px; align-items: start; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .card h3 { margin: 0 0 10px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  /* timeline */
+  .tl { list-style: none; margin: 0; padding: 0; }
+  .tl li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 7px; margin-bottom: 4px; }
+  .tl li .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--pending); flex: 0 0 auto; }
+  .tl li.done .dot { background: var(--green); }
+  .tl li.await .dot { background: var(--soft); box-shadow: 0 0 0 4px var(--soft-soft); }
+  .tl li.gate .dot { background: var(--red); }
+  .tl li.future { opacity: .45; }
+  .tl li .lbl { font-size: 13px; }
+  .tl li .tag { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .tl li.await { background: var(--soft-soft); }
+  .tl li.gate.await { background: var(--red-soft); }
+  /* forms */
+  .node-title { font-size: 18px; margin: 0 0 4px; }
+  .node-intro { color: var(--muted); margin: 0 0 14px; line-height: 1.5; }
+  .panel { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .panel > .pl { font-weight: 600; margin-bottom: 8px; font-size: 13px; }
+  table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.grid th, table.grid td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; }
+  table.grid th { background: var(--bg); color: var(--muted); font-weight: 600; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  .kv .alert { color: var(--red); font-weight: 600; }
+  textarea { width: 100%; min-height: 90px; border: 1px solid var(--line); border-radius: 6px;
+             padding: 8px; font-family: inherit; font-size: 13px; resize: vertical; }
+  input[type=text], input[type=number] { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; width: 100%; }
+  .json { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+          font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; max-height: 360px; overflow: auto; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .pill.soft { background: var(--soft-soft); color: var(--soft); }
+  .pill.red { background: var(--red-soft); color: var(--red); }
+  /* actions */
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+  button { border: none; border-radius: 7px; padding: 9px 16px; font-size: 13px; font-weight: 600;
+           cursor: pointer; font-family: inherit; }
+  .btn-approve { background: var(--green); color: #fff; }
+  .btn-revise { background: var(--accent); color: #fff; }
+  .btn-skip { background: var(--soft); color: #fff; }
+  .btn-reject { background: var(--red); color: #fff; }
+  .btn-ghost { background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .note { flex: 1; min-width: 200px; }
+  /* start */
+  .start { max-width: 520px; margin: 40px auto; }
+  .start label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+  .audit { font-size: 12px; }
+  .audit .row { padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .audit .row .a { font-weight: 600; }
+  .empty { color: var(--muted); font-style: italic; }
+  .flash { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
+  .flash.err { background: var(--red-soft); color: var(--red); }
+  .flash.ok { background: var(--green-soft); color: var(--green); }
+  .done-banner { background: var(--green-soft); color: var(--green); border: 1px solid #bbf7d0;
+                 padding: 14px; border-radius: 8px; font-weight: 600; }
+  .rewind { font-size: 11px; color: var(--muted); margin-left: auto; }
+  /* A4 实时预览 */
+  .a4row { display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid var(--line); font-size:13px; }
+  .a4dot { width:8px; height:8px; border-radius:50%; background:var(--pending); flex:0 0 auto; }
+  .a4title { font-weight:500; max-width:42%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .a4badge { flex:0 0 auto; }
+  .a4reason { color:var(--muted); font-size:12px; margin-left:auto; text-align:right; max-width:46%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧬 meta-analysis 工作台</h1>
+  <span class="meta" id="hdr-meta"></span>
+  <button class="btn-ghost" id="btn-new" style="margin-left:auto">＋ 新建</button>
+</header>
+
+<div class="layout" id="app">
+  <div class="card"><h3>流程进度</h3><ul class="tl" id="timeline"></ul></div>
+  <div class="card" id="center"><!-- node form / start --></div>
+  <div class="card"><h3>审计日志</h3><div class="audit" id="audit"><span class="empty">暂无决策</span></div>
+    <div class="rewind">↺ 回退重跑：Phase 2</div></div>
+</div>
+
+<script>
+// 全流程阶段计划（时间轴骨架；真实进度由后端 /api/session 的 progress 覆盖）
+const STAGE_ORDER = [
+  ["A","A1.topic_selection","选题"],["A","A2.literature_search","检索"],
+  ["A","A3.screening","初筛"],["A","A4.data_extraction","数据提取"],
+  ["B","B1.meta","合并计算"],["B","B2.grade","GRADE"],["B","B3.overclaim","过度声明"],
+  ["B","B4.quality_gate","质量门"],["C","C1.draft","初稿"],["C","C2.ai_review","AI 评审"],
+  ["C","C3.ref_verify","参考核验"],["C","C4.evidence_qa","投稿前 QA"],
+];
+
+let STATE = null;       // 当前后端状态
+let DRAFT = {};         // revision_key -> 编辑后的值
+
+const $ = (s, el=document) => el.querySelector(s);
+// 默认后端地址（与 launch_workbench.py 默认 --port 8765 一致）。
+// 若页面以 file:// 协议直接打开（双击 HTML），相对 fetch 会解析成 file:///api/...
+// 导致 “Failed to fetch”；此时回退到该默认地址，保证双击也能用。
+// 自定义端口请改用 launch_workbench.py，它会自动打开正确地址。
+const WB_BASE = "http://127.0.0.1:8765";
+function apiUrl(path) {
+  return (location.protocol === "file:") ? (WB_BASE + path) : path;
+}
+function api(path, opts) {
+  return fetch(apiUrl(path), Object.assign({headers: {"Content-Type":"application/json"}}, opts))
+    .then(r => r.ok ? r.json() : Promise.reject(new Error(r.status + " " + (r.statusText))))
+    .catch(err => {
+      if (err instanceof TypeError) {
+        throw new Error("无法连接后端（" + err.message + "）。请通过 " + WB_BASE +
+          "/ 打开工作台，不要直接双击 HTML 文件；若用了自定义端口，请改用 launch_workbench.py 自动打开。");
+      }
+      throw err;
+    });
+}
+function resolve(ctx, dotted) {
+  return dotted.split(".").reduce((o,k) => (o && o[k] !== undefined ? o[k] : null), ctx);
+}
+function flash(msg, kind) {
+  let f = $("#flash");
+  if (!f) { f = document.createElement("div"); f.id = "flash"; $("#center").prepend(f); }
+  f.className = "flash " + (kind || "ok"); f.textContent = msg;
+}
+
+// ---------- 启动 / 加载会话 ----------
+async function startSession(topic, opt) {
+  try {
+    const s = await api("/api/start", {method:"POST", body: JSON.stringify(
+      Object.assign({topic, max_results:50, effect_measure:"OR", nma:false}, opt||{}))});
+    STATE = s; DRAFT = {}; location.hash = "#" + encodeURIComponent(s.session.path);
+    render();
+  } catch (e) {
+    location.hash = "";   // 启动失败：清掉可能残留的坏 hash，避免下次重载再撞同一错误
+    flash("启动失败：" + e.message, "err");
+  }
+}
+async function loadSession(path) {
+  try {
+    STATE = await api("/api/session?path=" + encodeURIComponent(path));
+    DRAFT = {}; render();
+  } catch (e) {
+    // 旧 session 路径失效（文件被清理 / 换了工作区 / 来自临时目录）→ 清坏 hash，回落到开始页，
+    // 而非把工作台卡死在一个无法加载的 404 上。
+    flash("会话已失效（" + e.message + "），已回到开始页，请重新发起。", "err");
+    location.hash = "";
+    STATE = null; renderStart();
+  }
+}
+
+// ---------- 决策提交 ----------
+async function decide(action) {
+  if (!STATE) return;
+  const aw = STATE.await;
+  if (action === "revised" && Object.keys(DRAFT).length === 0) {
+    flash("revise 需要先编辑至少一个字段", "err"); return;
+  }
+  const note = ($("#note") || {}).value || "";
+  const body = { session_path: STATE.session.path, stage_id: aw.stage_id,
+                 action: action === "skip" ? "skipped" : action,
+                 revision: Object.keys(DRAFT).length ? DRAFT : null, note };
+  try {
+    const s = await api("/api/decide", {method:"POST", body: JSON.stringify(body)});
+    STATE = s; DRAFT = {}; render();
+    flash("已提交：" + action + (s.await.kind === "done" ? " · 流程完成" : ""), "ok");
+  } catch (e) { flash("提交失败：" + e.message, "err"); }
+}
+
+// ---------- 渲染 ----------
+function render() {
+  $("#hdr-meta").textContent = STATE ? `${STATE.session.pipeline_id} · ${STATE.session.topic}` : "";
+  renderTimeline(); renderAudit();
+  if (!STATE) { renderStart(); return; }
+  if (STATE.await.kind === "done") { renderDone(); return; }
+  renderNode();
+}
+
+function renderStart() {
+  $("#center").innerHTML = `
+    <div class="start">
+      <h2 class="node-title">新建 meta 分析流程</h2>
+      <p class="node-intro">填写主题即启动 Block A（检索→初筛→提取），遇人工闸自动暂停。</p>
+      <label>研究主题 / PICO</label>
+      <input type="text" id="topic" placeholder="例：DHA omega-3 补充对抑郁症的疗效">
+      <label>检索上限 / 起始年 / 效应量 / 网络 Meta</label>
+      <div style="display:flex;gap:8px">
+        <input type="number" id="maxr" value="50">
+        <input type="number" id="yf" placeholder="年(可空)">
+        <input type="text" id="em" value="OR" style="max-width:80px">
+        <input type="checkbox" id="nma"><span style="align-self:center">NMA</span>
+      </div>
+      <div class="actions"><button class="btn-approve" onclick="doStart()">启动流程</button></div>
+    </div>`;
+}
+function doStart() {
+  const t = $("#topic").value.trim();
+  if (!t) { flash("请填写主题", "err"); return; }
+  const opt = { max_results: +$("#maxr").value || 50,
+    effect_measure: $("#em").value || "OR", nma: $("#nma").checked };
+  const yf = $("#yf").value.trim();
+  if (yf) opt.year_from = +yf;   // 留空则不下发该字段（避免向后端传 null 触发 422）
+  startSession(t, opt);
+}
+
+function renderTimeline() {
+  const prog = STATE ? STATE.progress : [];
+  const byId = {}; prog.forEach(p => byId[p.stage_id] = p);
+  const ul = $("#timeline"); ul.innerHTML = "";
+  STAGE_ORDER.forEach(([blk, sid, lbl]) => {
+    const p = byId[sid];
+    const li = document.createElement("li");
+    let cls = "future";
+    if (p) {
+      cls = "done";
+      if (p.awaiting) cls = (p.status === "await_human" ? (STATE.await.kind === "gate" ? "gate await" : "await") : "done");
+    }
+    li.className = cls;
+    const tag = p ? (p.awaiting ? (STATE.await.kind === "gate" ? "🔴 红线" : "⏸ 待确认") : "✓") : "—";
+    li.innerHTML = `<span class="dot"></span><span class="lbl">${lbl}</span><span class="tag">${tag}</span>`;
+    li.onclick = () => {
+      if (p && p.awaiting) renderNode();
+      else if (p && (p.status === "completed" || p.status === "done")) viewStage(sid);
+    };
+    ul.appendChild(li);
+  });
+}
+
+function renderNode() {
+  const aw = STATE.await, sc = STATE.form_schema, ctx = {
+    nha: aw.nha || {}, editable: aw.editable_payload || {}, stage: aw.stage_result || {} };
+  const pill = sc.gate_type === "red"
+    ? `<span class="pill red">🔴 红线闸</span>` : `<span class="pill soft">🟡 软停</span>`;
+  let html = `<h2 class="node-title">${sc.title} ${pill}</h2>
+    <p class="node-intro">${sc.intro}</p><div id="flash"></div>`;
+  (sc.panels || []).forEach(p => { html += renderPanel(p, ctx); });
+  html += `<div class="actions" id="acts"></div>`;
+  $("#center").innerHTML = html;
+  renderActions();
+  // Phase 3：A4 节点追加「实时预览」面板（下载 + 抽取逐篇回传）
+  if (aw.stage_id === "A4.data_extraction") {
+    const prev = document.createElement("div");
+    prev.className = "panel"; prev.id = "a4preview";
+    prev.innerHTML = `<div class="pl">📥 A4 实时预览（下载 + 抽取进度）</div>
+      <p class="node-intro" style="margin:0 0 8px">逐篇实时回传状态；下载失败 / 付费墙 / 无入口的篇目会单独列出，供你补传 PDF。</p>
+      <div class="actions"><button class="btn-revise" id="btn-a4prev" onclick="startA4Preview()">▶ 开始实时预览</button>
+        <span id="a4prev-status" class="pill soft" style="display:none"></span></div>
+      <div id="a4prev-list" style="margin-top:10px"></div>`;
+    $("#center").appendChild(prev);
+  }
+}
+
+function renderPanel(p, ctx) {
+  const data = resolve(ctx, p.path);
+  let inner = "";
+  if (p.kind === "object") {
+    inner = `<div class="kv">` + (p.fields||[]).map(f => {
+      let v = data ? data[f.path] : null;
+      const alert = (f.alert_if_not && v !== f.alert_if_not) ? "alert" : "";
+      return `<div class="k">${f.label}</div><div class="${alert}">${esc(v ?? "—")}</div>`;
+    }).join("") + `</div>`;
+  } else if (p.kind === "dicttable") {
+    const rows = data ? Object.entries(data) : [];
+    inner = `<table class="grid"><tr><th>项</th><th>值</th></tr>` +
+      rows.map(([k,v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("") + `</table>`;
+  } else if (p.kind === "textarea") {
+    const val = data ?? "";
+    inner = p.editable
+      ? `<textarea data-rk="${p.revision_key}">${esc(val)}</textarea>`
+      : `<div class="json">${esc(val)}</div>`;
+  } else if (p.kind === "rowlist") {
+    inner = renderRowlist(p, data, ctx);
+  } else if (p.kind === "json") {
+    inner = `<div class="json">${esc(JSON.stringify(data, null, 2))}</div>`;
+  } else {
+    inner = `<div class="json">${esc(JSON.stringify(data, null, 2))}</div>`;
+  }
+  return `<div class="panel"><div class="pl">${p.label}</div>${inner}</div>`;
+}
+
+function renderRowlist(p, data, ctx) {
+  if (!Array.isArray(data) || !data.length)
+    return `<div class="empty">（无数据）</div>`;
+  let cols = p.columns === "auto"
+    ? Object.keys(data[0]).map(k => ({path:k, label:k, type:"text", editable:false}))
+    : p.columns;
+  const rk = p.revision_key;
+  const editable = p.editable;
+  let h = `<table class="grid"><tr>` + cols.map(c => `<th>${c.label}</th>`).join("") + `</tr>`;
+  data.forEach((row, i) => {
+    h += `<tr>` + cols.map(c => {
+      const v = row[c.path];
+      if (editable && c.editable) {
+        if (c.type === "bool")
+          return `<td><input type="checkbox" data-rk="${rk}" data-i="${i}" data-k="${c.path}" ${v?"checked":""}></td>`;
+        return `<td><input type="text" data-rk="${rk}" data-i="${i}" data-k="${c.path}" value="${esc(v ?? "")}"></td>`;
+      }
+      return `<td>${esc(v ?? "—")}</td>`;
+    }).join("") + `</tr>`;
+  });
+  h += `</table>`;
+  return h;
+}
+
+function renderActions() {
+  const aw = STATE.await, opts = aw.options || [];
+  const box = $("#acts"); box.innerHTML = "";
+  const note = document.createElement("input");
+  note.type = "text"; note.className = "note"; note.id = "note"; note.placeholder = "备注（可选，记入审计）";
+  box.appendChild(note);
+  const mk = (label, cls, action) => {
+    const b = document.createElement("button"); b.className = cls; b.textContent = label;
+    b.onclick = () => decide(action); box.appendChild(b);
+  };
+  if (opts.includes("approve")) mk("✓ 批准 / 放行", "btn-approve", "approved");
+  if (opts.includes("revise")) mk("✎ 修订后放行", "btn-revise", "revised");
+  if (opts.includes("skip")) mk("⏭ 跳过", "btn-skip", "skip");
+  if (opts.includes("reject")) mk("✕ 打回", "btn-reject", "rejected");
+  // 收集 editable 改动 → DRAFT
+  $("#center").querySelectorAll("[data-rk]").forEach(el => {
+    el.addEventListener("input", () => collectDraft(el));
+    el.addEventListener("change", () => collectDraft(el));
+  });
+}
+function collectDraft(el) {
+  const rk = el.dataset.rk;
+  if (el.type === "checkbox") {
+    const arr = DRAFT[rk] ? DRAFT[rk].slice() : (resolve({editable: STATE.await.editable_payload, nha: STATE.await.nha, stage: STATE.await.stage_result}, el.dataset.rk === "screened" ? "nha.decisions" : "editable." + rk) || []).slice();
+    const i = +el.dataset.i; arr[i] = Object.assign({}, arr[i], {[el.dataset.k]: el.checked});
+    DRAFT[rk] = arr;
+  } else if (el.dataset.i !== undefined) {  // rowlist text
+    const arr = DRAFT[rk] ? DRAFT[rk].slice() : (resolve({editable: STATE.await.editable_payload, nha: STATE.await.nha, stage: STATE.await.stage_result}, el.dataset.rk === "screened" ? "nha.decisions" : "editable." + rk) || []).slice();
+    const i = +el.dataset.i; arr[i] = Object.assign({}, arr[i], {[el.dataset.k]: el.value});
+    DRAFT[rk] = arr;
+  } else {  // textarea
+    DRAFT[rk] = el.value;
+  }
+}
+
+// 回看已完成节点后返回当前位置（流程 done 时给概览提示）
+function backToCurrent() {
+  if (STATE.await && STATE.await.kind && STATE.await.kind !== "done") renderNode();
+  else $("#center").innerHTML =
+    `<div class="panel"><div class="pl">流程已完成</div>` +
+    `<div class="json">全部阶段已通过人工闸。点上方时间轴节点可回看各阶段结果。</div></div>`;
+}
+
+// 查看已完成节点（自动/人工节点，非当前 await）：只读渲染该节点 schema + 其 stage_result
+function viewStage(sid) {
+  const sc = (STATE.stage_schema || {})[sid];
+  const sr = (STATE.stage_results || {})[sid] || {};
+  const box = $("#center");
+  if (!sc) {
+    box.innerHTML = `<h2 class="node-title">${esc(sid)} <span class="pill soft">未配置面板</span></h2>` +
+      `<div class="panel"><div class="pl">原始数据</div><div class="json">${esc(JSON.stringify(sr, null, 2))}</div></div>` +
+      `<div class="actions"><button class="btn-skip" onclick="backToCurrent()">← 返回</button></div>`;
+    return;
+  }
+  const ctx = { nha: {}, editable: {}, stage: sr };
+  const tag = sc.gate_type === "redline" ? "🔴 红线闸"
+            : sc.gate_type === "auto" ? "⚙ 自动"
+            : "🟡 软停";
+  let html = `<h2 class="node-title">${esc(sc.title)} <span class="pill soft">${tag}</span></h2>` +
+    `<p class="node-intro">${sc.intro || "（只读展示）"}</p><div id="flash"></div>`;
+  (sc.panels || []).forEach(p => { html += renderPanel(p, ctx); });
+  html += `<div class="actions"><button class="btn-skip" onclick="backToCurrent()">← 返回当前节点</button></div>`;
+  box.innerHTML = html;
+}
+
+// ---------- A4 实时预览（SSE 流式消费） ----------
+function startA4Preview() {
+  const btn = $("#btn-a4prev"); if (!btn) return;
+  btn.disabled = true;
+  const listEl = $("#a4prev-list"); listEl.innerHTML = "";
+  const statusEl = $("#a4prev-status"); statusEl.style.display = "inline-block";
+  statusEl.textContent = "连接中…";
+
+  function addRow(ev) {
+    const id = "a4r-" + ev.index;
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement("div"); el.id = id; el.className = "a4row";
+      el.innerHTML = `<span class="a4dot"></span><span class="a4title"></span>
+        <span class="a4badge pill"></span><span class="a4reason"></span>`;
+      listEl.appendChild(el);
+    }
+    const badge = el.querySelector(".a4badge");
+    const reason = el.querySelector(".a4reason");
+    const title = el.querySelector(".a4title");
+    title.textContent = (ev.title || ("#" + ev.index)) + (ev.doi ? ` (${ev.doi})` : "");
+    const dot = el.querySelector(".a4dot");
+    const MAP = {
+      start:               ["#94a3b8", "排队中",            "#94a3b8"],
+      downloading:         ["var(--accent)", "下载中",      "#2563eb"],
+      extracting:          ["var(--soft)", "抽取中",       "#f59e0b"],
+      extracted:           ["var(--green)", "✓ 已抽取",    "#16a34a"],
+      downloaded_no_extract:["var(--soft)", "已下载·待补抽取", "#f59e0b"],
+      skip:                ["var(--muted)", "跳过(未过门控)", "#6b7785"],
+      deferred:            ["var(--muted)", "延后(配额)",    "#6b7785"],
+      failed:              ["var(--red)", "✕ 需上传",      "#dc2626"],
+    };
+    const m = MAP[ev.event] || ["#94a3b8", ev.event, "#94a3b8"];
+    badge.style.background = m[0] + "22"; badge.style.color = m[0];
+    badge.textContent = m[1]; dot.style.background = m[2];
+    if (ev.event === "extracted")
+      reason.textContent = `2×2 行 ${ev.n_tworows} / 候选 ${ev.n_rows || 0}`;
+    else if (ev.reason) reason.textContent = ev.reason;
+    el.scrollIntoView({block: "nearest"});
+  }
+
+  function renderA4Upload(need) {
+    let box = $("#a4prev-upload");
+    if (!box) {
+      box = document.createElement("div"); box.id = "a4prev-upload"; box.className = "panel";
+      box.innerHTML = `<div class="pl">⚠️ 需用户上传 PDF（下载失败 / 付费墙 / 无入口）</div>
+        <div id="a4up-list"></div>`;
+      $("#center").appendChild(box);
+    }
+    $("#a4up-list").innerHTML = need.map(n =>
+      `<div class="a4row"><span class="a4badge pill red">上传</span>
+       <span class="a4title">${esc(n.title || "")}</span>
+       <span class="a4reason">${esc(n.reason || "")}</span></div>`).join("");
+  }
+
+  fetch(apiUrl("/api/a4_preview"), {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({session_path: STATE.session.path})})
+    .then(r => {
+      if (!r.ok) throw new Error(r.status + " " + r.statusText);
+      const reader = r.body.getReader(); const dec = new TextDecoder();
+      let buf = "";
+      function pump() {
+        return reader.read().then(({done, value}) => {
+          if (done) { btn.disabled = false; return; }
+          buf += dec.decode(value, {stream: true});
+          let idx;
+          while ((idx = buf.indexOf("\n\n")) >= 0) {
+            const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+            const line = chunk.split("\n").find(l => l.startsWith("data:"));
+            if (!line) continue;
+            const ev = JSON.parse(line.slice(5).trim());
+            if (ev.event === "done") {
+              const r0 = ev.result || {};
+              statusEl.textContent = `完成 · 下载 ${r0.n_downloaded} / 抽取 ${r0.n_extracted} / 待上传 ${(r0.needs_user_upload||[]).length}`;
+              if ((r0.needs_user_upload || []).length) renderA4Upload(r0.needs_user_upload);
+            } else if (ev.event === "error") {
+              statusEl.textContent = "错误"; flash(ev.message, "err");
+            } else { addRow(ev); }
+          }
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(e => { btn.disabled = false; statusEl.textContent = "失败"; flash("预览失败：" + e.message, "err"); });
+}
+
+function renderAudit() {
+  const a = $("#audit"); if (!STATE || !STATE.audit.length) { a.innerHTML = '<span class="empty">暂无决策</span>'; return; }
+  a.innerHTML = STATE.audit.slice().reverse().map(d =>
+    `<div class="row"><span class="a">${esc(d.action)}</span> · ${esc(d.stage_id)}
+     <div class="meta">${esc(d.decided_at||"")}${d.note? " · "+esc(d.note):""}</div></div>`).join("");
+}
+
+function renderDone() {
+  $("#center").innerHTML = `<div class="done-banner">✅ 流程已完成（Block C 终闸已放行）。
+    稿件经 C1→C3→C4 全部通过。可在审计日志追溯每一处人工决策。</div>`;
+}
+
+function esc(v) {
+  if (v === null || v === undefined) return "";
+  return String(v).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+// ---------- 初始化 ----------
+$("#btn-new").onclick = () => { STATE = null; location.hash = ""; renderStart(); };
+window.addEventListener("hashchange", () => {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h) loadSession(h); else { STATE = null; render(); }
+});
+window.addEventListener("DOMContentLoaded", () => {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h) loadSession(h); else renderStart();
+});
+</script>
+</body>
+</html>

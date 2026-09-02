@@ -26,6 +26,10 @@ m <- metaprop(
 | `PASF` (Freeman-Tukey) | Very small or very large proportions, stabilizes variance |
 | `PFT` (generalizable Freeman-Tukey) | Combines benefits |
 
+> 2026-09-01 口径统一：单组率 measure 以 `PLOGIT`/`PRAW`（meta 包名，coze 主路径口径）为准。
+> 本地 `ma_analyze()`（metafor 后端）同时接受等价别名 `PLO`（≡PLOGIT）与 `PR`（≡PRAW）；
+> `PASF`/`PFT` 两包实现不同，不做跨包别名，请按所用函数的原生参数名传。
+
 ## metamean — Single Mean Meta / 单组均值合并
 
 ```r

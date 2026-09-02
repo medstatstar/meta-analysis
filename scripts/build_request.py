@@ -22,7 +22,8 @@ build_request.py — meta-analysis 技能「计算轨」归一化/装配脚本
     "task": "pairwise_meta" | ...,
     "data": {"rows":[...], "colmap":{列:列}},
     "params": {"sm":"OR", "model":"REML", "common":false, "random":true, "subgroup":...},
-    "figure": {"plots":["forest", ...]}
+    "figure": {"plots":["forest", ...]},
+    "query_origin": "sha256:<64hex>"   // 调用方约束：产物可直接 POST /run，不产生空归因
   }
 
 红线：
@@ -34,6 +35,7 @@ build_request.py — meta-analysis 技能「计算轨」归一化/装配脚本
 """
 import sys
 import os
+import re
 import json
 import csv
 import argparse
@@ -45,6 +47,42 @@ try:
 except ImportError:  # 平铺执行
     sys.path.insert(0, os.getcwd())
     from classify import classify as _classify
+
+# 用户语言检测（user_language 备用入参）：复用 ct-base 共享底座 i18n，不再自带重复实现。
+# 用 importlib 以别名加载 ct-base/scripts/i18n.py，避免与本技能自带 scripts/i18n.py（UI 提示文案）撞名。
+# 判定优先级（ctbase_i18n.resolve_user_language）：① 显式 --language 最高；② 否则按【输入 query 文本】
+# 判定（含 CJK→zh，纯英文→en），解决"中文系统 + 英文输入"误判 zh 盲区；③ query 为空回退系统 locale。
+# 详见 ct-base/references/language_policy.md。
+import importlib.util as _ilu
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_CTBASE_I18N_PATH = os.path.normpath(
+    os.path.join(_HERE, "..", "..", "ct-base", "scripts", "i18n.py")
+)
+try:
+    _spec = _ilu.spec_from_file_location("_ctbase_i18n", _CTBASE_I18N_PATH)
+    ctbase_i18n = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(ctbase_i18n)
+except Exception:
+    ctbase_i18n = None
+
+# 调用方约束（2026-08-30）：build 产物 request.json 也要带有效 query_origin，
+# 即使被人手直接 POST /run 也不产生空归因（复用 coze_client 的唯一实现）。
+_adapters = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "adapters")
+if _adapters not in sys.path:
+    sys.path.insert(0, _adapters)
+try:
+    from coze_client import _default_query_origin as _origin
+except Exception:  # noqa: BLE001 — 极端情况下回退内联实现，绝不阻断装配
+    import hashlib as _hashlib
+    import socket as _socket
+    def _origin(debug: bool = False) -> str:
+        try:
+            _h = _socket.gethostname() or "unknown"
+        except Exception:  # noqa: BLE001
+            _h = "unknown"
+        _d = _hashlib.sha256(_h.encode("utf-8")).hexdigest()
+        return ("debug:sha256:" if debug else "sha256:") + _d
 
 
 # measure/model → coze params 映射（对齐 run_analysis 契约：params.sm / params.model）
@@ -142,6 +180,9 @@ VALID_PLOTS = frozenset({
     "sroc", "dose_resp", "loo", "cumulative", "drapery", "tsa", "power",
     "rob2", "gosh", "prisma_flow", "sens_forest", "spec_forest",
 })
+
+
+# 用户语言判定逻辑已上移至 ct-base/scripts/i18n.py（detect_text_language / _normalize_language / resolve_user_language），本文件不再重复实现。
 
 
 # 列名别名表（中/英同义 → 规范键）；先吃掉大部分"列名不匹配"，减少 LLM 兜底触发
@@ -332,6 +373,29 @@ def _resolve_colmap(raw_rows, canonical_keys, override=None):
     return resolved, unresolved
 
 
+def _classify_non_numeric_cols(raw_rows, extra_cols):
+    """判定哪些额外列应作为字符串透传（不 float 强转）。
+    逻辑：列名含 categorical/arm/臂/组/strain/type/allocation/region 等语义，
+    或整列值含非数字字符（如 'BCG-Moreau'、'Open'）→ 字符串透传。
+    纯数字列（如 latitude、followup_years）→ 返回数值强转。
+    这是 P0-1 协变量透传的关键：分类协变量/多臂标识列不得被 float() 打爆。
+    """
+    non_num = set()
+    for c in extra_cols:
+        base = c.lower().replace("_", "").replace("-", "")
+        if any(tok in base for tok in ("categorical", "stratum", "arm", "group",
+                                        "strain", "type", "allocation", "alloc",
+                                        "region", "country", "vaccine", "manufacturer",
+                                        "route", "population", "blind")):
+            non_num.add(c)
+            continue
+        # 抽样前几行看是否有非纯数字值
+        sample = [str(r.get(c, "")) for r in raw_rows[:20] if r.get(c, "") not in (None, "")]
+        if sample and not all(re.fullmatch(r"[-+]?\d*\.?\d+([eE][-+]?\d+)?", s.strip()) for s in sample):
+            non_num.add(c)
+    return non_num
+
+
 def _resolve_subgroup(subgroup, actual_cols):
     """把 classify 提取的亚组标签（可能是中文）解析为数据真实列名。
     解析顺序：精确匹配列名 → SUBGROUP_ALIASES 中文别名 → 否则显式告警并返回 None
@@ -381,7 +445,9 @@ def _load_rows(data_arg, data_json):
     elif data_arg:
         if data_arg.lower().endswith(".csv"):
             # ★ CSV → JSON：读成行数组（每行一个 dict），后续作为 JSON 发往 coze
-            with open(data_arg, encoding="utf-8", newline="") as f:
+            # 用 utf-8-sig 读取以剥掉 BOM——extract_assist 用 utf-8-sig 写（带 BOM），
+            # 若用 utf-8 读，首列名会变成 "\ufeffstudy"，被误判为额外列且 study 值丢失。
+            with open(data_arg, encoding="utf-8-sig", newline="") as f:
                 obj = list(csv.DictReader(f))
         else:
             obj = json.load(open(data_arg, encoding="utf-8"))
@@ -407,9 +473,17 @@ def _coerce_rows(rows, resolved, carry_cols=None, non_numeric=None):
     out = []
     for i, r in enumerate(rows):
         rec = {"study": r.get("study") or str(i + 1)}
+        # 协变量/额外列透传：分类/臂列字符串原样，数值协变量（latitude/followup 等）float 强转
         for c in carry_cols:
-            if c in r and r[c] not in (None, ""):
+            if c not in r or r[c] in (None, ""):
+                continue
+            if c in non_numeric:
                 rec[c] = r[c]
+                continue
+            try:
+                rec[c] = float(r[c])
+            except (TypeError, ValueError):
+                rec[c] = r[c]  # 非纯数字（如缺失标记）→ 字符串透传，不阻断
         for canonical, actual in resolved.items():
             v = r.get(actual)
             if v in (None, ""):
@@ -426,7 +500,8 @@ def _coerce_rows(rows, resolved, carry_cols=None, non_numeric=None):
 
 
 def build(query=None, spec=None, data_arg=None, data_json=None, out_path="request.json",
-          colmap_override=None, measure_override=None, model_override=None):
+          colmap_override=None, measure_override=None, model_override=None,
+          language_override=None):
     spec = spec or _classify(query or "")
     if spec.get("track") == "topic":
         raise SystemExit("[build_request] 选题轨不走计算路径；请用 literature_probe.py（见 §2.2）")
@@ -463,8 +538,17 @@ def build(query=None, spec=None, data_arg=None, data_json=None, out_path="reques
         subgroup = (spec.get("params_extra") or {}).get("subgroup")
         # 解析亚组列名（中文标签→真实列名）；解析不出发显式告警并退化为无分层，不再静默失效
         subgroup = _resolve_subgroup(subgroup, raw_rows[0] if raw_rows else {})
+        # ★ 协变量透传（P0-1 修复，BCG 案例打脸）：除核心结局列 + subgroup 外，
+        #   CSV 中的「额外列」全部原样透传（如 latitude/allocation/vaccine_type 等协变量、
+        #   arm 多臂标识），供 coze 端做元回归/亚组分析。数值协变量 float 强转，
+        #   分类/臂标识列字符串透传（靠 _coerce_rows 的 NON_NUMERIC_KEYS 判断）。
+        resolved_keys = set(resolved)
+        extra_cols = [c for c in (raw_rows[0].keys() if raw_rows else [])
+                      if c != "study" and c not in resolved_keys and c != (subgroup or "")]
         carry_cols = [subgroup] if subgroup else []
-        non_numeric = NON_NUMERIC_KEYS
+        carry_cols += extra_cols
+        # 分类协变量/臂标识列：凡含 latin/categorical 语义或值非纯数字 → 字符串透传
+        non_numeric = set(NON_NUMERIC_KEYS) | _classify_non_numeric_cols(raw_rows, extra_cols)
     if unresolved:
         available = list(raw_rows[0].keys()) if raw_rows else []
         _emit_fallback(unresolved, available, spec)
@@ -481,6 +565,17 @@ def build(query=None, spec=None, data_arg=None, data_json=None, out_path="reques
         "common": common,
         "random": random,
     }
+    # 用户语言备用字段（注入 coze 入参 params）：coze 可据其决定报告/图表文案语言。
+    # 判定优先级：① 显式 --language 最高；② 否则按【输入 query 文本内容】判定
+    #   （中文系统 + 英文输入 → en，而非被系统 locale 误判 zh）；③ query 为空时
+    #   回退到系统 locale（i18n._current_lang）。属"备用"输入，不强制覆盖 coze 自身判定。
+    # 复用 ct-base i18n.resolve_user_language：三级优先级（显式 > 内容级文本 > 系统 locale）
+    if ctbase_i18n is not None:
+        params["user_language"] = ctbase_i18n.resolve_user_language(
+            query if query else "", language_override
+        )
+    else:
+        params["user_language"] = "en"  # ct-base 缺失退化兜底（正常不应触发）
     # sm（效应量尺度）仅对消费 sm 的 task 写入。diagnostic_meta / survival_meta 不消费 sm，
     # 写 OR 属噪音字段且会误导用户以为可换尺度 → 跳过（见 coze_contract.md §3）。
     if spec.get("task") not in NON_SM_TASKS:
@@ -505,6 +600,8 @@ def build(query=None, spec=None, data_arg=None, data_json=None, out_path="reques
         "data": {"rows": rows, "colmap": {k: k for k in resolved}},
         "params": params,
         "figure": {"plots": plots},
+        # 调用方约束（2026-08-30）：产物直接可 POST /run（带有效归因，空归因会绕过限流）。
+        "query_origin": _origin(),
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(req, f, ensure_ascii=False, indent=2)
@@ -521,13 +618,15 @@ def main():
     ap.add_argument("--colmap", help="LLM 兜底回灌：列映射 JSON，{规范键:实际列名}，如 '{\"event_exp\":\"实验组事件数\"}'")
     ap.add_argument("--measure", help="LLM 兜底回灌：效应量覆盖（OR/RR/RD/MD/SMD/HR…）")
     ap.add_argument("--model", help="LLM 兜底回灌：模型覆盖（REM-L/MH）")
+    ap.add_argument("--language", help="用户语言（zh/en/...），覆盖自动检测，注入 coze 入参 user_language 备用")
     a = ap.parse_args()
 
     spec = None
     if a.spec:
         spec = json.load(open(a.spec, encoding="utf-8"))
     req = build(query=a.query, spec=spec, data_arg=a.data, data_json=a.data_json, out_path=a.out,
-                colmap_override=a.colmap, measure_override=a.measure, model_override=a.model)
+                colmap_override=a.colmap, measure_override=a.measure, model_override=a.model,
+                language_override=a.language)
     print(json.dumps(req, ensure_ascii=False, indent=2))
 
 

@@ -14,7 +14,7 @@
 source("src/r_engine/meta_analysis_core.R")
 res <- ma_analyze(data, type = "rate",            # binary|continuous|rate|precomp|survival
                                                # |correlation|single_proportion|single_mean
-                  measure = "IRR",                # 自动选 OR/SMD/IRR/ZCOR/PLO/MN 等
+                  measure = "IRR",                # 自动选 OR/SMD/IRR/ZCOR/PLOGIT(PLO)/MN 等
                   method = "REML", test = "knha")
 
 # 一行出图 + 摘要（森林图/漏斗图 SVG+PNG + results.md）

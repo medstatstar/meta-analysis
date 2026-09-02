@@ -9,7 +9,8 @@ adapters/coze_client.py — meta-analysis 技能 → Coze 工作流 主路径客
 - 数值判断由 coze 端 R 计算产出，本客户端只解析结构、绝不读取/改写数值结论。
 - 接口契约见 coze 项目的 coze_contract.md（不随技能发布）。
 - ⚠️ 回退已取消（2026-08-26）：coze 不可达 / 未授权时本客户端直接抛错，不再兜底本地引擎；
-  原本地引擎代码保留在 `adapters/_dev/local_engine.py`（开发调试用，不随发布包分发）。
+  原本地引擎 `adapters/_dev/local_engine.py` 已于 2026-09-01 按架构终态原则删除
+  （原则：coze 为唯一计算真相源，本地不保留计算引擎）。
 
 配置（环境变量）：
   COZE_META_ENDPOINT  工作流 /run 地址，默认 https://ct-meta.coze.site/run（2026-08-26 改造：
@@ -35,9 +36,11 @@ adapters/coze_client.py — meta-analysis 技能 → Coze 工作流 主路径客
 import copy
 import hashlib
 import json
+import mimetypes
 import os
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -55,18 +58,40 @@ except ImportError:  # 平铺模块直接运行（run_analysis 把 adapters 加�
 
 # 2026-08-26 改造：主分析工作流切到 ct-meta2（新 token，aud=5v9HMQWtTSzxrEeZjI7kJJEzeMPrHXny），
 # 同日后续互换：主工作流回切 ct-meta（旧 token，aud=oxwSsfwdtRRfByYIM8Xg3U4RQH5OgEjO），
-# ct-meta2 降级为回退（新 token）。二者 JWT 不同，token 按 endpoint 分别解析（见 coze_token.get_token_for）。
-DEFAULT_ENDPOINT = "https://ct-meta.coze.site/run"
+# ct-meta2 降级为回退（新 token）。2026-08-31 起端点选择改由下方「开发期策略覆盖」段
+# 按 DEV_POLICY.json 动态决定（默认生产态仍是 ct-meta 主 / ct-meta2 回退），故此处不再
+# 硬编码 DEFAULT/FALLBACK，统一在文末覆盖段定义。
 
-# 回退端点：主工作流 ct-meta 因 token 不一致 / 服务地址升级而无法访问时，
-# 改用 ct-meta2 重试（**token 也切换为 ct-meta2 专属 token**，而非沿用主端点 token）。
-# 该端点须预先加入 config.json auto_approve_endpoints 白名单（与 ct-meta / ct-bugreport 同级）。
-FALLBACK_ENDPOINT = "https://ct-meta2.coze.site/run"
 
 # 触发回退时向用户呈现的说明（主工作流地址已切换，已自动回退到备用 coze 端点）。
 ENDPOINT_FALLBACK_NOTICE = (
     "主分析工作流地址已切换，本次分析已自动回退到备用 coze 端点完成"
 )
+
+# === 开发期策略覆盖（2026-08-31 起，meta-analysis 架构重构开发期）===
+# 单源真相：本目录 DEV_POLICY.json 的 ct_meta_disabled 标志。
+# 该期间用户要求：禁用 ct-meta 调用，coze 唯一站点 = ct-meta2，且不回退 ct-meta。
+# 结束开发期时：删除 DEV_POLICY.json 并还原本段（DEFAULT/FALLBACK 回切 ct-meta/ct-meta2）。
+_DEV_POLICY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DEV_POLICY.json")
+
+
+def _dev_ct_meta_disabled() -> bool:
+    """读取开发期策略：是否禁用 ct-meta（仅走 ct-meta2）。无策略文件 → 正常生产态。"""
+    try:
+        with open(_DEV_POLICY_PATH, "r", encoding="utf-8") as _f:
+            return bool(json.load(_f).get("ct_meta_disabled", False))
+    except Exception:
+        return False
+
+
+if _dev_ct_meta_disabled():
+    # 开发期：ct-meta2 为唯一站点，禁用 ct-meta（FALLBACK 置空 → 任何回退都不发生）
+    DEFAULT_ENDPOINT = "https://ct-meta2.coze.site/run"
+    FALLBACK_ENDPOINT = ""
+else:
+    # 正常生产态（无 DEV_POLICY.json 或 ct_meta_disabled=false）
+    DEFAULT_ENDPOINT = "https://ct-meta.coze.site/run"
+    FALLBACK_ENDPOINT = "https://ct-meta2.coze.site/run"
 
 # 2026-08-29（ct-base §20.9 修订）：**删除版本号比对**——原 `EXPECTED_COZE_ENVELOPE_VERSION`
 # 常量与 `_coze_version` / `_contract_version` 的比对逻辑一并移除。版本由 coze 端随发布
@@ -224,6 +249,33 @@ def _default_query_origin(debug: bool = False) -> str:
 
 
 # --------------------------------------------------------------------------
+# 调用方约束：query_origin 发送层硬守卫 — 2026-08-30 新增
+# --------------------------------------------------------------------------
+# 背景：2.2.28 客户端已在 run_meta 自动注入 query_origin，但仍有"裸 POST /run、
+# 复制契约示例、body 缺 query_origin"的调用产生飞书空归因记录（2026-08-30 实测
+# CTDB_searchlog 三条）。本守卫放在**序列化发送前**——任何绕过 run_meta 注入、
+# 或将来改动导致 query_origin 丢失的路径，只要走到出站这步就发不出空归因请求。
+_ORIGIN_RE = re.compile(r"^(?:debug:)?sha256:[0-9a-f]{64}$")
+
+
+def _assert_query_origin(payload: dict) -> str:
+    """硬校验出站 payload 必须携带**有效** query_origin（调用方约束，不可绕过）。
+
+    有效值 = `[debug:]sha256:` + 64 位十六进制（主机名哈希）。缺失 / 空串 /
+    格式非法均抛 ValueError，绝不带空归因出站。
+    """
+    qo = (payload or {}).get("query_origin")
+    if not isinstance(qo, str) or not _ORIGIN_RE.match(qo):
+        raise ValueError(
+            "调用方约束：出站请求必须携带有效 query_origin（[debug:]sha256:<64hex>），"
+            "当前为 %r。请经 coze_client.run_meta / run_analysis 调用，或自行填充 "
+            "_default_query_origin()。空归因会让调用绕过按 query_origin 计的限流，"
+            "且飞书日志无法溯源。" % (qo,)
+        )
+    return qo
+
+
+# --------------------------------------------------------------------------
 # 请求指纹 + 短窗幂等去重 — 2026-08-29 新增
 # --------------------------------------------------------------------------
 # 背景：一次调试中同一份数据被连续调用两次（仅 figure.plots 不同），coze 端无
@@ -249,7 +301,9 @@ def _dedup_fingerprint(payload: dict) -> str:
     只取四个业务字段，忽略 request_id / _debug / query_origin 等观测字段——
     否则同一分析换个 request_id 就绕过去重。
     """
-    core = {k: payload.get(k) for k in ("task", "data", "params", "figure")}
+    core = {k: payload.get(k) for k in
+            ("task", "data", "params", "figure", "stage", "pipeline_id",
+             "contract_version", "schema")}
     blob = json.dumps(core, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -637,6 +691,41 @@ def _inflate_externalized(parsed: dict, refs: list | None = None, timeout: int =
     return parsed
 
 
+def _post_run_with_fallback(run_url: str, body: bytes, headers: dict, timeout: int):
+    """POST /run（主端点），token 鉴权失败（401/403 + token 关键字）回退 FALLBACK_ENDPOINT
+    （回退端点使用自身 token）。返回 (raw_text, elapsed_seconds, used_fallback, final_run_url)。
+
+    供 run_meta 与 run_stage 共用，避免两端各写一份回退逻辑（消除重复）。
+    """
+    try:
+        _acquire_rate_limit()
+        raw, elapsed = _post_run(run_url, body, headers, timeout)
+        return raw, elapsed, False, run_url
+    except _CozeHttpError as e:
+        ep = _endpoint()
+        # 开发期 FALLBACK_ENDPOINT 可能置空（禁用 ct-meta）→ 不回退；
+        # 仅当配置了回退端点且当前端点非回退端点时才重试。
+        if FALLBACK_ENDPOINT and _is_token_error(e.code, e.body) and ep != FALLBACK_ENDPOINT:
+            fb_url = FALLBACK_ENDPOINT if FALLBACK_ENDPOINT.endswith("/run") else FALLBACK_ENDPOINT + "/run"
+            fb_headers = _headers(fb_url)
+            if not _auth_gate(fb_url):
+                raise AuthRequiredError(
+                    f"coze 回退端点未授权（{fb_url} 不在 auto_approve_endpoints 白名单）。"
+                )
+            try:
+                _acquire_rate_limit()
+                raw, elapsed = _post_run(fb_url, body, fb_headers, timeout)
+                return raw, elapsed, True, fb_url
+            except _CozeHttpError as e2:
+                raise RuntimeError(
+                    f"coze 主端点与回退端点均因 token 不一致失败（{e2.code}）。"
+                    f"{ENDPOINT_FALLBACK_NOTICE}"
+                )
+        raise
+    except RuntimeError:
+        raise
+
+
 def run_meta(task: str, data: dict, params: dict | None = None,
              figure: dict | None = None, query_origin: str | None = None,
              debug: bool = False) -> dict:
@@ -711,38 +800,16 @@ def run_meta(task: str, data: dict, params: dict | None = None,
         )
     # ct-base §5：出站 payload 发送前脱敏（剥离 PII）
     payload = sanitize_payload(payload)
+    # 调用方约束（2026-08-30）：序列化出站前硬校验 query_origin 非空且格式合法，
+    # 覆盖主端点与回退端点（body 只构造一次、两次 POST 复用）——杜绝空归因出站。
+    _assert_query_origin(payload)
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     headers = _headers(ep)
     used_fallback = False
 
     # 主端点请求；token 不一致（401/403 + token 关键字）则回退 FALLBACK_ENDPOINT
     # （**回退端点使用自身专属 token**，见 _headers(fb_url)）
-    try:
-        _acquire_rate_limit()  # 并发保护：相邻 coze 调用至少间隔 1 秒
-        raw, _elapsed = _post_run(run_url, body, headers, _timeout())
-    except _CozeHttpError as e:
-        if _is_token_error(e.code, e.body) and ep != FALLBACK_ENDPOINT:
-            fb_url = FALLBACK_ENDPOINT if FALLBACK_ENDPOINT.endswith("/run") else FALLBACK_ENDPOINT + "/run"
-            fb_headers = _headers(fb_url)
-            if not _auth_gate(fb_url):
-                raise AuthRequiredError(
-                    f"coze 回退端点未授权（{fb_url} 不在 auto_approve_endpoints 白名单）。"
-                )
-            try:
-                _acquire_rate_limit()  # 并发保护同样覆盖回退端点
-                raw, _elapsed = _post_run(fb_url, body, fb_headers, _timeout())
-                used_fallback = True
-                run_url = fb_url
-            except _CozeHttpError as e2:
-                # 回退仍 token 失败：附升级提示后抛出，提示用户更新技能
-                raise RuntimeError(
-                    f"coze 主端点与回退端点均因 token 不一致失败（{e2.code}）。"
-                    f"{ENDPOINT_FALLBACK_NOTICE}"
-                )
-        else:
-            raise
-    except RuntimeError:
-        raise
+    raw, _elapsed, used_fallback, run_url = _post_run_with_fallback(run_url, body, headers, _timeout())
 
     outer = json.loads(raw)
     # /run 返回 GlobalState（GraphOutput.result = R 引擎 JSON 字符串）
@@ -832,6 +899,486 @@ def health() -> bool:
         return True  # 4xx/5xx：服务已响应（401/404/405 均说明可达）
     except Exception:
         return False  # 网络层/超时：不可达
+
+
+# ============================================================================
+# Phase 0 — per-stage Pipeline 客户端（本地薄客户端骨架）
+# 设计（对齐 contracts/pipeline_stage/v1.0.0/SPEC.md + coze_contract.md §9）：
+#   - run_stage()        发送 per-stage 信封；旧 per-task 信封 → 委派 run_meta（R1 双模）。
+#   - parse_stage_response()  解析 stage_result/next_human_action/tool_cards（coze 端以
+#                         JSON 字符串承载，与 result 同模式）+ 兼容旧 result 内层。
+#   - execute_tool_cards()  复用 need_tool 范式：request_upload → 本地上传；ct-* → 查表执行。
+#   - run_pipeline()     薄客户端编排（发→解析→执行 tool_card→回填 stage_context→续跑），
+#                         红线 gate 强执（gate≠none & required → 阻断自动续跑，交人工）。
+#   - _upload_file()/download_attachments()  文件双向传输（S3 预签名）。
+#   - billing 仅透传（account_id/billing_token 可选，预留接口）。
+# 所有网络动作可经 transport 注入（测试用），不依赖真实 coze 部署。
+# ============================================================================
+
+CONTRACT_VERSION = "1.0.0"
+STAGE_SCHEMA_ID = "meta.pipeline.stage/v1"
+_STAGE_FIELDS = ("contract_version", "schema", "pipeline_id", "pipeline", "stage")
+# 🔴 红线闸集合：命中且 required=True 时，run_pipeline 阻断自动续跑（SPEC §8 / coze_contract §9.2）。
+_REDLINE_GATES = {"extraction_review", "final_inclusion", "manuscript_approval", "reference_verification"}
+
+_UPLOAD_PUT_TIMEOUT = 120
+_DOWNLOAD_TIMEOUT = 120
+
+
+def _http_put(url: str, data: bytes, headers: dict | None = None, timeout: int = _UPLOAD_PUT_TIMEOUT) -> int:
+    """PUT 上传（S3 预签名），返回 HTTP 状态码。测试可 monkeypatch 本函数。"""
+    req = urllib.request.Request(url, data=data, method="PUT", headers=headers or {})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.status
+
+
+def _http_get(url: str, timeout: int = _DOWNLOAD_TIMEOUT) -> bytes:
+    """GET 下载，返回字节。测试可 monkeypatch 本函数。"""
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return r.read()
+
+
+def _is_legacy_envelope(env: dict) -> bool:
+    """双模判定：无管线字段即 legacy（对齐 BACKWARD_COMPAT.md / coze_contract §9.5 R1）。"""
+    return not any(k in env for k in _STAGE_FIELDS)
+
+
+def build_stage_payload(env: dict, debug: bool = False) -> dict:
+    """规范化 stage 信封：补齐 contract_version/schema/request_id/query_origin；
+    coze 恒只返 SVG（2026-08-20 收紧）；byvar→subgroup 归一化。"""
+    env = dict(env)
+    fig = dict(env.get("figure") or {})
+    fig["format"] = "svg"
+    env["figure"] = fig
+    if env.get("params") and "byvar" in env["params"]:
+        env["params"] = {**env["params"], "subgroup": env["params"].pop("byvar")}
+    if "contract_version" not in env:
+        env["contract_version"] = CONTRACT_VERSION
+    if "schema" not in env:
+        env["schema"] = STAGE_SCHEMA_ID
+    if "request_id" not in env:
+        env["request_id"] = str(uuid.uuid4())
+    env["query_origin"] = env.get("query_origin") or _default_query_origin(debug=debug)
+    if debug:
+        env["_debug"] = True
+    return env
+
+
+def attach_billing(env: dict, account_id: str | None = None,
+                   billing_token: str | None = None) -> dict:
+    """billing 标识仅透传（预留接口，向后兼容）：account_id/billing_token 二选一，
+    与 query_origin（匿名机器指纹）完全独立。缺失 → legacy/未计量路径。"""
+    if account_id:
+        env["account_id"] = account_id
+    if billing_token:
+        env["billing_token"] = billing_token
+    return env
+
+
+def run_stage(env: dict, debug: bool = False, transport=None) -> dict:
+    """发送 per-stage 信封并解析响应。
+
+    - 旧 per-task 信封（无管线字段）→ 委派 run_meta（R1 双模在客户端层也成立）。
+    - 新 stage 信封 → 经 transport（默认 _post_run_with_fallback）POST /run，
+      parse_stage_response 解析。transport 签名同 _post_run：(url, body, headers, timeout)。
+    """
+    if _is_legacy_envelope(env):
+        return run_meta(
+            env.get("task"), env.get("data"), env.get("params"),
+            env.get("figure"), query_origin=env.get("query_origin"), debug=debug,
+        )
+    payload = build_stage_payload(env, debug=debug)
+    fp = _dedup_fingerprint(payload)
+    cached = _dedup_lookup(fp)
+    if cached is not None:
+        cached["_dedup_hit"] = True
+        return cached
+    ep = _endpoint()
+    run_url = ep if ep.endswith("/run") else ep + "/run"
+    if not _auth_gate(run_url):
+        raise AuthRequiredError(
+            f"coze 出站未授权（端点 {run_url} 不在 auto_approve_endpoints 白名单）。"
+            f"如同意发送请让用户确认后调用 approve_endpoint('{run_url}') 再重试。"
+        )
+    payload = sanitize_payload(payload)
+    _assert_query_origin(payload)  # 出站硬守卫，杜绝空归因（2026-08-30）
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = _headers(ep)
+    transport = transport or _post_run_with_fallback
+    _tr = transport(run_url, body, headers, _timeout())
+    # transport 可能返回 2 元组 (raw, elapsed) 或 4 元组 (raw, elapsed, used_fallback, final_url)：
+    # 真实 HTTP transport (_post_run_with_fallback) 返回 4 元组；本地 local_transport 返回 2 元组。
+    # 向后兼容两种形态（2026-08-31 修复：此前真实调用因 4 元组解包崩溃，被 local_transport 的 2 元组掩盖）。
+    raw, elapsed = _tr[0], _tr[1]
+    outer = json.loads(raw)
+    parsed = parse_stage_response(outer, payload.get("request_id"), elapsed=elapsed)
+    _dedup_store(fp, parsed)
+    return parsed
+
+
+def parse_stage_response(outer, request_id, elapsed: float = 0.0) -> dict:
+    """解析 coze 返回的 stage 信封。
+
+    coze 端 stage_result/next_human_action/tool_cards 以 JSON 字符串承载（与 result 同模式，
+    见 coze_contract §9.1）。本函数统一解析为对象，并兼容旧 result 内层（Block B 计算，
+    R2 仍填充 result）。红线闸信号由 run_pipeline 消费。
+    """
+    if not isinstance(outer, dict):
+        return {"status": "error", "notes": "coze 返回非 JSON 对象",
+                "_request_id": request_id, "_gate_blocked": False}
+    out = {"_request_id": request_id, "coze_elapsed_seconds": round(elapsed, 1)}
+    for _k in ("feishu_write_success", "feishu_write_time", "_coze_endpoint_notice"):
+        if _k in outer:
+            out[_k] = outer[_k]
+
+    def _json_or_obj(v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:  # noqa: BLE001
+                return {"_raw": v}
+        return v
+
+    stage_present = any(k in outer for k in ("stage_result", "next_human_action", "tool_cards"))
+    if stage_present:
+        out["mode"] = "stage"
+        out["stage_result"] = _json_or_obj(outer.get("stage_result"))
+        out["next_human_action"] = _json_or_obj(outer.get("next_human_action"))
+        out["tool_cards"] = _json_or_obj(outer.get("tool_cards")) or []
+        out["stage"] = _json_or_obj(outer.get("stage"))
+        out["pipeline_id"] = outer.get("pipeline_id")
+    else:
+        out["mode"] = "legacy"
+
+    # 兼容：result 内层（Block B 计算阶段，R2 仍填充 result）
+    result_str = outer.get("result")
+    if isinstance(result_str, str) and result_str:
+        try:
+            inner = json.loads(result_str)
+        except json.JSONDecodeError:
+            inner = {"status": "error", "notes": f"coze 返回非 JSON 结果：{result_str[:500]}"}
+        full = _fetch_full_json(inner, timeout=30) if isinstance(inner, dict) else None
+        if full is not None:
+            inner = full
+        else:
+            _fill_external_svgs(inner)
+        if isinstance(inner, dict):
+            inner, _drift, _up = _assess_contract(inner)
+            if _drift:
+                inner["_contract_drift"] = _drift
+                inner["_needs_upgrade"] = _up
+        out["result"] = inner
+        for _f in ("status", "stats", "figures", "warnings", "notes", "task", "repro"):
+            if isinstance(inner, dict) and _f in inner:
+                out[_f] = inner[_f]
+    elif not stage_present:
+        # 既无 stage 字段也无 result → 直接把 outer 当结果（兼容直接返回结构化结果）
+        for _f in ("status", "stats", "figures", "warnings", "notes", "task"):
+            if _f in outer:
+                out[_f] = outer[_f]
+
+    # 响应侧 attachments（下载引用）
+    atts = outer.get("attachments")
+    if isinstance(atts, str):
+        try:
+            atts = json.loads(atts)
+        except Exception:  # noqa: BLE001
+            atts = None
+    out["attachments"] = atts if isinstance(atts, list) else []
+
+    # 红线闸强执信号：gate≠none & required → 阻断自动续跑
+    nha = out.get("next_human_action")
+    gate_blocked = bool(
+        isinstance(nha, dict) and nha.get("gate") in _REDLINE_GATES and nha.get("required")
+    )
+    out["_gate_blocked"] = gate_blocked
+    return out
+
+
+def _load_tool_mapping() -> dict:
+    """加载 tool_mapping_meta.json（Block A/C 需要的 ct-* 本地调用映射）。缺失返回空。
+
+    skill_dir 中的 ~ 在此展开为绝对路径（subprocess 不会自动展开 ~）。
+    """
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tool_mapping_meta.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
+    for spec in data.values():
+        if isinstance(spec, dict) and spec.get("skill_dir"):
+            spec["skill_dir"] = os.path.expanduser(spec["skill_dir"])
+    return data
+
+
+def _parse_tool_output(text):
+    """解析 ct-* 子进程 stdout 为结构化结果。
+
+    - 整段是合法 JSON（对象/数组）→ 直接返回；
+    - 否则按行解析 NDJSON（ct-literature 逐行 print(json.dumps(rec))），收集所有 dict / 展开 list；
+    - 无可解析记录 → 返回原始字符串（便于上层诊断）。
+    """
+    if not text:
+        return ""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except Exception:  # noqa: BLE001
+        pass
+    records = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(obj, dict):
+            records.append(obj)
+        elif isinstance(obj, list):
+            records.extend(obj)
+    return records if records else text
+
+
+def _upload_file(local_path, purpose: str | None = None, storage: str = "s3") -> dict:
+    """构建本地文件的 AttachmentRef（key/filename/mime/size_bytes/sha256/purpose）。
+    实际 PUT 到 S3 预签名 URL 由 execute_tool_cards 在拿到 put_url 后完成。
+
+    测试可 monkeypatch coze_client._http_put 避免真实网络。
+    """
+    p = os.path.abspath(local_path)
+    if not os.path.isfile(p):
+        raise FileNotFoundError(p)
+    with open(p, "rb") as f:
+        data = f.read()
+    sha = hashlib.sha256(data).hexdigest()
+    size = len(data)
+    mime = mimetypes.guess_type(p)[0] or "application/octet-stream"
+    ref = {"storage": storage, "key": f"pipeline/uploads/{sha}_{os.path.basename(p)}",
+           "filename": os.path.basename(p), "mime": mime, "size_bytes": size, "sha256": sha}
+    if purpose:
+        ref["purpose"] = purpose
+    return ref
+
+
+def download_attachments(attachments, out_dir) -> list:
+    """下载响应侧 attachments（含预签名 GET url），校验 sha256，落盘 out_dir。
+    返回 list[dict]{filename,path,ok,sha256_ok}。失败不抛错，标 ok=False。
+
+    测试可 monkeypatch coze_client._http_get 避免真实网络。
+    """
+    out_dir = os.path.abspath(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    results = []
+    for att in (attachments or []):
+        if not isinstance(att, dict) or not att.get("url"):
+            results.append({"ok": False, "reason": "missing url", "ref": att})
+            continue
+        try:
+            raw = _http_get(att["url"])
+            sha_ok = True
+            if att.get("sha256"):
+                sha_ok = hashlib.sha256(raw).hexdigest() == att["sha256"]
+            fname = att.get("filename") or os.path.basename(att.get("key") or "download")
+            path = os.path.join(out_dir, fname)
+            with open(path, "wb") as f:
+                f.write(raw)
+            results.append({"filename": fname, "path": path, "ok": True, "sha256_ok": sha_ok})
+        except Exception as e:  # noqa: BLE001
+            results.append({"ok": False, "reason": str(e)[:200], "ref": att})
+    return results
+
+
+def execute_tool_cards(cards, out_dir: str = ".", cwd: str | None = None) -> list:
+    """执行 coze 下发的 tool_cards（复用 need_tool 范式）。
+
+    - need_tool == "request_upload" → 本地逐个上传 params["_local_files"] 所列文件
+      （每项 {path, purpose} 或纯路径），put_url 由 params["_put_urls"]{path: url} 提供；
+      返回 AttachmentRef[]。
+    - 其他（ct-* 等）→ 查 tool_mapping_meta.json 构造 CLI 执行（草稿兜底）。
+    返回 list[{card_ref, need_tool, status, result}]，绝不抛错中断管线。
+    """
+    out_dir = os.path.abspath(out_dir)
+    mapping = _load_tool_mapping()
+    outputs = []
+    for card in (cards or []):
+        if not isinstance(card, dict):
+            continue
+        need = card.get("need_tool")
+        cref = card.get("card_ref")
+        params = card.get("params") or {}
+        draft = card.get("draft_answer")
+        try:
+            if need == "request_upload":
+                local_files = params.get("_local_files") or []
+                put_urls = params.get("_put_urls") or {}
+                refs = []
+                for item in local_files:
+                    lp = item if isinstance(item, str) else item.get("path")
+                    purp = None if isinstance(item, str) else item.get("purpose")
+                    if not lp:
+                        continue
+                    ref = _upload_file(lp, purpose=purp)
+                    url = put_urls.get(lp) or put_urls.get(os.path.basename(lp))
+                    if url:
+                        with open(os.path.abspath(lp), "rb") as f:
+                            _http_put(url, f.read(), headers={"Content-Type": ref["mime"]})
+                        ref["put_url"] = url
+                    refs.append(ref)
+                outputs.append({"card_ref": cref, "need_tool": need,
+                                "status": "ok", "result": {"attachments": refs}})
+            else:
+                spec = mapping.get(need)
+                if not spec or not spec.get("cmd"):
+                    outputs.append({"card_ref": cref, "need_tool": need, "status": "error",
+                                    "result": {"error": f"未找到工具映射: {need}", "draft_answer": draft}})
+                    continue
+                cmd = [c.format(skill_dir=spec.get("skill_dir", "")) if isinstance(c, str) and "{skill_dir}" in c else c
+                       for c in spec["cmd"]]
+                for pname, flag in (spec.get("arg_map") or {}).items():
+                    if pname in params:
+                        cmd += [flag, str(params[pname])]
+                for f in (spec.get("fixed_flags") or []):
+                    cmd.append(f)
+                proc = subprocess.run(cmd, capture_output=True, text=True,
+                                     timeout=card.get("timeout_sec", 120), cwd=cwd)
+                if proc.returncode != 0:
+                    outputs.append({"card_ref": cref, "need_tool": need, "status": "error",
+                                    "result": {"stderr": proc.stderr[:500], "draft_answer": draft}})
+                    continue
+                res = _parse_tool_output(proc.stdout)
+                outputs.append({"card_ref": cref, "need_tool": need, "status": "ok", "result": res})
+        except Exception as e:  # noqa: BLE001
+            outputs.append({"card_ref": cref, "need_tool": need, "status": "error",
+                            "result": {"exception": f"{type(e).__name__}: {e}", "draft_answer": draft}})
+    return outputs
+
+
+def run_stage_local(env: dict, debug: bool = False, transport=None) -> dict:
+    """本地 R 引擎镜像（coze 代码同源，不经 coze 云）。
+
+    供冻结期离线真实计算 / 测试：把 stage 信封翻译为 run_task.R 的 input，
+    经本机 Rscript 调用 adapters/coze/src/r_engine/run_task.R，解析结果包成
+    coze 风格响应（{stage_result:{result:{stats,...}}}），供 block_b._extract_coze_stats
+    原样消费，下游 B2/B3/B4 零改动。非 coze 部署路径，仅本地开发/演示/回归使用。
+    """
+    import json as _json
+    import os as _os
+    import tempfile as _tf
+    import shutil as _sh
+    import subprocess as _sp
+
+    task = env.get("task")
+    data = env.get("data") or []
+    params = env.get("params") or {}
+    em = params.get("effect_measure") or "OR"
+    rows = data if isinstance(data, list) else (data.get("rows") or [])
+    inp = {
+        "task": task,
+        "data": {"rows": rows},
+        "params": {"sm": em, "model": "random"},
+        "figure": {"format": "svg", "plots": ["forest", "funnel"]},
+    }
+    rdir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                         "coze", "src", "r_engine")
+    rscript = _os.environ.get("RSCRIPT_BIN", r"C:/Tools/R-4.6.1/bin/Rscript.exe")
+    run_task = _os.path.join(rdir, "run_task.R")
+    d = _tf.mkdtemp(prefix="meta_local_")
+    ip = _os.path.join(d, "in.json")
+    op = _os.path.join(d, "out.json")
+    try:
+        with open(ip, "w", encoding="utf-8") as f:
+            _json.dump(inp, f, ensure_ascii=False)
+        try:
+            proc = _sp.run([rscript, run_task, "--input", ip, "--output", op],
+                           capture_output=True, text=True, timeout=180)
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error",
+                    "notes": f"本地 R 引擎调用失败: {type(e).__name__}: {e}",
+                    "_request_id": env.get("pipeline_id"), "_gate_blocked": False}
+        if not _os.path.exists(op):
+            return {"status": "error",
+                    "notes": f"本地 R 引擎无输出: {proc.stderr[-1500:]}",
+                    "_request_id": env.get("pipeline_id"), "_gate_blocked": False}
+        out = _json.load(open(op, encoding="utf-8"))
+        stats = out.get("stats")
+        figures = out.get("figures", [])
+        return {
+            "stage_result": {
+                "result": {
+                    "stats": stats,
+                    "figures": figures,
+                    "task": task,
+                    "notes": out.get("notes"),
+                    "warnings": out.get("warnings", []),
+                    # 复现 R 代码（供 HTML 报告折叠展示；run_task.R 顶层 repro 字段）
+                    "repro": out.get("repro"),
+                }
+            },
+            "_local_engine": True,
+            "_coze_endpoint_notice": "本地 R 引擎镜像（coze 代码同源），未经 coze 云。",
+        }
+    finally:
+        _sh.rmtree(d, ignore_errors=True)
+
+
+def run_pipeline(initial_env: dict, max_stages: int = 20, debug: bool = False,
+                 transport=None, out_dir: str = ".") -> dict:
+    """薄客户端编排（I/O 入口）：发→解析→执行 tool_card→回填 stage_context→续跑；
+    红线闸 gate≠none & required 阻断自动续跑，交人工。
+
+    Returns:
+        {done, await_human, gate, final, stages[], attachments[], tool_card_outputs[]}
+    """
+    env = dict(initial_env)
+    env.setdefault("stage_context",
+                   {"human_decisions": [], "tool_card_outputs": [], "artifacts": []})
+    stages = []
+    all_tool_outputs = []
+    downloaded = []
+    for _i in range(max_stages):
+        resp = run_stage(env, debug=debug, transport=transport)
+        stages.append(resp)
+        if resp.get("attachments"):
+            downloaded += download_attachments(resp["attachments"], out_dir)
+        # 🔴 红线闸：阻断自动续跑，交人工
+        if resp.get("_gate_blocked"):
+            return {"done": False, "await_human": True,
+                    "gate": (resp.get("next_human_action") or {}).get("gate"),
+                    "final": resp, "stages": stages,
+                    "attachments": downloaded, "tool_card_outputs": all_tool_outputs}
+        # 执行 tool_cards 并回填 stage_context（不回发 coze，下请求携带）
+        cards = resp.get("tool_cards") or []
+        if cards:
+            outs = execute_tool_cards(cards, out_dir=out_dir)
+            all_tool_outputs += outs
+            env["stage_context"]["tool_card_outputs"] += outs
+            if isinstance(env.get("stage"), dict):
+                env["stage"]["intent"] = "resume"
+            continue
+        # 无 tool_card 且非闸 → 据 next_human_action 决定
+        nha = resp.get("next_human_action") or {}
+        ntype = nha.get("type")
+        if ntype == "none" and (resp.get("stage") or {}).get("status") == "completed":
+            return {"done": True, "await_human": False, "gate": None, "final": resp,
+                    "stages": stages, "attachments": downloaded,
+                    "tool_card_outputs": all_tool_outputs}
+        if ntype not in (None, "none"):
+            return {"done": False, "await_human": True, "gate": nha.get("gate"), "final": resp,
+                    "stages": stages, "attachments": downloaded,
+                    "tool_card_outputs": all_tool_outputs}
+        st = (resp.get("stage") or {}).get("status")
+        if st in ("need_data", "failed"):
+            return {"done": False, "await_human": True, "gate": nha.get("gate"), "final": resp,
+                    "stages": stages, "attachments": downloaded,
+                    "tool_card_outputs": all_tool_outputs}
+    return {"done": False, "await_human": True, "gate": "max_stages_reached",
+            "final": stages[-1] if stages else None, "stages": stages,
+            "attachments": downloaded, "tool_card_outputs": all_tool_outputs}
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ python scripts/run_meta.py <request.json>
 ```
 
 > **Coze-project R-engine maintenance commands** (package setup, dispatcher run, module help,
-> etc.) are **not published here** — they live in `adapters/coze_project/DEV.md`
+> etc.) are **not published here** — they live in `adapters/coze/DEV.md`
 > (git/clawhub-ignored, excluded from the published package). They are for coze-project
 > maintainers only.
 
@@ -106,7 +106,7 @@ y_i ~ Normal(θ_i, σ_i²)
 | dosresmeta | ≥2.0 | Dose-response meta |
 | ~~survmeta~~ | — | 已下架，改用 metafor 逆方差合并 logHR |
 | mada | ≥1.0 | Diagnostic meta |
-| metagear | ≥1.0 | Systematic review workflow |
+| metagear | ≥0.7 | PRISMA 2020 flow diagram (plot_PRISMA; only prisma_flow task uses it) |
 | ggplot2 | ≥3.0 | Visualization |
 | gridExtra | ≥2.0 | Multi-panel plots |
 | forestploter | ≥1.1 | Publication-ready forest plots (替代 ggforestplot) |
@@ -175,7 +175,7 @@ meta-analysis/
 │   ├── diagnosis_meta.md          # mada bivariate + SROC
 │   ├── bayesian_nma.md            # gemtc (主) / multinma (可选) workflows
 │   ├── esc_robust_meta.md         # esc conversions + RVE
-│   ├── review_workflow.md         # metagear PRISMA / screening / digitize
+│   ├── review_workflow.md         # PRISMA flow (metagear::plot_PRISMA) + agent-layer screening + data extraction
 │   ├── r_packages.md              # Package inventory
 │   ├── citations.md               # Methodological references
 │   ├── references.md              # Reference list

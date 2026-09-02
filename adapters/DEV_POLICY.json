@@ -1,0 +1,14 @@
+{
+  "dev_period": true,
+  "ct_meta_disabled": true,
+  "publish_freeze": true,
+  "set_at": "2026-08-31T13:50+08:00",
+  "set_by": "user（meta-analysis 技能架构大规模重构开发期指令）",
+  "reason": "meta-analysis 技能架构大规模重构开发期：禁用 ct-meta 调用、ct-meta2 为唯一 coze 站点；冻结技能新版本发布",
+  "unset_when": "用户明确告知开发期结束",
+  "effects": [
+    "coze_client 路由：DEFAULT_ENDPOINT 切到 ct-meta2，FALLBACK_ENDPOINT 置空（禁用 ct-meta，无回退）",
+    "禁止发布 meta-analysis 新版本（GitHub / SkillHub / ClawHub 均冻结）；publish_guard.py 与 deploy_retest G9 拦截",
+    "结束开发期：删除本文件 + 还原 coze_client.py 端点覆盖段（DEFAULT/FALLBACK 回切 ct-meta/ct-meta2）即可；config.json 白名单可保留"
+  ]
+}
