@@ -26,6 +26,7 @@ import fullflow  # noqa: E402
 import form_schema  # noqa: E402
 import block_a  # noqa: E402
 from fullflow import FullflowSession, run_fullflow, resume_fullflow, rewind_fullflow  # noqa: E402
+import literature_probe  # noqa: E402
 
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import HTMLResponse, StreamingResponse  # noqa: E402
@@ -144,6 +145,10 @@ class A4PreviewReq(BaseModel):
     max_attempts: int = 12
     email: Optional[str] = None
 
+class TopicHelpReq(BaseModel):
+    topic: str
+    year_from: Optional[int] = None
+
 
 # ---------------------------------------------------------------------------
 # 路由
@@ -172,6 +177,18 @@ def api_session(path: str):
     if not os.path.exists(path):
         raise HTTPException(404, f"会话不存在：{path}")
     return build_state(FullflowSession.load(path))
+
+@app.post("/api/topic_help")
+def api_topic_help(req: TopicHelpReq):
+    # 命中题轨的自包含上游闸：literature_probe 直连 Europe PMC，
+    # 返回真实命中数（Cochrane + PubMed SR/MA），用于选题可行性速览。
+    try:
+        res = literature_probe.dedup_probe(req.topic, year_from=req.year_from, max_results=8)
+    except Exception as e:  # 网络/解析失败 → 优雅降级，不整页冒
+        return {"topic": req.topic, "ok": False, "error": str(e),
+                "layers": {}, "summary": "", "any_error": True}
+    res["ok"] = True
+    return res
 
 
 @app.post("/api/rewind")

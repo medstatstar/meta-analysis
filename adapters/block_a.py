@@ -127,6 +127,21 @@ def a1_topic_selection(topic, registry_probe=None):
                 report["scope_warning"] = (report["scope_warning"] or "") + " 注册库未检索到相关试验，属空白/新兴方向。"
             elif total >= 200:
                 report["scope_warning"] = (report["scope_warning"] or "") + f" 注册库已检索到 {total} 项相关试验，方向可能已较拥挤，建议明确差异化角度。"
+    # 供工作台 A1 面板「PICOS 报告」文本框预填（editable_payload.report 的源）
+    # —— 对齐 EDITABLE_KEYS["A1.topic_selection"]=["report"]，避免文本框空白。
+    _rep = ["# PICOS 选题报告（本地启发式生成，请确认/修订后放行）", "",
+            f"**选题**：{topic}", "",
+            "| 维度 | 内容 |", "| --- | --- |"]
+    for _k in ("P", "I", "C", "O", "S"):
+        _rep.append(f"| {_k} | {picos.get(_k) or '（待填）'} |")
+    if missing:
+        _rep.append("")
+        _rep.append(f"⚠️ 缺失维度：{', '.join(missing)}（本地启发式无法自动推断，请人工补全）")
+    if scope_warning:
+        _rep.append(f"⚠️ {scope_warning}")
+    if registry_probe:
+        _rep.append(f"📋 注册库探针：{registry_probe.get('status')}（total={registry_probe.get('total')}）")
+    report["report"] = "\n".join(_rep)
     nha = {
         "type": "confirm",
         "prompt": f"选题闸门（本地启发式）{'+ ct-registry 查重' if registry_probe else ''}：{topic}。"

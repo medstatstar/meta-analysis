@@ -55,7 +55,8 @@
   /* actions */
   .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
   button { border: none; border-radius: 7px; padding: 9px 16px; font-size: 13px; font-weight: 600;
-           cursor: pointer; font-family: inherit; }
+           cursor: pointer; font-family: inherit; transition: opacity .15s ease, transform .05s ease; }
+  button:active { transform: translateY(1px); }
   .btn-approve { background: var(--green); color: #fff; }
   .btn-revise { background: var(--accent); color: #fff; }
   .btn-skip { background: var(--soft); color: #fff; }
@@ -63,6 +64,16 @@
   .btn-ghost { background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .note { flex: 1; min-width: 200px; }
+  .hint { font-size: 12px; color: var(--muted); margin: 4px 0 12px; line-height: 1.5; }
+  label.chk { display: flex; align-items: center; gap: 6px; font-weight: 500; color: var(--ink); margin: 12px 0 4px; }
+  .feas-kv { display: flex; flex-direction: column; gap: 2px; }
+  .feas-kv .row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .feas-kv .row .k { color: var(--muted); }
+  .feas-kv .row .v { font-weight: 600; }
+  .paper { padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
+  .paper a { color: var(--accent); text-decoration: none; }
+  .paper a:hover { text-decoration: underline; }
+  .paper .yr { color: var(--muted); font-size: 12px; }
   /* start */
   .start { max-width: 520px; margin: 40px auto; }
   .start label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
@@ -70,7 +81,7 @@
   .audit .row { padding: 7px 0; border-bottom: 1px solid var(--line); }
   .audit .row .a { font-weight: 600; }
   .empty { color: var(--muted); font-style: italic; }
-  .flash { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
+  .flash { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; transition: opacity .35s ease; }
   .flash.err { background: var(--red-soft); color: var(--red); }
   .flash.ok { background: var(--green-soft); color: var(--green); }
   .done-banner { background: var(--green-soft); color: var(--green); border: 1px solid #bbf7d0;
@@ -134,10 +145,21 @@ function api(path, opts) {
 function resolve(ctx, dotted) {
   return dotted.split(".").reduce((o,k) => (o && o[k] !== undefined ? o[k] : null), ctx);
 }
+let flashTimer = null;
 function flash(msg, kind) {
   let f = $("#flash");
   if (!f) { f = document.createElement("div"); f.id = "flash"; $("#center").prepend(f); }
-  f.className = "flash " + (kind || "ok"); f.textContent = msg;
+  f.className = "flash " + (kind || "ok"); f.textContent = msg; f.style.opacity = "1";
+  if (flashTimer) clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => {
+    if (f) { f.style.opacity = "0";
+      setTimeout(() => { f.textContent = ""; f.className = "flash"; }, 350); }
+  }, 4500);
+}
+function clearFlash() {
+  if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
+  const f = $("#flash");
+  if (f) { f.textContent = ""; f.className = "flash"; f.style.opacity = ""; }
 }
 
 // ---------- 启动 / 加载会话 ----------
@@ -166,25 +188,34 @@ async function loadSession(path) {
 }
 
 // ---------- 决策提交 ----------
-async function decide(action) {
+async function decide(action, btn) {
   if (!STATE) return;
   const aw = STATE.await;
   if (action === "revised" && Object.keys(DRAFT).length === 0) {
     flash("revise 需要先编辑至少一个字段", "err"); return;
   }
+  // 防重复点击：立即禁用所有决策按钮并显示「提交中…」
+  const buttons = $("#acts").querySelectorAll("button");
+  buttons.forEach(b => { b.disabled = true; });
+  if (btn) btn.textContent = "⏳ 提交中…";
   const note = ($("#note") || {}).value || "";
   const body = { session_path: STATE.session.path, stage_id: aw.stage_id,
-                 action: action === "skip" ? "skipped" : action,
+                 action: action,
                  revision: Object.keys(DRAFT).length ? DRAFT : null, note };
   try {
     const s = await api("/api/decide", {method:"POST", body: JSON.stringify(body)});
     STATE = s; DRAFT = {}; render();
     flash("已提交：" + action + (s.await.kind === "done" ? " · 流程完成" : ""), "ok");
-  } catch (e) { flash("提交失败：" + e.message, "err"); }
+  } catch (e) {
+    // 失败：恢复按钮（保留用户已填内容，不重渲染以免文本框被重置）
+    buttons.forEach(b => { b.disabled = false; if (b.dataset.label) b.textContent = b.dataset.label; });
+    flash("提交失败：" + e.message, "err");
+  }
 }
 
 // ---------- 渲染 ----------
 function render() {
+  clearFlash();   // 重渲染即清掉上一条提示，避免旧提示误导
   $("#hdr-meta").textContent = STATE ? `${STATE.session.pipeline_id} · ${STATE.session.topic}` : "";
   renderTimeline(); renderAudit();
   if (!STATE) { renderStart(); return; }
@@ -192,21 +223,42 @@ function render() {
   renderNode();
 }
 
-function renderStart() {
+function renderStart(prefill) {
+  const t = prefill || "";
   $("#center").innerHTML = `
     <div class="start">
       <h2 class="node-title">新建 meta 分析流程</h2>
-      <p class="node-intro">填写主题即启动 Block A（检索→初筛→提取），遇人工闸自动暂停。</p>
+      <p class="node-intro">填写研究主题即启动全流程（检索 → 初筛 → 提取 → 合并 → 评级），遇人工闸自动暂停。</p>
+
       <label>研究主题 / PICO</label>
-      <input type="text" id="topic" placeholder="例：DHA omega-3 补充对抑郁症的疗效">
-      <label>检索上限 / 起始年 / 效应量 / 网络 Meta</label>
-      <div style="display:flex;gap:8px">
-        <input type="number" id="maxr" value="50">
-        <input type="number" id="yf" placeholder="年(可空)">
-        <input type="text" id="em" value="OR" style="max-width:80px">
-        <input type="checkbox" id="nma"><span style="align-self:center">NMA</span>
+      <input type="text" id="topic" value="${esc(t)}" placeholder="例：DHA 鱼油补充对成人抑郁症的疗效">
+      <p class="hint">一句话说清你想研究什么，越具体越好。若已想好 PICO，可直接写「P:… I:… C:… O:…」。</p>
+
+      <label>检索上限（最多拉取多少篇文献记录用于初筛）</label>
+      <input type="number" id="maxr" value="50">
+      <p class="hint">默认 50。数值越大覆盖越全，但初筛越慢；一般 30–100 足够。</p>
+
+      <label>起始年（只纳入该年份及之后的研究，可空）</label>
+      <input type="number" id="yf" placeholder="如 2015；留空=不限年份">
+      <p class="hint">只想看近十年证据就填 2015；留空则不限年份。</p>
+
+      <label>合并效应量尺度</label>
+      <select id="em">
+        <option value="OR">OR 比值比（二分类结局，如有效/无效）</option>
+        <option value="RR">RR 相对危险度（二分类）</option>
+        <option value="SMD">SMD 标准化均数差（连续结局，如量表评分）</option>
+        <option value="MD">MD 均数差（连续结局，同单位）</option>
+        <option value="HR">HR 风险比（生存/时间事件）</option>
+      </select>
+      <p class="hint">结局是「发生/未发生」选 OR 或 RR；是「分数高低」选 SMD 或 MD；是「多久发生」选 HR。默认 OR。</p>
+
+      <label class="chk"><input type="checkbox" id="nma"> 网络 Meta 分析（NMA）</label>
+      <p class="hint">要同时比较 3 种及以上干预（如 A vs B vs C）就勾选；只做两两比较则留空。</p>
+
+      <div class="actions">
+        <button class="btn-approve" onclick="doStart()">启动流程</button>
+        <button class="btn-ghost" id="btn-help" onclick="topicHelp()">🧭 帮助选题（可行性速览）</button>
       </div>
-      <div class="actions"><button class="btn-approve" onclick="doStart()">启动流程</button></div>
     </div>`;
 }
 function doStart() {
@@ -218,6 +270,60 @@ function doStart() {
   if (yf) opt.year_from = +yf;   // 留空则不下发该字段（避免向后端传 null 触发 422）
   startSession(t, opt);
 }
+
+// ---------- 帮助选题（可行性速览，挂接 literature_probe 选题轨） ----------
+let LAST_TOPIC = "";
+async function topicHelp() {
+  const t = ($("#topic") || {}).value || "";
+  if (!t.trim()) { flash("请先填写研究主题，再点帮助选题", "err"); return; }
+  LAST_TOPIC = t.trim();
+  const btn = $("#btn-help");
+  if (btn) { btn.disabled = true; btn.textContent = "\u23f3 查询中…"; }
+  const yfRaw = ($("#yf") || {}).value || "";
+  const yf = yfRaw.trim() ? +yfRaw : null;
+  try {
+    const r = await api("/api/topic_help", {method:"POST",
+      body: JSON.stringify({topic: LAST_TOPIC, year_from: yf})});
+    renderTopicHelp(r);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "\ud83d\udedd 帮助选题（可行性速览）"; }
+    flash("选题速览失败：" + e.message, "err");
+  }
+}
+function renderTopicHelp(r) {
+  const layers = r.layers || {};
+  const co = layers.cochrane || {};
+  const pm = layers.pubmed_meta || {};
+  const paperList = (arr) => (arr || []).map(w => {
+    const yr = w.year ? ` <span class="yr">(${w.year})</span>` : "";
+    const url = w.url ? ` href="${esc(w.url)}" target="_blank" rel="noopener"` : "";
+    const cit = (w.cited_by_count != null) ? ` · 被引 ${w.cited_by_count}` : "";
+    return `<div class="paper"><a${url}>${esc(w.title || "(无标题)")}</a>${yr}${cit}</div>`;
+  }).join("") || `<div class="paper">（无）</div>`;
+  const coCount = (co.hit_count != null) ? co.hit_count : "探针不可用";
+  const pmCount = (pm.hit_count != null) ? pm.hit_count : "探针不可用";
+  const html = `
+    <div class="start" style="max-width:760px">
+      <h2 class="node-title">\ud83d\udedd 选题可行性速览</h2>
+      <p class="node-intro">基于真实文献库（Europe PMC / Cochrane）的命中数，帮你判断这个选题「是否已被充分研究、还值不值得做」。主题：<b>${esc(r.topic || LAST_TOPIC)}</b></p>
+      <div class="panel"><div class="pl">检索结果（去重探针）</div>
+        <div class="feas-kv">
+          <div class="row"><span class="k">Cochrane 系统评价</span><span class="v">${coCount} 篇</span></div>
+          <div class="row"><span class="k">PubMed 系统评价 / Meta（近 5 年）</span><span class="v">${pmCount} 篇</span></div>
+        </div>
+        <p class="hint">${esc(r.summary || "")}</p>
+      </div>
+      <div class="panel"><div class="pl">Cochrane 顶部文献</div>${paperList(co.works)}</div>
+      <div class="panel"><div class="pl">PubMed 顶部文献</div>${paperList(pm.works)}</div>
+      <p class="hint">\ud83d\udccc 命中数高 ⇒ 该方向已被充分研究，需找更新颖的角度；命中数低 ⇒ 可能是空白，但要警惕「数据太少做不到」。本速览只是去重快检（真实命中数 + 前几篇），并非全面检索；需要完整检索请用 ct-literature 技能。</p>
+      <div class="actions">
+        <button class="btn-approve" onclick="startWithTopic()">用此选题启动流程 →</button>
+        <button class="btn-ghost" onclick="renderStart()">← 返回修改</button>
+      </div>
+    </div>`;
+  $("#center").innerHTML = html;
+}
+function startWithTopic() { renderStart(LAST_TOPIC); doStart(); }
 
 function renderTimeline() {
   const prog = STATE ? STATE.progress : [];
@@ -326,12 +432,13 @@ function renderActions() {
   box.appendChild(note);
   const mk = (label, cls, action) => {
     const b = document.createElement("button"); b.className = cls; b.textContent = label;
-    b.onclick = () => decide(action); box.appendChild(b);
+    b.dataset.label = label;
+    b.onclick = () => decide(action, b); box.appendChild(b);
   };
-  if (opts.includes("approve")) mk("✓ 批准 / 放行", "btn-approve", "approved");
-  if (opts.includes("revise")) mk("✎ 修订后放行", "btn-revise", "revised");
-  if (opts.includes("skip")) mk("⏭ 跳过", "btn-skip", "skip");
-  if (opts.includes("reject")) mk("✕ 打回", "btn-reject", "rejected");
+  if (opts.includes("approved")) mk("✓ 批准 / 放行", "btn-approve", "approved");
+  if (opts.includes("revised")) mk("✎ 修订后放行", "btn-revise", "revised");
+  if (opts.includes("skipped")) mk("⏭ 跳过", "btn-skip", "skipped");
+  if (opts.includes("rejected")) mk("✕ 打回", "btn-reject", "rejected");
   // 收集 editable 改动 → DRAFT
   $("#center").querySelectorAll("[data-rk]").forEach(el => {
     el.addEventListener("input", () => collectDraft(el));
@@ -339,6 +446,7 @@ function renderActions() {
   });
 }
 function collectDraft(el) {
+  clearFlash();   // 用户开始编辑 → 旧提示自动消失
   const rk = el.dataset.rk;
   if (el.type === "checkbox") {
     const arr = DRAFT[rk] ? DRAFT[rk].slice() : (resolve({editable: STATE.await.editable_payload, nha: STATE.await.nha, stage: STATE.await.stage_result}, el.dataset.rk === "screened" ? "nha.decisions" : "editable." + rk) || []).slice();
