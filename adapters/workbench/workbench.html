@@ -383,6 +383,78 @@ async function decide(action, btn) {
   }
 }
 
+// ---------- 打回 / 回退（✕ 按钮）----------
+// 打回不是「停在原地」，而是真正回退到某个更早的阶段并重算下游。
+// 弹出目标选择器，确认后调用 /api/rewind（块级回退，清空该块及下游、保留审计）。
+function openRejectPicker() {
+  if (!STATE || !STATE.progress) { flash("无进度信息，无法打回", "err"); return; }
+  const curSid = STATE.await.stage_id;
+  const curBlock = (STATE.session.cursor && STATE.session.cursor.block)
+                   || (curSid ? curSid[0] : "A");
+  const prog = STATE.progress;
+  const curIdx = prog.findIndex(p => p.stage_id === curSid);
+  // 候选：块序早于当前块，或同块内更靠前的阶段（handoff_confirm 时 curIdx=-1，
+  // 取当前块之前所有块 → 即「重做上一块」）。
+  const cands = prog.filter(p => {
+    if (!p.stage_id) return false;
+    if (p.block < curBlock) return true;
+    if (p.block === curBlock && curIdx > 0 && p.index < (prog[curIdx] ? prog[curIdx].index : 1e9)) return true;
+    return false;
+  });
+  if (!cands.length) {
+    flash("已是流程起点，没有更早的阶段可回退", "err"); return;
+  }
+  const box = $("#center");
+  const opts = cands.map((c, i) =>
+    `<option value="${esc(c.stage_id)}"${i === cands.length - 1 ? " selected" : ""}>${esc(c.stage_id)} · ${esc(c.block)}块</option>`).join("");
+  const html =
+    `<div class="panel" id="reject-picker" style="border-left:4px solid var(--red);margin-top:14px">` +
+      `<div class="pl">✕ 打回 / 回退 · 选择目标阶段</div>` +
+      `<p class="hint">系统将清空所选阶段及其之后所有结果，并重新计算下游（可能联网重新检索 / 抽取，耗时较长）。` +
+      `审计已自动留痕。</p>` +
+      `<div class="actions" style="flex-wrap:wrap">` +
+        `<select id="reject-target" class="note" style="min-width:260px">${opts}</select>` +
+        `<button class="btn-reject" id="reject-go">确认打回并回退</button>` +
+        `<button class="btn-skip" onclick="renderNode()">取消</button>` +
+      `</div>` +
+    `</div>`;
+  box.insertAdjacentHTML("beforeend", html);
+  $("#reject-go").onclick = () => {
+    const tgt = $("#reject-target").value;
+    if (!tgt) return;
+    rejectAndRewind(tgt);
+  };
+  $("#reject-target").focus();
+}
+
+async function rejectAndRewind(target) {
+  if (!STATE) return;
+  const sp = STATE.session.path;
+  const note = ($("#note") || {}).value || "";
+  setBusy(true, "回退并重建下游");
+  log("✕ 打回到 " + target + "（下游块将重算）");
+  try {
+    const r = await fetch("/api/rewind", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_path: sp, target_stage_id: target, note: note || undefined }),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.detail || ("HTTP " + r.status));
+    }
+    const st = await r.json();
+    STATE = st; DRAFT = {};
+    render();
+    flash("已打回到 " + target + "，下游块将重新计算", "ok");
+  } catch (e) {
+    log("✕ 回退失败：" + e.message, "err");
+    flash("回退失败：" + e.message, "err");
+  } finally {
+    setBusy(false);
+  }
+}
+
 // ---------- A3 Excel 下载 / 上传 ----------
 function a3DownloadExcel() {
   if (!STATE || !STATE.session) { flash("请先发起流程", "err"); return; }
@@ -759,15 +831,15 @@ function renderActions() {
   const note = document.createElement("input");
   note.type = "text"; note.className = "note"; note.id = "note"; note.placeholder = "备注（可选，记入审计）";
   box.appendChild(note);
-  const mk = (label, cls, action) => {
+  const mk = (label, cls, action, onclick) => {
     const b = document.createElement("button"); b.className = cls; b.textContent = label;
     b.dataset.label = label;
-    b.onclick = () => decide(action, b); box.appendChild(b);
+    b.onclick = onclick || (() => decide(action, b)); box.appendChild(b);
   };
   if (opts.includes("approved")) mk("✓ 批准 / 放行", "btn-approve", "approved");
   if (opts.includes("revised")) mk("✎ 修订后放行", "btn-revise", "revised");
   if (opts.includes("skipped")) mk("⏭ 跳过", "btn-skip", "skipped");
-  if (opts.includes("rejected")) mk("✕ 打回", "btn-reject", "rejected");
+  if (opts.includes("rejected")) mk("✕ 打回 / 回退", "btn-reject", "rejected", openRejectPicker);
   bindDraftInputs($("#center"));
 }
 function collectDraft(el) {

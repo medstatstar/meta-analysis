@@ -531,7 +531,8 @@ def _advance_until_pause(sess, debug=False, on_line=None, on_a4_event=None):
     return view
 
 
-def rewind_fullflow(session_path: str, target_stage_id: str, *, debug: bool = False) -> dict:
+def rewind_fullflow(session_path: str, target_stage_id: str, *, debug: bool = False,
+                    on_line=None, on_a4_event=None) -> dict:
     """Phase 2 公开入口：回退到 target 所属块并重算下游，直到回到原闸位/完成。
 
     target 可为块字母（'A'/'B'/'C'）或 stage_id（'A2.literature_search' 等）；
@@ -543,4 +544,4 @@ def rewind_fullflow(session_path: str, target_stage_id: str, *, debug: bool = Fa
     if letter is None:
         return {"error": f"无法解析回退目标块：{target_stage_id!r}"}
     sess.rewind(letter)
-    return _advance_until_pause(sess, debug=debug, on_line=on_line)
+    return _advance_until_pause(sess, debug=debug, on_line=on_line, on_a4_event=on_a4_event)

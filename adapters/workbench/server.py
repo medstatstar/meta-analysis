@@ -251,6 +251,7 @@ class DecideReq(BaseModel):
 class RewindReq(BaseModel):
     session_path: str
     target_stage_id: str
+    note: Optional[str] = None
 
 
 class A4PreviewReq(BaseModel):
@@ -342,6 +343,16 @@ def api_rewind(req: RewindReq):
     out = rewind_fullflow(req.session_path, req.target_stage_id)
     if "error" in out:
         raise HTTPException(400, out["error"])
+    # 审计：打回/回退必须留痕（rejected + 回退目标），human_decisions 在 rewind 中保留不丢
+    sess = FullflowSession.load(req.session_path)
+    sess.record_decision({
+        "stage_id": None, "gate": None, "action": "rejected",
+        "revision": {"rewind_to": req.target_stage_id},
+        "note": (req.note or "") + (f" 打回并回退到 {req.target_stage_id}"
+                                    if not req.note else ""),
+        "decided_by": "workbench",
+    })
+    sess.save()
     ff = out.get("fullflow") or {}
     path = ff.get("session_path")
     if not path:
