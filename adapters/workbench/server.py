@@ -297,20 +297,20 @@ def api_session(path: str):
 
 @app.post("/api/topic_help")
 def api_topic_help(req: TopicHelpReq):
-    # 命中题轨的自包含上游闸：literature_probe 直连 Europe PMC，
-    # 返回真实命中数（Cochrane + PubMed SR/MA），用于选题可行性速览。
-    try:
-        res = literature_probe.dedup_probe(req.topic, year_from=req.year_from, max_results=8)
-    except Exception as e:  # 网络/解析失败 → 优雅降级，不整页冒
-        return {"topic": req.topic, "ok": False, "error": str(e),
-                "layers": {}, "summary": "", "any_error": True}
-    res["ok"] = True
-    # 复用 A1 选题闸门的本地启发式分析（PICOS 推断 / 缺失维度 / 范围预警），
-    # 即「分析结果 + 建议」的来源——原按钮只挂了命中数、漏掉了这部分。
+    # 本地启发式分析（PICOS 推断 / 缺失维度 / 可行性判定）先算，与网络探针解耦：
+    # 即使 Europe PMC 探针失败，分析结果 + 建议仍要输出（用户核心诉求：原按钮漏掉了这部分）。
     try:
         analysis, _ = block_a.a1_topic_selection(req.topic, registry_probe=None)
     except Exception:
         analysis = None
+    # 命中题轨的自包含上游闸：literature_probe 直连 Europe PMC，
+    # 返回真实命中数（Cochrane + PubMed SR/MA），用于选题可行性速览。
+    try:
+        res = literature_probe.dedup_probe(req.topic, year_from=req.year_from, max_results=8)
+        res["ok"] = True
+    except Exception as e:  # 网络/解析失败 → 优雅降级，不整页冒，但 analysis 仍返回
+        res = {"topic": req.topic, "ok": False, "error": str(e),
+               "layers": {}, "summary": "", "any_error": True}
     res["topic_analysis"] = analysis
     return res
 
