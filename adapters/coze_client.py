@@ -1193,7 +1193,8 @@ def download_attachments(attachments, out_dir) -> list:
     return results
 
 
-def execute_tool_cards(cards, out_dir: str = ".", cwd: str | None = None) -> list:
+def execute_tool_cards(cards, out_dir: str = ".", cwd: str | None = None,
+                       on_line=None) -> list:
     """执行 coze 下发的 tool_cards（复用 need_tool 范式）。
 
     - need_tool == "request_upload" → 本地逐个上传 params["_local_files"] 所列文件
@@ -1201,6 +1202,12 @@ def execute_tool_cards(cards, out_dir: str = ".", cwd: str | None = None) -> lis
       返回 AttachmentRef[]。
     - 其他（ct-* 等）→ 查 tool_mapping_meta.json 构造 CLI 执行（草稿兜底）。
     返回 list[{card_ref, need_tool, status, result}]，绝不抛错中断管线。
+
+    on_line: 可选的实时输出回调 f(line: str)，供上层（工作台底部信息栏）展示后台进度。
+      - **不传（默认）**：走原 `subprocess.run(capture_output=True)` 一次性捕获，行为完全不变。
+      - **传入**：改走 `Popen` 逐行流式读 stdout+stderr，每行即时回调，同时收集完整
+        输出供 `_parse_tool_output` 正常解析（结果一致性不受影响）。
+      回调自身抛错被吞掉，绝不影响主流程。
     """
     out_dir = os.path.abspath(out_dir)
     mapping = _load_tool_mapping()
@@ -1244,13 +1251,36 @@ def execute_tool_cards(cards, out_dir: str = ".", cwd: str | None = None) -> lis
                         cmd += [flag, str(params[pname])]
                 for f in (spec.get("fixed_flags") or []):
                     cmd.append(f)
-                proc = subprocess.run(cmd, capture_output=True, text=True,
-                                     timeout=card.get("timeout_sec", 120), cwd=cwd)
-                if proc.returncode != 0:
+                timeout_s = card.get("timeout_sec", 120)
+                if on_line is not None:
+                    # 流式路径：逐行读 stdout（stderr 合并）→ 实时回调，同时收集完整输出。
+                    # 显式 utf-8 + errors=replace：后台进度行含 emoji/中文，避免 Windows
+                    # 默认编码（cp936）解码失败打断检索。
+                    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT, text=True,
+                                            bufsize=1, encoding="utf-8",
+                                            errors="replace", cwd=cwd)
+                    chunks = []
+                    for line in proc.stdout:
+                        chunks.append(line)
+                        try:
+                            on_line(line.rstrip())
+                        except Exception:  # noqa: BLE001 — 展示层回调失败不阻断检索
+                            pass
+                    proc.stdout.close()
+                    proc.wait(timeout=timeout_s)
+                    stdout_text, stderr_text, rc = "".join(chunks), "", proc.returncode
+                else:
+                    # 原路径（默认）：一次性捕获，行为与改动前完全一致。
+                    proc = subprocess.run(cmd, capture_output=True, text=True,
+                                          timeout=timeout_s, cwd=cwd)
+                    stdout_text, stderr_text, rc = proc.stdout, proc.stderr, proc.returncode
+                if rc != 0:
                     outputs.append({"card_ref": cref, "need_tool": need, "status": "error",
-                                    "result": {"stderr": proc.stderr[:500], "draft_answer": draft}})
+                                    "result": {"stderr": (stderr_text or "")[:500],
+                                               "draft_answer": draft}})
                     continue
-                res = _parse_tool_output(proc.stdout)
+                res = _parse_tool_output(stdout_text)
                 outputs.append({"card_ref": cref, "need_tool": need, "status": "ok", "result": res})
         except Exception as e:  # noqa: BLE001
             outputs.append({"card_ref": cref, "need_tool": need, "status": "error",

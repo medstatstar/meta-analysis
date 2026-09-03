@@ -62,6 +62,14 @@
   .btn-skip { background: var(--soft); color: #fff; }
   .btn-reject { background: var(--red); color: #fff; }
   .btn-ghost { background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
+  .btn-mini { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px;
+              font-size: 12px; border-radius: 6px; border: 1px solid var(--accent);
+              background: var(--accent); color: #fff; cursor: pointer; line-height: 1.2; }
+  .btn-mini.file { background: var(--green); border-color: var(--green); }
+  .rl-xlsx-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                 margin-bottom: 10px; padding: 8px 10px; background: var(--soft);
+                 border-radius: 6px; border: 1px solid var(--line); }
+  .rl-xlsx-hint { font-size: 12px; color: var(--muted); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .note { flex: 1; min-width: 200px; }
   .hint { font-size: 12px; color: var(--muted); margin: 4px 0 12px; line-height: 1.5; }
@@ -93,9 +101,60 @@
   .a4title { font-weight:500; max-width:42%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .a4badge { flex:0 0 auto; }
   .a4reason { color:var(--muted); font-size:12px; margin-left:auto; text-align:right; max-width:46%; }
+  /* 底部信息栏：滚动显示后台输出 / 进度 */
+  body { padding-bottom: 176px; }
+  body.log-collapsed { padding-bottom: 46px; }
+  #logbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+            background: var(--panel); border-top: 1px solid var(--line);
+            box-shadow: 0 -2px 10px rgba(15,23,42,.06); }
+  #logbar-head { display: flex; align-items: center; gap: 10px; padding: 7px 16px;
+                 cursor: pointer; user-select: none; font-size: 12px; }
+  #logbar-head .title { font-weight: 700; }
+  #logbar-head .spacer { margin-left: auto; }
+  #logbar-body { height: 130px; overflow-y: auto; padding: 4px 16px 10px;
+                 font-family: ui-monospace, Menlo, Consolas, monospace;
+                 font-size: 12px; line-height: 1.65; }
+  #logbar.collapsed #logbar-body { display: none; }
+  .logline { display: flex; gap: 8px; white-space: pre-wrap; word-break: break-word; }
+  .logline .ts { color: var(--muted); flex: 0 0 auto; }
+  .logline .msg { color: var(--ink); }
+  .logline.err .msg { color: var(--red); font-weight: 600; }
+  .logline.warn .msg { color: var(--soft); }
+  .logline.ok .msg { color: var(--green); }
+  .spin { display: inline-block; animation: spin360 .9s linear infinite; }
+  @keyframes spin360 { to { transform: rotate(360deg); } }
+
+  /* A3 初筛逐条裁决：筛选栏 / 展开详情 / 三态着色 */
+  .rl-filter { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .rlf-btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+             padding: 5px 12px; border-radius: 16px; cursor: pointer; font-size: 13px; }
+  .rlf-btn:hover { border-color: var(--accent); }
+  .rlf-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .rl-filter-hint { color: var(--muted); font-size: 12px; margin-left: 4px; }
+  table.rl th, table.rl td { vertical-align: top; }
+  .rl-row.dec-include { background: var(--green-soft); }
+  .rl-row.dec-exclude { background: var(--red-soft); }
+  .rl-row.dec-uncertain { background: var(--soft-soft); }
+  .rl-title { cursor: pointer; }
+  .rl-toggle { display: inline-block; width: 14px; color: var(--accent); user-select: none; }
+  .rl-title-link { color: var(--accent); text-decoration: none; cursor: pointer; }
+  .rl-title-link:hover { text-decoration: underline; }
+  tr.rl-detail { display: none; }
+  tr.rl-detail.open { display: table-row; }
+  .rl-detail-inner { padding: 10px 12px; background: var(--bg); border: 1px dashed var(--line);
+                      border-radius: 6px; margin: 2px 0; display: grid;
+                      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 18px; }
+  .rl-df { font-size: 12.5px; line-height: 1.5; }
+  .rl-df.wide { grid-column: 1 / -1; }
+  .rl-df-k { color: var(--muted); display: inline-block; min-width: 64px; margin-right: 6px; }
+  .rl-df-v { color: var(--ink); }
+  .rl-sel { padding: 3px 6px; border-radius: 5px; border: 1px solid var(--line); font-size: 13px; }
+  .rl-sel-include { background: var(--green-soft); color: var(--green); border-color: var(--green); }
+  .rl-sel-exclude { background: var(--red-soft); color: var(--red); border-color: var(--red); }
+  .rl-sel-uncertain { background: var(--soft-soft); color: var(--soft); border-color: var(--soft); }
 </style>
 </head>
-<body>
+<body class="log-collapsed">
 <header>
   <h1>🧬 meta-analysis 工作台</h1>
   <span class="meta" id="hdr-meta"></span>
@@ -107,6 +166,17 @@
   <div class="card" id="center"><!-- node form / start --></div>
   <div class="card"><h3>审计日志</h3><div class="audit" id="audit"><span class="empty">暂无决策</span></div>
     <div class="rewind">↺ 回退重跑：Phase 2</div></div>
+</div>
+
+<div id="logbar" class="collapsed">
+  <div id="logbar-head" onclick="toggleLog()">
+    <span class="title">🗂 后台输出</span>
+    <span id="logbar-status"><span class="pill">✓ 空闲</span></span>
+    <span class="spacer"></span>
+    <span id="logbar-count" class="rewind">0 行</span>
+    <span id="logbar-toggle">▴ 展开</span>
+  </div>
+  <div id="logbar-body"><div id="log-lines"></div></div>
 </div>
 
 <script>
@@ -121,6 +191,38 @@ const STAGE_ORDER = [
 
 let STATE = null;       // 当前后端状态
 let DRAFT = {};         // revision_key -> 编辑后的值
+
+// ---------- A3 初筛逐条裁决：筛选 / 展开 / 三态下拉 ----------
+let A3_FILTER = "";                       // 当前筛选的决策值（"" = 全部）
+const A3_EXPANDED = new Set();            // 已展开详情的原始行索引
+let _LAST_ROWLIST = null;                 // 最近一次渲染的 rowlist 上下文
+
+function draftCell(rk, i, k, fallback) {
+  const arr = DRAFT[rk];
+  if (arr && arr[i] && arr[i][k] !== undefined) return arr[i][k];
+  return fallback;
+}
+function bindDraftInputs(root) {
+  (root || document).querySelectorAll("[data-rk]").forEach(el => {
+    el.addEventListener("input", () => collectDraft(el));
+    el.addEventListener("change", () => collectDraft(el));
+  });
+}
+function reRenderRowlist(rk) {
+  if (!_LAST_ROWLIST || _LAST_ROWLIST.rk !== rk) return;
+  const el = document.getElementById("rowlist-" + rk);
+  if (!el) return;
+  el.outerHTML = `<div id="rowlist-${rk}">${renderRowlist(_LAST_ROWLIST.p, _LAST_ROWLIST.data, {})}</div>`;
+  bindDraftInputs(document.getElementById("rowlist-" + rk));
+}
+function a3SetFilter(v) {
+  A3_FILTER = (A3_FILTER === v) ? "" : v;   // 同值再点 = 取消筛选
+  reRenderRowlist("screened");
+}
+function a3ToggleExpand(i) {
+  if (A3_EXPANDED.has(i)) A3_EXPANDED.delete(i); else A3_EXPANDED.add(i);
+  reRenderRowlist("screened");
+}
 
 const $ = (s, el=document) => el.querySelector(s);
 // 默认后端地址（与 launch_workbench.py 默认 --port 8765 一致）。
@@ -164,15 +266,33 @@ function clearFlash() {
 
 // ---------- 启动 / 加载会话 ----------
 async function startSession(topic, opt) {
-  try {
-    const s = await api("/api/start", {method:"POST", body: JSON.stringify(
-      Object.assign({topic, max_results:50, effect_measure:"OR", nma:false}, opt||{}))});
-    STATE = s; DRAFT = {}; location.hash = "#" + encodeURIComponent(s.session.path);
-    render();
-  } catch (e) {
-    location.hash = "";   // 启动失败：清掉可能残留的坏 hash，避免下次重载再撞同一错误
-    flash("启动失败：" + e.message, "err");
-  }
+  const btn = document.getElementById("btn-start");
+  const label = btn ? (btn.dataset.label || "启动流程") : "启动流程";
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ 启动中…"; }
+  setBusy(true, "启动流程");
+  log("▶ 提交启动请求…");
+  await streamPost("/api/start_stream", Object.assign(
+      {topic, max_results:50, effect_measure:"OR", nma:false}, opt||{}), {
+    onEvent(ev) {
+      if (ev.event === "log") log(ev.msg, ev.level);
+      else if (ev.event === "tick") { /* 计时已在底部状态栏显示，不刷屏 */ }
+      else if (ev.event === "done") {
+        if (ev.state) {
+          STATE = ev.state; DRAFT = {};
+          location.hash = "#" + encodeURIComponent(ev.state.session.path);
+          render();
+        }
+      } else if (ev.event === "error") { log("✕ " + ev.message, "err"); flash(ev.message, "err"); }
+    },
+    onError(msg) {
+      // 启动失败：清掉可能残留的坏 hash，避免下次重载再撞同一错误
+      location.hash = "";
+      log("✕ " + msg, "err");
+      flash("启动失败：" + msg, "err");
+    }
+  });
+  setBusy(false);
+  if (btn) { btn.disabled = false; btn.textContent = label; }
 }
 async function loadSession(path) {
   try {
@@ -202,14 +322,71 @@ async function decide(action, btn) {
   const body = { session_path: STATE.session.path, stage_id: aw.stage_id,
                  action: action,
                  revision: Object.keys(DRAFT).length ? DRAFT : null, note };
-  try {
-    const s = await api("/api/decide", {method:"POST", body: JSON.stringify(body)});
-    STATE = s; DRAFT = {}; render();
-    flash("已提交：" + action + (s.await.kind === "done" ? " · 流程完成" : ""), "ok");
-  } catch (e) {
-    // 失败：恢复按钮（保留用户已填内容，不重渲染以免文本框被重置）
+  setBusy(true, "提交决策");
+  log("▶ " + aw.stage_id + " → " + action
+      + (body.revision ? "（含修订，将重算下游阶段）" : ""));
+  await streamPost("/api/decide_stream", body, {
+    onEvent(ev) {
+      if (ev.event === "log") log(ev.msg, ev.level);
+      else if (ev.event === "done") {
+        if (ev.state) { STATE = ev.state; DRAFT = {}; render(); }
+        const done = ev.state && ev.state.await && ev.state.await.kind === "done";
+        flash("已提交：" + action + (done ? " · 流程完成" : ""), "ok");
+      } else if (ev.event === "error") { log("✕ " + ev.message, "err"); flash(ev.message, "err"); }
+    },
+    onError(msg) { log("✕ " + msg, "err"); flash("提交失败：" + msg, "err"); }
+  });
+  setBusy(false);
+  // 未推进（失败）：恢复按钮，保留用户已填内容，不重渲染以免文本框被重置
+  if (STATE && STATE.await && STATE.await.stage_id === aw.stage_id) {
     buttons.forEach(b => { b.disabled = false; if (b.dataset.label) b.textContent = b.dataset.label; });
-    flash("提交失败：" + e.message, "err");
+  }
+}
+
+// ---------- A3 Excel 下载 / 上传 ----------
+function a3DownloadExcel() {
+  if (!STATE || !STATE.session) { flash("请先发起流程", "err"); return; }
+  const sp = STATE.session.path;
+  log("正在导出 A3 裁决表 (xlsx)…");
+  setBusy(true, "导出 Excel");
+  const a = document.createElement("a");
+  a.href = apiUrl("/api/export_screening?session_path=" + encodeURIComponent(sp));
+  a.download = "A3_裁决表.xlsx";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setBusy(false);
+  log("导出完成，已启动下载：A3_裁决表.xlsx（含全部元数据 + 裁决/理由列）", "ok");
+}
+
+async function a3UploadExcel(fileEl) {
+  const file = fileEl.files && fileEl.files[0];
+  if (!file) return;
+  if (!STATE || !STATE.session) { flash("请先发起流程", "err"); return; }
+  const sp = STATE.session.path;
+  log("正在上传并更新裁决表：" + file.name);
+  setBusy(true, "上传 Excel 并更新");
+  try {
+    const fd = new FormData();
+    fd.append("session_path", sp);
+    fd.append("file", file);
+    const resp = await fetch(apiUrl("/api/upload_screening"), { method: "POST", body: fd });
+    if (!resp.ok) {
+      const e = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(e.detail || ("HTTP " + resp.status));
+    }
+    const data = await resp.json();
+    STATE = data.state; DRAFT = {}; render();
+    const s = data.stats || {};
+    log(`Excel 更新完成：匹配 ${s.matched || 0} / 更新 ${s.updated || 0} / 未匹配 ${s.unmatched || 0}。`
+        + `已回到 A3 软停，请复核后点「修订后放行」。`, "ok");
+    flash("Excel 已更新并回写 A3", "ok");
+  } catch (e) {
+    log("上传失败：" + e.message, "err");
+    flash("上传失败：" + e.message, "err");
+  } finally {
+    setBusy(false);
+    fileEl.value = "";  // 允许重复选同一文件触发 onchange
   }
 }
 
@@ -256,8 +433,8 @@ function renderStart(prefill) {
       <p class="hint">要同时比较 3 种及以上干预（如 A vs B vs C）就勾选；只做两两比较则留空。</p>
 
       <div class="actions">
-        <button class="btn-approve" onclick="doStart()">启动流程</button>
-        <button class="btn-ghost" id="btn-help" onclick="topicHelp()">🧭 帮助选题（可行性速览）</button>
+        <button class="btn-approve" id="btn-start" data-label="启动流程" onclick="doStart()">启动流程</button>
+        <button class="btn-ghost" id="btn-help" data-label="🧭 帮助选题（可行性速览）" onclick="topicHelp()">🧭 帮助选题（可行性速览）</button>
       </div>
     </div>`;
 }
@@ -279,15 +456,21 @@ async function topicHelp() {
   LAST_TOPIC = t.trim();
   const btn = $("#btn-help");
   if (btn) { btn.disabled = true; btn.textContent = "\u23f3 查询中…"; }
+  setBusy(true, "选题速览");
+  log("▶ 选题可行性速览：查询中…");
   const yfRaw = ($("#yf") || {}).value || "";
   const yf = yfRaw.trim() ? +yfRaw : null;
   try {
     const r = await api("/api/topic_help", {method:"POST",
       body: JSON.stringify({topic: LAST_TOPIC, year_from: yf})});
     renderTopicHelp(r);
+    log("✓ 速览完成");
+    setBusy(false);
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = "\ud83d\udedd 帮助选题（可行性速览）"; }
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label; }
+    log("✕ 选题速览失败：" + e.message, "err");
     flash("选题速览失败：" + e.message, "err");
+    setBusy(false);
   }
 }
 function renderTopicHelp(r) {
@@ -392,6 +575,16 @@ function renderPanel(p, ctx) {
       : `<div class="json">${esc(val)}</div>`;
   } else if (p.kind === "rowlist") {
     inner = renderRowlist(p, data, ctx);
+    // A3 初筛裁决面板：在列表上方挂 Excel 下载/上传工具栏
+    if (p.filter_by === "decision") {
+      inner = `<div class="rl-xlsx-bar">
+          <button class="btn-mini" onclick="a3DownloadExcel()">⬇ 下载裁决表 (Excel)</button>
+          <label class="btn-mini file">⬆ 上传更新
+            <input type="file" accept=".xlsx" onchange="a3UploadExcel(this)" style="display:none">
+          </label>
+          <span class="rl-xlsx-hint">在 Excel 中改「裁决 / 理由」两列后上传，自动按 DOI / 标题匹配回写</span>
+        </div>` + inner;
+    }
   } else if (p.kind === "json") {
     inner = `<div class="json">${esc(JSON.stringify(data, null, 2))}</div>`;
   } else {
@@ -401,27 +594,66 @@ function renderPanel(p, ctx) {
 }
 
 function renderRowlist(p, data, ctx) {
+  _LAST_ROWLIST = {rk: p.revision_key, p, data};
   if (!Array.isArray(data) || !data.length)
     return `<div class="empty">（无数据）</div>`;
-  let cols = p.columns === "auto"
+  const rk = p.revision_key;
+  const fb = p.filter_by, fopts = p.filter_options;
+  const cols = p.columns === "auto"
     ? Object.keys(data[0]).map(k => ({path:k, label:k, type:"text", editable:false}))
     : p.columns;
-  const rk = p.revision_key;
-  const editable = p.editable;
-  let h = `<table class="grid"><tr>` + cols.map(c => `<th>${c.label}</th>`).join("") + `</tr>`;
-  data.forEach((row, i) => {
-    h += `<tr>` + cols.map(c => {
-      const v = row[c.path];
-      if (editable && c.editable) {
-        if (c.type === "bool")
-          return `<td><input type="checkbox" data-rk="${rk}" data-i="${i}" data-k="${c.path}" ${v?"checked":""}></td>`;
-        return `<td><input type="text" data-rk="${rk}" data-i="${i}" data-k="${c.path}" value="${esc(v ?? "")}"></td>`;
-      }
-      return `<td>${esc(v ?? "—")}</td>`;
-    }).join("") + `</tr>`;
-  });
-  h += `</table>`;
-  return h;
+  const ncol = cols.length;
+  let head = "";
+  if (fb && fopts) {
+    head += `<div class="rl-filter">` +
+      fopts.map(([v, l]) => {
+        const arg = (typeof v === "string") ? "'" + v + "'" : v;
+        return `<button type="button" class="rlf-btn ${A3_FILTER === v ? "active" : ""}" onclick="a3SetFilter(${arg})">${l}</button>`;
+      }).join("") +
+      `<span class="rl-filter-hint">点筛选按钮可单独查看；再次点击取消</span></div>`;
+  }
+  const body = data.map((row, i) => {
+    const fv = fb ? (row[fb] ?? "") : "";
+    if (fb && A3_FILTER && String(fv) !== String(A3_FILTER)) return "";  // 筛选不匹配：跳过整行（含详情）
+    const dec = draftCell(rk, i, "decision", row.decision);
+    const cls = "rl-row " + (dec ? "dec-" + dec : "");
+    const cells = cols.map(c => {
+      const raw = draftCell(rk, i, c.path, row[c.path]);
+      if (c.editable && c.type === "bool")
+        return `<td><input type="checkbox" data-rk="${rk}" data-i="${i}" data-k="${c.path}" ${raw ? "checked" : ""}></td>`;
+      if (c.editable && c.type === "select")
+        return `<td><select data-rk="${rk}" data-i="${i}" data-k="${c.path}" class="rl-sel rl-sel-${raw}">` +
+               (c.options || []).map(([v, l]) => `<option value="${esc(v)}" ${String(raw) === String(v) ? "selected" : ""}>${esc(l)}</option>`).join("") +
+               `</select></td>`;
+      if (c.editable)
+        return `<td><input type="text" data-rk="${rk}" data-i="${i}" data-k="${c.path}" value="${esc(raw ?? "")}"></td>`;
+      if (c.type === "list") return `<td>${esc(Array.isArray(raw) ? raw.join(", ") : (raw ?? "—"))}</td>`;
+      if (c.type === "link") return `<td>${raw ? `<a href="${esc(raw)}" target="_blank" rel="noopener">链接</a>` : "—"}</td>`;
+      if (c.type === "bool") return `<td>${raw ? "是" : "否"}</td>`;
+      if (c.expand)
+        return `<td class="rl-title"><span class="rl-toggle ${A3_EXPANDED.has(i) ? "open" : ""}" onclick="a3ToggleExpand(${i})">${A3_EXPANDED.has(i) ? "▾" : "▸"}</span>` +
+               `<a class="rl-title-link" onclick="a3ToggleExpand(${i})">${esc(raw ?? "—")}</a></td>`;
+      return `<td>${esc(raw ?? "—")}</td>`;
+    }).join("");
+    let det = "";
+    const df = p.detail_fields || [];
+    if (df.length) {
+      const open = A3_EXPANDED.has(i);
+      const din = df.map(d => {
+        const v = draftCell(rk, i, d.path, row[d.path]);
+        let valHtml;
+        if (d.type === "list") valHtml = esc(Array.isArray(v) ? v.join(", ") : (v ?? "—"));
+        else if (d.type === "link") valHtml = v ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : "—";
+        else if (d.type === "bool") valHtml = v ? "是" : "否";
+        else valHtml = esc(v ?? "—");
+        return `<div class="rl-df ${d.type === "para" ? "wide" : ""}"><span class="rl-df-k">${esc(d.label)}</span><span class="rl-df-v">${valHtml}</span></div>`;
+      }).join("");
+      det = `<tr class="rl-detail ${open ? "open" : ""}"><td colspan="${ncol}"><div class="rl-detail-inner">${din}</div></td></tr>`;
+    }
+    return `<tr class="${cls}" data-i="${i}">${cells}</tr>${det}`;
+  }).join("");
+  const table = `<table class="grid rl"><tr>${cols.map(c => `<th>${esc(c.label)}</th>`).join("")}</tr>${body}</table>`;
+  return `<div id="rowlist-${rk}">${head}${table}</div>`;
 }
 
 function renderActions() {
@@ -439,11 +671,7 @@ function renderActions() {
   if (opts.includes("revised")) mk("✎ 修订后放行", "btn-revise", "revised");
   if (opts.includes("skipped")) mk("⏭ 跳过", "btn-skip", "skipped");
   if (opts.includes("rejected")) mk("✕ 打回", "btn-reject", "rejected");
-  // 收集 editable 改动 → DRAFT
-  $("#center").querySelectorAll("[data-rk]").forEach(el => {
-    el.addEventListener("input", () => collectDraft(el));
-    el.addEventListener("change", () => collectDraft(el));
-  });
+  bindDraftInputs($("#center"));
 }
 function collectDraft(el) {
   clearFlash();   // 用户开始编辑 → 旧提示自动消失
@@ -546,36 +774,25 @@ function startA4Preview() {
        <span class="a4reason">${esc(n.reason || "")}</span></div>`).join("");
   }
 
-  fetch(apiUrl("/api/a4_preview"), {method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({session_path: STATE.session.path})})
-    .then(r => {
-      if (!r.ok) throw new Error(r.status + " " + r.statusText);
-      const reader = r.body.getReader(); const dec = new TextDecoder();
-      let buf = "";
-      function pump() {
-        return reader.read().then(({done, value}) => {
-          if (done) { btn.disabled = false; return; }
-          buf += dec.decode(value, {stream: true});
-          let idx;
-          while ((idx = buf.indexOf("\n\n")) >= 0) {
-            const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
-            const line = chunk.split("\n").find(l => l.startsWith("data:"));
-            if (!line) continue;
-            const ev = JSON.parse(line.slice(5).trim());
-            if (ev.event === "done") {
-              const r0 = ev.result || {};
-              statusEl.textContent = `完成 · 下载 ${r0.n_downloaded} / 抽取 ${r0.n_extracted} / 待上传 ${(r0.needs_user_upload||[]).length}`;
-              if ((r0.needs_user_upload || []).length) renderA4Upload(r0.needs_user_upload);
-            } else if (ev.event === "error") {
-              statusEl.textContent = "错误"; flash(ev.message, "err");
-            } else { addRow(ev); }
-          }
-          return pump();
-        });
-      }
-      return pump();
-    })
-    .catch(e => { btn.disabled = false; statusEl.textContent = "失败"; flash("预览失败：" + e.message, "err"); });
+  setBusy(true, "A4 实时预览");
+  log("▶ A4 实时预览：开始下载 + 抽取…");
+  streamPost("/api/a4_preview", {session_path: STATE.session.path}, {
+    onEvent(ev) {
+      if (ev.event === "done") {
+        const r0 = ev.result || {};
+        statusEl.textContent = `完成 · 下载 ${r0.n_downloaded} / 抽取 ${r0.n_extracted} / 待上传 ${(r0.needs_user_upload||[]).length}`;
+        log(`✓ A4 预览完成 · 下载 ${r0.n_downloaded} / 抽取 ${r0.n_extracted} / 待上传 ${(r0.needs_user_upload||[]).length}`, "ok");
+        if ((r0.needs_user_upload || []).length) renderA4Upload(r0.needs_user_upload);
+      } else if (ev.event === "error") {
+        statusEl.textContent = "错误"; log("✕ " + ev.message, "err"); flash(ev.message, "err");
+      } else if (ev.event === "extracted" || ev.event === "failed") {
+        addRow(ev);
+        log(`  #${ev.index} ${ev.event === "extracted" ? "✓ 已抽取" : "✕ 需上传"} ${ev.title || ev.doi || ""}`
+            + (ev.reason ? " · " + ev.reason : ""), ev.event === "failed" ? "warn" : "info");
+      } else { addRow(ev); }
+    },
+    onError(msg) { statusEl.textContent = "失败"; log("✕ " + msg, "err"); flash("预览失败：" + msg, "err"); }
+  }).then(() => { btn.disabled = false; setBusy(false); });
 }
 
 function renderAudit() {
@@ -595,6 +812,87 @@ function esc(v) {
   return String(v).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 }
 
+// ---------- 底部信息栏：滚动显示后台输出 / 进度 ----------
+let BUSY = 0, LOG_N = 0, TICK0 = 0, TICK_TMR = null;
+
+function toggleLog() {
+  const bar = document.getElementById("logbar");
+  bar.classList.toggle("collapsed");
+  const col = bar.classList.contains("collapsed");
+  document.body.classList.toggle("log-collapsed", col);
+  document.getElementById("logbar-toggle").textContent = col ? "▴ 展开" : "▾ 收起";
+}
+function log(msg, level) {
+  const wrap = document.getElementById("log-lines");
+  if (!wrap) return;
+  const d = new Date();
+  const ts = [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map(n => String(n).padStart(2, "0")).join(":");
+  const el = document.createElement("div");
+  el.className = "logline " + (level || "info");
+  el.innerHTML = `<span class="ts">${ts}</span><span class="msg"></span>`;
+  el.querySelector(".msg").textContent = msg;      // textContent：后台文本不解析为 HTML
+  wrap.appendChild(el);
+  LOG_N++;
+  document.getElementById("logbar-count").textContent = LOG_N + " 行";
+  const bodyEl = document.getElementById("logbar-body");
+  bodyEl.scrollTop = bodyEl.scrollHeight;          // 自动滚到最新一行
+  while (wrap.children.length > 500) wrap.removeChild(wrap.firstChild);  // 防止长跑撑爆 DOM
+}
+// 全局忙态：计数支持并发请求；忙时自动展开信息栏并起计时器
+function setBusy(on, label) {
+  BUSY = Math.max(0, BUSY + (on ? 1 : -1));
+  const st = document.getElementById("logbar-status");
+  if (BUSY > 0) {
+    if (label) st.innerHTML = `<span class="pill soft">⏳ ${esc(label)}</span>`;
+    if (!TICK_TMR) {
+      TICK0 = Date.now();
+      TICK_TMR = setInterval(() => {
+        const s = ((Date.now() - TICK0) / 1000).toFixed(1);
+        st.innerHTML = `<span class="pill soft">⏳ <span class="spin">◍</span> 运行中 ${s}s</span>`;
+      }, 200);
+      const bar = document.getElementById("logbar");
+      if (bar.classList.contains("collapsed")) toggleLog();
+    }
+  } else if (TICK_TMR) {
+    clearInterval(TICK_TMR); TICK_TMR = null;
+    st.innerHTML = `<span class="pill">✓ 空闲</span>`;
+  }
+}
+
+// SSE 通用消费（POST + 逐条回调）。A4 预览原本自己写一份解析，收敛到此处共用。
+function streamPost(path, body, h) {
+  return fetch(apiUrl(path), {method:"POST", headers:{"Content-Type":"application/json"},
+                              body: JSON.stringify(body || {})})
+    .then(r => {
+      if (!r.ok) throw new Error(r.status + " " + r.statusText);
+      const reader = r.body.getReader(); const dec = new TextDecoder();
+      let buf = "";
+      function pump() {
+        return reader.read().then(({done, value}) => {
+          if (done) return;
+          buf += dec.decode(value, {stream: true});
+          let idx;
+          while ((idx = buf.indexOf("\n\n")) >= 0) {
+            const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+            const line = chunk.split("\n").find(l => l.startsWith("data:"));
+            if (!line) continue;
+            let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+            if (h.onEvent) h.onEvent(ev);
+          }
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(e => {
+      const msg = (e instanceof TypeError)
+        ? "无法连接后端（" + e.message + "）。请通过 " + WB_BASE + "/ 打开工作台，不要直接双击 HTML。"
+        : e.message;
+      if (h.onError) h.onError(msg);
+    });
+}
+
 // ---------- 初始化 ----------
 $("#btn-new").onclick = () => { STATE = null; location.hash = ""; renderStart(); };
 window.addEventListener("hashchange", () => {
@@ -602,6 +900,7 @@ window.addEventListener("hashchange", () => {
   if (h) loadSession(h); else { STATE = null; render(); }
 });
 window.addEventListener("DOMContentLoaded", () => {
+  log("就绪。发起流程后，后台输出与进度会实时显示在这里。");
   const h = decodeURIComponent(location.hash.slice(1));
   if (h) loadSession(h); else renderStart();
 });

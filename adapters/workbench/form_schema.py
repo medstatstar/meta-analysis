@@ -55,25 +55,37 @@ SCHEMA = {
     "A2.literature_search": {
         "title": "检索策略与覆盖确认",
         "gate_type": "soft",
-        "intro": "核对各数据库条数与检索状态：search_status≠ok 或某库缺位 = 可能沉默漏检"
-                 "（无 token 静默跳库 / skill 缺失）。可修订查询式（重跑于 Phase 2 生效）。",
+        "intro": "检索式已做「翻译 + 优化」（中文主题 → 干净英文布尔检索式，核心词同义 OR 扩展），"
+                 "并据此多库检索。核对各数据库条数与检索状态：search_status≠ok 或某库缺位 = 可能沉默漏检"
+                 "（无 token 静默跳库 / skill 缺失）。可修订检索式（重跑于 Phase 2 生效）。",
         "panels": [
             {"label": "检索概览", "kind": "object", "path": "nha.coverage", "fields": [
                 {"path": "total", "label": "合并总数"},
                 {"path": "search_status", "label": "检索状态", "alert_if_not": "ok"},
                 {"path": "retracted", "label": "撤稿数"},
+                {"path": "fully_translated", "label": "是否完整翻译"},
                 {"path": "year_from", "label": "起始年"},
                 {"path": "max_results", "label": "检索上限"},
             ]},
-            {"label": "各数据库条数", "kind": "dicttable", "path": "nha.coverage.by_source"},
-            {"label": "查询式", "kind": "textarea", "path": "nha.coverage.query",
+            {"label": "原始主题（输入）", "kind": "object", "path": "nha.coverage", "fields": [
+                {"path": "raw_topic", "label": "原始主题"},
+            ]},
+            {"label": "优化翻译后检索式（可编辑）", "kind": "textarea", "path": "nha.coverage.translated_query",
              "editable": True, "revision_key": "query"},
+            {"label": "未翻译残留", "kind": "object", "path": "nha.coverage", "fields": [
+                {"path": "untranslated", "label": "未翻译词（应留空）"},
+            ]},
+            {"label": "各数据库条数", "kind": "dicttable", "path": "nha.coverage.by_source"},
         ],
     },
     "A3.screening": {
         "title": "初筛逐条裁决",
         "gate_type": "soft",
-        "intro": "逐条确认或翻转 Include/Exclude，重点复核剔除项以防误剔关键研究。",
+        "intro": "逐条裁决：纳入 / 剔除 / 低置信（低置信 = 需人工定夺，默认随纳入走）。"
+                 "点标题行可展开刊名、日期、卷期页、作者、摘要等详情；"
+                 "上方筛选按钮可按裁决结果单独查看。"
+                 "也可用「⬇ 下载裁决表」导出 Excel、改完「裁决/理由」两列后「⬆ 上传更新」批量回写。"
+                 "重点复核剔除项以防误剔关键研究。",
         "panels": [
             {"label": "筛选统计", "kind": "object", "path": "nha.summary", "fields": [
                 {"path": "n_total", "label": "去重总数"},
@@ -82,9 +94,42 @@ SCHEMA = {
                 {"path": "n_uncertain", "label": "低置信"},
             ]},
             {"label": "逐条决策", "kind": "rowlist", "path": "nha.decisions",
-             "editable": True, "revision_key": "screened", "columns": [
-                {"path": "title", "label": "标题", "type": "text", "editable": False},
-                {"path": "include", "label": "纳入", "type": "bool", "editable": True},
+             "editable": True, "revision_key": "screened",
+             # 三态筛选栏（按 decision 字段过滤显示）
+             "filter_by": "decision",
+             "filter_options": [["", "全部"], ["include", "纳入"],
+                                ["exclude", "剔除"], ["uncertain", "低置信"]],
+             # 点行展开的详情字段（后台 _A3_META_KEYS 已透传，缺值显示 —）
+             "detail_fields": [
+                 {"path": "journal", "label": "刊名"},
+                 {"path": "publication_date", "label": "发表日期"},
+                 {"path": "year", "label": "年份"},
+                 {"path": "volume", "label": "卷"},
+                 {"path": "issue", "label": "期"},
+                 {"path": "page", "label": "页码"},
+                 {"path": "authors", "label": "作者", "type": "list"},
+                 {"path": "study_type", "label": "研究类型"},
+                 {"path": "cited_by_count", "label": "被引次数"},
+                 {"path": "relevance_score", "label": "相关性评分"},
+                 {"path": "doi", "label": "DOI"},
+                 {"path": "pmid", "label": "PMID"},
+                 {"path": "source", "label": "来源库"},
+                 {"path": "language", "label": "语言"},
+                 {"path": "is_retracted", "label": "已撤稿", "type": "bool"},
+                 {"path": "keywords", "label": "关键词", "type": "list"},
+                 {"path": "url", "label": "链接", "type": "link"},
+                 {"path": "abstract_snippet", "label": "摘要", "type": "para"},
+             ],
+             "columns": [
+                {"path": "title", "label": "标题", "type": "text",
+                 "editable": False, "expand": True},
+                {"path": "journal", "label": "刊名", "type": "text", "editable": False},
+                {"path": "year", "label": "年份", "type": "text", "editable": False},
+                {"path": "authors", "label": "作者", "type": "list", "editable": False},
+                {"path": "study_type", "label": "类型", "type": "text", "editable": False},
+                {"path": "decision", "label": "裁决", "type": "select", "editable": True,
+                 "options": [["include", "纳入"], ["exclude", "剔除"],
+                             ["uncertain", "低置信"]]},
                 {"path": "reason", "label": "理由", "type": "text", "editable": True},
             ]},
         ],

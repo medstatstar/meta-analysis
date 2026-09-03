@@ -183,7 +183,7 @@ class FullflowSession:
 # ---------------------------------------------------------------------------
 # 块运行（控制器 → 三块驱动器；复用既有闸语义，不重造）
 # ---------------------------------------------------------------------------
-def _run_block(letter, sess, debug):
+def _run_block(letter, sess, debug, on_line=None):
     cfg = sess.data["cfg"]
     creds = sess.decisions_for_block(letter) or None
     pause = sess.effective_pause_at() or None
@@ -208,7 +208,7 @@ def _run_block(letter, sess, debug):
             max_attempts=cfg.get("max_attempts", 12),
             inclusion_hints=None,
             override_query=a2_rev.get("query"),
-            override_screened=a3_rev.get("screened"))
+            override_screened=a3_rev.get("screened"), on_line=on_line)
     if letter == "B":
         return block_b.run_block_b(
             sess.data["handoff"].get("studies_for_b") or [],
@@ -342,7 +342,8 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
                  effect_measure: str = "OR", nma: bool = False,
                  pause_at=None, extraction_table=None,
                  session_dir: str = ".", debug: bool = False,
-                 pdf_email: str = None, max_attempts: int = 12) -> dict:
+                 pdf_email: str = None, max_attempts: int = 12,
+                 on_line=None) -> dict:
     """启动 fullflow：跑 Block A，遇停靠点即停。返回 = 块信封 + fullflow 视图。
 
     pdf_email / max_attempts 透传给 Block A 的 A4 自动落盘（A3 摘要门控 → OA PDF
@@ -357,10 +358,11 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
            "session_dir": session_dir, "pdf_email": pdf_email,
            "max_attempts": max_attempts}
     sess = FullflowSession.new(topic, cfg, session_dir)
-    return _advance(sess, debug=debug)
+    return _advance(sess, debug=debug, on_line=on_line)
 
 
-def resume_fullflow(session_path: str, decision: dict, *, debug: bool = False) -> dict:
+def resume_fullflow(session_path: str, decision: dict, *, debug: bool = False,
+                    on_line=None) -> dict:
     """带人工决策续跑。自动判断该进下一阶段 / 下一块 / 结束。返回同 run_fullflow。"""
     sess = FullflowSession.load(session_path)
     err = _validate_decision(sess, decision)
@@ -376,7 +378,7 @@ def resume_fullflow(session_path: str, decision: dict, *, debug: bool = False) -
         if tgt is not None and cur in _BLOCK_SEQ and _BLOCK_SEQ.index(tgt) < _BLOCK_SEQ.index(cur):
             sess.record_decision(decision)
             sess.rewind(tgt)
-            return _advance_until_pause(sess, debug=debug)
+            return _advance_until_pause(sess, debug=debug, on_line=on_line)
     sess.record_decision(decision)
     sess.save()
     if action == "rejected":
@@ -433,7 +435,7 @@ def _validate_decision(sess, decision):
     return None
 
 
-def _advance(sess, debug=False):
+def _advance(sess, debug=False, on_line=None):
     """推进：跑 cursor 所指块（含 revision 补丁），遇停即存即返。"""
     letter = sess.cursor["block"]
     if letter == "done":
@@ -454,7 +456,7 @@ def _advance(sess, debug=False):
                                  "handoff_preview": None}}
 
     try:
-        env = _run_block(letter, sess, debug)
+        env = _run_block(letter, sess, debug, on_line=on_line)
     except Exception as e:  # noqa: BLE001 — coze 失败/网络异常返回结构化错误，不推进
         sess.cursor["await_kind"] = sess.cursor.get("await_kind") or "error"
         sess.save()
@@ -493,7 +495,7 @@ def _downstream_blocks(letter):
     return _BLOCK_SEQ[_BLOCK_SEQ.index(letter):]
 
 
-def _advance_until_pause(sess, debug=False):
+def _advance_until_pause(sess, debug=False, on_line=None):
     """rewind 后自动续跑：遇 handoff_confirm 自动批准续跑，遇 pause/gate/done/error 即停。
     使回退后下游真正重算到原闸位/完成态。"""
     for _ in range(len(_BLOCK_SEQ) + 2):
@@ -503,9 +505,9 @@ def _advance_until_pause(sess, debug=False):
                 "stage_id": None, "gate": None, "action": "approved",
                 "note": "rewind 自动续跑：handoff 自动批准", "decided_by": "system_rewind",
             })
-            view = _advance(sess, debug=debug)
+            view = _advance(sess, debug=debug, on_line=on_line)
         elif kind in (None,):
-            view = _advance(sess, debug=debug)
+            view = _advance(sess, debug=debug, on_line=on_line)
         else:
             return {"fullflow": {"session_path": sess.path, "cursor": dict(sess.cursor),
                                  "await": {"kind": kind}}}
@@ -530,4 +532,4 @@ def rewind_fullflow(session_path: str, target_stage_id: str, *, debug: bool = Fa
     if letter is None:
         return {"error": f"无法解析回退目标块：{target_stage_id!r}"}
     sess.rewind(letter)
-    return _advance_until_pause(sess, debug=debug)
+    return _advance_until_pause(sess, debug=debug, on_line=on_line)
