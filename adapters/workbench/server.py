@@ -305,6 +305,13 @@ def api_topic_help(req: TopicHelpReq):
         return {"topic": req.topic, "ok": False, "error": str(e),
                 "layers": {}, "summary": "", "any_error": True}
     res["ok"] = True
+    # 复用 A1 选题闸门的本地启发式分析（PICOS 推断 / 缺失维度 / 范围预警），
+    # 即「分析结果 + 建议」的来源——原按钮只挂了命中数、漏掉了这部分。
+    try:
+        analysis, _ = block_a.a1_topic_selection(req.topic, registry_probe=None)
+    except Exception:
+        analysis = None
+    res["topic_analysis"] = analysis
     return res
 
 

@@ -78,6 +78,13 @@
   .feas-kv .row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--line); }
   .feas-kv .row .k { color: var(--muted); }
   .feas-kv .row .v { font-weight: 600; }
+  .feas-kv .row .v.miss { color: #c0392b; font-weight: 500; }
+  .hint.warn { color: #c0392b; background: #fdecea; border-radius: 6px; padding: 8px 10px; }
+  .hint.ok { color: #1e7e34; }
+  .feas-verdict { border-left: 3px solid var(--accent); }
+  .query { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+           background: var(--code-bg, #f4f5f7); border-radius: 6px; padding: 8px 10px; margin: 6px 0;
+           word-break: break-all; color: var(--ink); }
   .paper { padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
   .paper a { color: var(--accent); text-decoration: none; }
   .paper a:hover { text-decoration: underline; }
@@ -498,6 +505,8 @@ function renderTopicHelp(r) {
   const layers = r.layers || {};
   const co = layers.cochrane || {};
   const pm = layers.pubmed_meta || {};
+  const ana = r.topic_analysis || null;
+  const handoff = r.ct_handoff || {};
   const paperList = (arr) => (arr || []).map(w => {
     const yr = w.year ? ` <span class="yr">(${w.year})</span>` : "";
     const url = w.url ? ` href="${esc(w.url)}" target="_blank" rel="noopener"` : "";
@@ -506,10 +515,36 @@ function renderTopicHelp(r) {
   }).join("") || `<div class="paper">（无）</div>`;
   const coCount = (co.hit_count != null) ? co.hit_count : "探针不可用";
   const pmCount = (pm.hit_count != null) ? pm.hit_count : "探针不可用";
+  // —— 分析结果：PICOS 推断 + 缺失维度 + 可行性判定（来自 A1 选题闸门本地启发式）——
+  const picos = (ana && ana.picos) || {};
+  const picosRows = ["P","I","C","O","S"].map(k => {
+    const v = picos[k];
+    const cls = v ? "" : " miss";
+    return `<div class="row"><span class="k">${k}</span><span class="v${cls}">${v ? esc(v) : "（待填）"}</span></div>`;
+  }).join("");
+  const missing = (ana && ana.missing_dimensions) || [];
+  const missingHtml = missing.length
+    ? `<p class="hint warn">⚠️ 缺失维度：${esc(missing.join("、"))}（本地启发式无法自动推断，请人工补全后再启动）</p>`
+    : `<p class="hint ok">✓ PICOS 五维基本完整</p>`;
+  const verdict = (ana && ana.scope_warning) || "";
+  const verdictHtml = verdict
+    ? `<div class="panel feas-verdict"><div class="pl">可行性判定与建议</div><p class="hint">${esc(verdict)}</p></div>`
+    : "";
+  // —— 衔接建议：把探针结果顺手转成可在 ct-literature 复用的检索式 ——
+  const noteHtml = handoff.note
+    ? `<div class="panel"><div class="pl">衔接建议（完整检索）</div><p class="hint">${esc(handoff.note)}</p></div>`
+    : "";
+  const qco = handoff.cochrane_query ? esc(handoff.cochrane_query) : "";
+  const qpm = handoff.pubmed_query ? esc(handoff.pubmed_query) : "";
+  const qHtml = (qco || qpm)
+    ? `<div class="panel"><div class="pl">可复用检索式（贴进 ct-literature）</div>
+         ${qco ? `<div class="query">Cochrane：${qco}</div>` : ""}
+         ${qpm ? `<div class="query">PubMed：${qpm}</div>` : ""}</div>`
+    : "";
   const html = `
-    <div class="start" style="max-width:760px">
+    <div class="start" style="max-width:820px">
       <h2 class="node-title">\ud83d\udedd 选题可行性速览</h2>
-      <p class="node-intro">基于真实文献库（Europe PMC / Cochrane）的命中数，帮你判断这个选题「是否已被充分研究、还值不值得做」。主题：<b>${esc(r.topic || LAST_TOPIC)}</b></p>
+      <p class="node-intro">基于真实文献库（Europe PMC / Cochrane）的命中数 + 本地 PICOS 启发式，帮你判断这个选题「是否已被充分研究、还值不值得做」。主题：<b>${esc(r.topic || LAST_TOPIC)}</b></p>
       <div class="panel"><div class="pl">检索结果（去重探针）</div>
         <div class="feas-kv">
           <div class="row"><span class="k">Cochrane 系统评价</span><span class="v">${coCount} 篇</span></div>
@@ -517,8 +552,15 @@ function renderTopicHelp(r) {
         </div>
         <p class="hint">${esc(r.summary || "")}</p>
       </div>
+      <div class="panel"><div class="pl">PICOS 推断（本地启发式，须人工确认）</div>
+        <div class="feas-kv">${picosRows}</div>
+        ${missingHtml}
+      </div>
+      ${verdictHtml}
       <div class="panel"><div class="pl">Cochrane 顶部文献</div>${paperList(co.works)}</div>
       <div class="panel"><div class="pl">PubMed 顶部文献</div>${paperList(pm.works)}</div>
+      ${noteHtml}
+      ${qHtml}
       <p class="hint">\ud83d\udccc 命中数高 ⇒ 该方向已被充分研究，需找更新颖的角度；命中数低 ⇒ 可能是空白，但要警惕「数据太少做不到」。本速览只是去重快检（真实命中数 + 前几篇），并非全面检索；需要完整检索请用 ct-literature 技能。</p>
       <div class="actions">
         <button class="btn-approve" onclick="startWithTopic()">用此选题启动流程 →</button>
