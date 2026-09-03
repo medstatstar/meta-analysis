@@ -4,6 +4,29 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.9.9] — 2026-09-03 — A4 续跑优化 + 逐篇下载实时进度 + 修复发起流程 TypeError（发布就绪）
+
+> **目标**：① A3 批准后只跑 A4（不再整块重跑 A1→A4）；② A4 下载/抽取逐篇实时上屏；③ 修复 `api_start_stream` / `api_decide_stream` 因 `_call` 闭包未接收 `on_a4_event` 导致的 TypeError。
+> 退出标准：A3 批准仅跑 A4（a1/a2/a3 调用计数 0）；A4 逐篇 `a4` 事件实时流出（生产实测 100s 内 31 条）；发起/决策流程零 TypeError。✅ 全部达成（生产环境端到端实测 + 单元验证）。
+
+### Added
+- **A4 续跑（A3 批准后只跑 A4）**：`fullflow._run_block` A3 已批准且无 A2/A3 修订时设 `start_stage='A4'` 并传 `cached_envelope`（含已算好的 A1/A2/A3）；`block_a.run_block_a` 新增 `start_stage`/`cached_envelope`，命中则 `a4_only=True`，复用缓存 `studies/screened`，跳过 A1/A2/A3 重算（实测调用计数 a1:a2:a3 = 0:0:0，原整块重跑约 7 分钟）。
+- **A4 逐篇实时进度**：`block_a.a4_auto_fetch_and_extract` / `a4_data_extraction` 透传 `on_a4_event` 回调；`server._stream_blocking` 新增 `_make_on_a4()` 把逐篇事件推成 SSE `a4`；前端 `decide` SSE 处理新增 `a4` 分支 → `renderA4Live(ev.a4)` 逐篇进度面板（标题/状态徽章/原因即时刷新）+ `.a4live*` 样式。
+
+### Fixed
+- **发起/决策流程 TypeError（2026-09-03）**：`_stream_blocking` 向 `call(...)` 同时传 `on_line` 与 `on_a4_event`，但 `api_start_stream._call` / `api_decide_stream._call` 仅声明 `on_line=None`、不收 `on_a4_event` → 首次发起流程即抛 `TypeError: ..._call() got an unexpected keyword argument 'on_a4_event'`。两处 `_call` 增加 `on_a4_event=None` 形参并转发给 `run_fullflow` / `resume_fullflow`。`fullflow.py` 下游已全程透传，无需改动。
+- **A4 面板渲染崩溃（Cannot read properties of undefined (reading 'split')）**：`renderPanel` 对无 `path` 字段的面板（a4documents/a4uploads）改 `data=ctx`；`resolve` 空/非字符串 dotted 返回 `ctx` 兜底；`form_schema.py` 自检改 `p.get('path')`。
+
+### Verified
+- 单元验证：monkeypatch `run_fullflow` / `resume_fullflow` 记录器，直接调真实 `api_start_stream` / `api_decide_stream` 端点 → 两处 `_call` 均收到 `on_a4_event`（callable）。
+- 生产实测（会话 `fullflow_session_ff-753d2c8f347d`）：`start_stream` → A1 选题闸（零错误）→ approve A1 → A2 检索 75 篇 → A2 闸 → approve A2 → A3 初筛 75 篇 → A3 闸 → approve A3 → **A4-only 触发 + 100s 内 31 条逐篇 `a4` 事件实时流出，全程零 A1/A2/A3 重跑日志**。
+
+### Notes
+- 解除 2.9.8 的「开发期冻结」备注（DEV_POLICY.json 已不存在）；本次起恢复常规发布流程。
+- 发布包排除：`.gitignore` / `.clawhubignore` 新增 A2/A4 运行产物（`adapters/*.json`、`lit_report.*`、`evidence_log.*`、`references.*`、`pdfs/`、`workbench/runs/` 等），测试内容不进发布包（§16）。
+
+---
+
 ## [2.9.8] — 2026-09-01 — 数据抓取增强 port 进本体：连续型模板 + 无边框表重建 + 校验修正（开发期不发布）
 
 > **目标**：把 seam_test 沙盒验证过的 `pdf_extractor_opt.py` 全量 port 进技能本体 `adapters/pdf_extractor.py`，并修复 port 过程暴露的保真缺陷与 opt 版固有 bug。

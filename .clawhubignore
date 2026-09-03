@@ -64,3 +64,26 @@ scripts/tests/
 Thumbs.db
 *.so
 *.egg-info/
+
+# ── A2/A4 检索与抽取运行产物（会话期，不进发布包，2026-09-03 补，§16；ClawHub 不读 .gitignore 须自列）──
+adapters/openalex.json
+adapters/europepmc.json
+adapters/.merged.json
+adapters/lit_report.*
+adapters/evidence_log.*
+adapters/references*
+adapters/pdfs/
+adapters/workbench/runs/
+adapters/workbench/.merged.json
+adapters/workbench/europepmc.json
+adapters/workbench/openalex.json
+adapters/workbench/evidence_log.*
+adapters/workbench/references*
+adapters/workbench/lit_report.*
+adapters/workbench/pdfs/
+adapters/workbench/driver_demo.py
+cases/fullflow_session_*.json
+scripts/smoke_*.py
+scripts/wb_http_probe.py
+*_out.txt
+_dec2.txt
