@@ -147,11 +147,21 @@ async def _stream_blocking(call, start_msg, stage_hint=""):
 
         return _push
 
+    def _make_on_a4():
+        """a4_stream 逐篇进度事件 → SSE 的 a4 事件（前端实时渲染下载/抽取进度）。"""
+        def _push(ev):
+            try:
+                q.put({"event": "a4", "a4": ev,
+                       "index": ev.get("index"), "total": ev.get("total")})
+            except Exception:  # noqa: BLE001
+                pass
+        return _push
+
     def _worker():
         t0 = time.time()
         threading.Thread(target=_ticker, args=(t0,), daemon=True).start()
         try:
-            out = call(on_line=_make_on_line()) or {}
+            out = call(on_line=_make_on_line(), on_a4_event=_make_on_a4()) or {}
             if out.get("error"):
                 q.put({"event": "log", "level": "warn",
                        "msg": f"引擎返回错误：{out['error']}"})

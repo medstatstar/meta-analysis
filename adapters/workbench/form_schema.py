@@ -315,6 +315,6 @@ if __name__ == "__main__":
         sc = schema_for(sid)
         assert sc["title"], sid
         for p in sc["panels"]:
-            v = resolve(sample, p["path"])
-            print(f"{sid:22s} panel={p['label'][:10]:10s} path={p['path']:28s} -> {'OK' if v is not None else 'MISSING'}")
+            v = resolve(sample, p["path"]) if "path" in p else None
+            print(f"{sid:22s} panel={p['label'][:10]:10s} path={(p.get('path') or '-'):28s} -> {'OK' if v is not None else 'MISSING'}")
     print("FORM_SCHEMA self-check done.")

@@ -974,25 +974,21 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
 
 
 def a4_auto_fetch_and_extract(studies, screened, pdf_dir=None, max_attempts=12,
-                              inclusion_hints=None, email=None):
+                              inclusion_hints=None, email=None, on_a4_event=None):
     """A3 摘要门控 → 自动落盘 OA 全文 PDF → pdf_extractor 抽取 2×2 表（同步封装）。
 
     消费 a4_stream 至 done，返回完整结果 dict（与原实现行为一致）。
-    返回 dict：extracted_rows（A4 草案，pdf_extractor.to_a4_rows 形状）/
-    fetch_log（每篇门控分类）/ n_screened/n_passed/n_downloaded/n_extracted/
-    needs_user_upload（通过门控但付费墙下不到、需人工上传 PDF 的篇目）。
-
-    语义（对齐 HITL「人工下载前核验相关性」+「能下载的先下、其余用户上传」）：
-      - A3 未通过（relevance_skip）→ 不下载，待人工核验
-      - 通过门控但无下载入口（no_candidate）→ 需用户上传
-      - 通过门控 + 无 OA 副本/下载失败（pass_no_oa/pass_download_fail）→ 需用户上传
-      - 通过门控 + 真下载成功（pass_downloaded）→ 抽取四格表行并入草案
-      - 已达 max_attempts 成功下载数（quota_deferred）→ 其余通过门控者留待下一轮
-        （注：max_attempts 统计「成功下载数」，付费墙/网络失败不消耗配额，避免可下 OA 论文被饿死）
+    on_a4_event：可选回调 f(ev)，实时转发 a4_stream 的逐篇进度事件
+    （start/downloading/extracting/extracted/failed/...），供工作台续跑路径实时上屏。
     """
     last = None
     for ev in a4_stream(studies, screened, pdf_dir=pdf_dir, max_attempts=max_attempts,
                         inclusion_hints=inclusion_hints, email=email):
+        if on_a4_event:
+            try:
+                on_a4_event(ev)
+            except Exception:  # noqa: BLE001 — 回调异常不得拖垮抽取
+                pass
         if ev.get("event") == "done":
             last = ev["result"]
     return last
@@ -1028,7 +1024,7 @@ def a4_get_result(session_path):
 
 def a4_data_extraction(screened_studies, extraction_table=None, studies=None,
                        auto_fetch=False, auto_fetch_dir=None, max_attempts=12,
-                       inclusion_hints=None, pdf_email=None):
+                       inclusion_hints=None, pdf_email=None, on_a4_event=None):
     # 🔴 红线闸：效应量/事件数等关键字段须人工核验放行方可进 Block B
     nha = {
         "type": "approve",
@@ -1055,7 +1051,7 @@ def a4_data_extraction(screened_studies, extraction_table=None, studies=None,
             af = a4_auto_fetch_and_extract(
                 studies, screened_studies, pdf_dir=auto_fetch_dir,
                 max_attempts=max_attempts, inclusion_hints=inclusion_hints,
-                email=pdf_email,
+                email=pdf_email, on_a4_event=on_a4_event,
             )
         except Exception as e:  # noqa: BLE001
             # 自动抓取整段失败不得拖垮 Block A；降级回离线占位并如实说明
@@ -1239,7 +1235,8 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
                 use_coze=False, pause_at=None,
                 inclusion_hints=None, auto_fetch=True, auto_fetch_dir=None,
                 max_attempts=12, pdf_email=None,
-                override_query=None, override_screened=None, on_line=None):
+                override_query=None, override_screened=None, on_line=None,
+                on_a4_event=None, start_stage=None, cached_envelope=None):
     """本地优先 Block A 驱动器。返回与 run_pipeline 同构的 dict。
 
     - use_coze=False（默认）：A1/A3 走本地启发式，A2 走本地 ct-literature，A4 本地强执闸。
@@ -1257,58 +1254,80 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
     stages = []
     tool_card_outputs = []
 
-    # A1 — 本地启发式选题 + 真实 ct-registry 查重探针（不阻塞，失败优雅降级）
-    try:
-        reg_probe = a1_registry_check(topic, max_results=min(max_results, 20))
-    except Exception as e:  # noqa: BLE001
-        reg_probe = {"status": "error", "total": None, "returned": None,
-                     "sample": [], "note": f"registry 探针异常: {type(e).__name__}: {e}"}
-    rep1, nha1 = a1_topic_selection(topic, registry_probe=reg_probe)
-    s1 = _mk_stage(A1, 0, "await_human", rep1, nha1)
-    stages.append(s1)
-    _st = _soft_stop(env, pid, stages, tool_card_outputs, s1, A1, pause_at, human_decision)
-    if _st:
-        return _st
+    # ---- 续跑优化：start_stage="A4" 且缓存信封含 A1/A2/A3 → 跳过整块重算，
+    # 直接复用已算好的早期阶段，仅跑 A4。典型场景：A3 已批准（非 revise），
+    # 避免重复 A2 全库检索 + 全量下载带来的分钟级无谓等待。----
+    a4_only = False
+    if start_stage == "A4" and cached_envelope:
+        _cid = {(s.get("stage") or {}).get("id"): s
+                for s in (cached_envelope.get("stages") or [])}
+        _s1, _s2, _s3 = _cid.get(A1), _cid.get(A2), _cid.get(A3)
+        if _s1 and _s2 and _s3:
+            _studies = (_s2.get("stage_result") or {}).get("studies") or []
+            _screened = (_s3.get("stage_result") or {}).get("screened") or []
+            if _studies or _screened:
+                studies, screened = _studies, _screened
+                stages = [_s1, _s2, _s3]
+                tool_card_outputs = ((_s2.get("tool_cards") or [])
+                                     + (_s3.get("tool_cards") or []))
+                hints = (inclusion_hints if inclusion_hints is not None
+                         else _derive_inclusion_hints(topic))
+                a4_only = True
 
-    # A2 — 🟡 软停靠：检索策略/覆盖确认（防沉默漏检：跳库/空结果）
-    search_topic = override_query if override_query is not None else topic
-    # 检索式翻译前置（关联 ct-base 权威 kw_localize，对照表 + 外接 API 兜底）：
-    # 原始中文/混合主题 → 干净英文检索式，再交给 ct-literature 多库检索。
-    # 展示与真实检索都用翻译后的检索式，而非原始输入——避免「部分翻译混合串 →
-    # 境外库 0 命中 → 只检索了 OpenAlex」式的沉默漏检。
-    strategy = _translate_topic_authoritative(search_topic)
-    studies, outs2, _card2 = a2_literature_search(strategy["translated_query"], max_results,
-                                                  year_from, out_dir, on_line=on_line)
-    tool_card_outputs += outs2
-    nha2 = _a2_coverage_nha(studies, outs2, _card2, max_results, year_from, strategy=strategy)
-    s2 = _mk_stage(A2, 1, "completed",
-                   {"studies": studies, "n": len(studies),
-                    "coverage": nha2.get("coverage"),
-                    "search_strategy": strategy}, nha2, [_card2])
-    stages.append(s2)
-    _st = _soft_stop(env, pid, stages, tool_card_outputs, s2, A2, pause_at, human_decision)
-    if _st:
-        return _st
+    if not a4_only:
+        # A1 — 本地启发式选题 + 真实 ct-registry 查重探针（不阻塞，失败优雅降级）
+        try:
+            reg_probe = a1_registry_check(topic, max_results=min(max_results, 20))
+        except Exception as e:  # noqa: BLE001
+            reg_probe = {"status": "error", "total": None, "returned": None,
+                         "sample": [], "note": f"registry 探针异常: {type(e).__name__}: {e}"}
+        rep1, nha1 = a1_topic_selection(topic, registry_probe=reg_probe)
+        s1 = _mk_stage(A1, 0, "await_human", rep1, nha1)
+        stages.append(s1)
+        _st = _soft_stop(env, pid, stages, tool_card_outputs, s1, A1, pause_at, human_decision)
+        if _st:
+            return _st
 
-    # A3 — 摘要级纳入门控（inclusion_hints 驱动；None 时由主题自动派生）
-    hints = inclusion_hints if inclusion_hints is not None else _derive_inclusion_hints(topic)
-    if override_screened is not None:
-        # Phase 2 真接缝：直接使用人工修订后的逐条裁决，不重跑启发式
-        screened = override_screened
-        nha3 = _a3_nha_from_screened(screened)
-    else:
-        screened, nha3 = a3_screening(studies, inclusion_hints=hints)
-    s3 = _mk_stage(A3, 2, "await_human", {"screened": screened, "n": len(screened)}, nha3)
-    stages.append(s3)
-    _st = _soft_stop(env, pid, stages, tool_card_outputs, s3, A3, pause_at, human_decision)
-    if _st:
-        return _st
+        # A2 — 🟡 软停靠：检索策略/覆盖确认（防沉默漏检：跳库/空结果）
+        search_topic = override_query if override_query is not None else topic
+        # 检索式翻译前置（关联 ct-base 权威 kw_localize，对照表 + 外接 API 兜底）：
+        # 原始中文/混合主题 → 干净英文检索式，再交给 ct-literature 多库检索。
+        # 展示与真实检索都用翻译后的检索式，而非原始输入——避免「部分翻译混合串 →
+        # 境外库 0 命中 → 只检索了 OpenAlex」式的沉默漏检。
+        strategy = _translate_topic_authoritative(search_topic)
+        studies, outs2, _card2 = a2_literature_search(strategy["translated_query"], max_results,
+                                                      year_from, out_dir, on_line=on_line)
+        tool_card_outputs += outs2
+        nha2 = _a2_coverage_nha(studies, outs2, _card2, max_results, year_from, strategy=strategy)
+        s2 = _mk_stage(A2, 1, "completed",
+                       {"studies": studies, "n": len(studies),
+                        "coverage": nha2.get("coverage"),
+                        "search_strategy": strategy}, nha2, [_card2])
+        stages.append(s2)
+        _st = _soft_stop(env, pid, stages, tool_card_outputs, s2, A2, pause_at, human_decision)
+        if _st:
+            return _st
+
+        # A3 — 摘要级纳入门控（inclusion_hints 驱动；None 时由主题自动派生）
+        hints = inclusion_hints if inclusion_hints is not None else _derive_inclusion_hints(topic)
+        if override_screened is not None:
+            # Phase 2 真接缝：直接使用人工修订后的逐条裁决，不重跑启发式
+            screened = override_screened
+            nha3 = _a3_nha_from_screened(screened)
+        else:
+            screened, nha3 = a3_screening(studies, inclusion_hints=hints)
+        s3 = _mk_stage(A3, 2, "await_human", {"screened": screened, "n": len(screened)}, nha3)
+        stages.append(s3)
+        _st = _soft_stop(env, pid, stages, tool_card_outputs, s3, A3, pause_at, human_decision)
+        if _st:
+            return _st
 
     # A4 — 🔴 红线闸：A3 门控 → 自动落盘 OA PDF → 抽取 2×2 表（草稿）→ 人工核验放行
     rep4, nha4 = a4_data_extraction(
         screened, extraction_table=extraction_table, studies=studies,
         auto_fetch=auto_fetch, auto_fetch_dir=auto_fetch_dir,
         max_attempts=max_attempts, inclusion_hints=hints, pdf_email=pdf_email,
+        on_a4_event=on_a4_event,
     )
     s4 = _mk_stage(A4, 3, "await_human", rep4, nha4)
     stages.append(s4)
