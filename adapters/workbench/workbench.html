@@ -72,6 +72,8 @@
   .rl-xlsx-hint { font-size: 12px; color: var(--muted); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .note { flex: 1; min-width: 200px; }
+  .acts-hint { flex: 0 0 100%; font-size: 12px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin-bottom: 4px; }
+  .a4assign-sel { max-width: 420px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; }
   .hint { font-size: 12px; color: var(--muted); margin: 4px 0 12px; line-height: 1.5; }
   label.chk { display: flex; align-items: center; gap: 6px; font-weight: 500; color: var(--ink); margin: 12px 0 4px; }
   .feas-kv { display: flex; flex-direction: column; gap: 2px; }
@@ -109,10 +111,10 @@
   .a4badge { flex:0 0 auto; }
   .a4reason { color:var(--muted); font-size:12px; margin-left:auto; text-align:right; max-width:46%; }
   /* A4 逐篇文档展示 */
-  .a4doc { border:1px solid var(--line); border-radius:10px; margin:10px 0; overflow:hidden; }
+  .a4doc { border:1px solid var(--line); border-radius:10px; margin:10px 0; overflow:hidden; min-width:0; max-width:100%; }
   .a4doc-head { display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--panel-2); flex-wrap:wrap; }
   .a4doc-idx { font-weight:700; color:var(--accent); }
-  .a4doc-head .a4title { max-width:none; white-space:normal; }
+  .a4doc-head .a4title { max-width:52%; white-space:normal; word-break:break-word; }
   .a4doi { color:var(--muted); font-size:11px; font-family:ui-monospace,Menlo,Consolas,monospace; }
   .a4doc-body { padding:8px 12px 12px; }
   .a4row2 { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:8px 0; background:#fff; }
@@ -736,6 +738,14 @@ function renderRowlist(p, data, ctx) {
 function renderActions() {
   const aw = STATE.await, opts = aw.options || [];
   const box = $("#acts"); box.innerHTML = "";
+  const sid = String(aw.stage_id || "");
+  if (sid.startsWith("A4")) {
+    const hint = document.createElement("div");
+    hint.className = "acts-hint";
+    hint.innerHTML = "🟢 <b>继续</b>：核对上方逐篇抽取数据无误后，点绿色「批准 / 放行」进入下一阶段；" +
+      "缺 PDF 的篇目到「待上传 / 补抽取 PDF」面板上传。修改某篇数据后记得点该篇的「💾 保存本篇修订」。";
+    box.appendChild(hint);
+  }
   const note = document.createElement("input");
   note.type = "text"; note.className = "note"; note.id = "note"; note.placeholder = "备注（可选，记入审计）";
   box.appendChild(note);
@@ -884,7 +894,13 @@ function renderA4Live(ev) {
     $("#center").innerHTML = `
       <div class="node">
         <h2 class="node-title">\u{1F4E5} A4 数据提取进度（逐篇下载 / 抽取）</h2>
-        <p class="node-intro">正在按篇下载全文 PDF 并抽取 2×2 表，每完成一篇即刷新。</p>
+        <p class="node-intro">正在按篇并行下载全文 PDF 并抽取 2×2 表，每完成一篇即刷新；已下载过的 PDF 自动复用，不会重复下载。</p>
+        <div class="a4live-bar">
+          <label class="btn-mini file">⬆ 上传已有 PDF（自动匹配）
+            <input type="file" accept=".pdf" multiple onchange="a4UploadAuto(this)" style="display:none"></label>
+          <span class="rl-xlsx-hint">付费墙 / 下载失败的篇目，可直接上传你手头的 PDF，系统按 DOI / 标题自动匹配到对应篇目；
+            全部完成后自动回到 A4 节点，点绿色「批准 / 放行」继续。</span>
+        </div>
         <div id="a4live" class="a4live"></div>
       </div>`;
     live = $("#a4live");
@@ -921,6 +937,73 @@ function renderA4Live(ev) {
   else if (ev.reason) reason.textContent = ev.reason;
   else if (ev.url) reason.textContent = "下载源：" + String(ev.url).slice(0, 90);
   el.scrollIntoView({block: "nearest"});
+}
+
+// ---- A4 上传已有 PDF（自动匹配 → 失败则手动指派）----
+let A4_PENDING = [];  // 未能自动匹配的待指派文件队列
+
+function reloadSession() {
+  return fetch(apiUrl("/api/session?path=" + encodeURIComponent(STATE.session.path)))
+    .then(r => r.json()).then(s => { STATE = s; renderNode(); });
+}
+
+function a4UploadAuto(el) {
+  const files = Array.from(el.files || []); if (!files.length) return;
+  el.value = "";
+  files.forEach(f => {
+    const fd = new FormData();
+    fd.append("session_path", STATE.session.path);
+    fd.append("file", f);
+    fetch(apiUrl("/api/upload_pdf_auto"), { method: "POST", body: fd })
+      .then(r => r.json()).then(j => {
+        if (j.matched) {
+          flash(`✓「${f.name}」已自动匹配到第 ${j.index + 1} 篇，抽取 ${j.n_tworows} 条 2×2 行`, "ok");
+          log(`✓ 上传自动匹配：${f.name} → #${j.index + 1}`, "ok");
+          reloadSession();
+        } else {
+          A4_PENDING.push(f);
+          log(`⚠「${f.name}」未能自动匹配：${j.message || ""}`, "warn");
+          a4ShowAssign(j.candidates || [], f);
+        }
+      }).catch(e => flash(`「${f.name}」上传失败：` + e, "err"));
+  });
+}
+
+function a4ShowAssign(cands, f) {
+  let box = $("#a4assign");
+  if (!box) {
+    box = document.createElement("div"); box.id = "a4assign";
+    box.style.display = "flex"; box.style.flexDirection = "column"; box.style.gap = "6px";
+    const live = $("#a4live");
+    if (live && live.parentNode) live.parentNode.insertBefore(box, live);
+    else return;
+  }
+  if (!cands.length) { flash(`「${f.name}」无待上传篇目可指派`, "warn"); return; }
+  const rowId = "a4assign-" + A4_PENDING.indexOf(f);
+  box.insertAdjacentHTML("beforeend",
+    `<div class="a4up-card" id="${rowId}"><b>「${esc(f.name)}」未自动匹配 — 请指派：</b>
+      <select class="a4assign-sel" data-f="${A4_PENDING.indexOf(f)}">` +
+    cands.map(c => `<option value="${c.index}">#${c.index + 1} ${esc(String(c.title || "").slice(0, 70))}</option>`).join("") +
+    `</select> <button class="btn-mini" onclick="a4AssignPending('${rowId}')">指派并抽取</button></div>`);
+}
+
+function a4AssignPending(rowId) {
+  const row = document.getElementById(rowId);
+  const sel = row && row.querySelector(".a4assign-sel");
+  if (!sel) return;
+  const fi = +sel.dataset.f, di = +sel.value;
+  const f = A4_PENDING[fi]; if (!f) return;
+  A4_PENDING[fi] = null;
+  row.remove();
+  const fd = new FormData();
+  fd.append("session_path", STATE.session.path);
+  fd.append("doc_index", di);
+  fd.append("file", f);
+  fetch(apiUrl("/api/upload_pdf"), { method: "POST", body: fd })
+    .then(r => r.json()).then(j => {
+      flash(`✓ 已指派到第 ${di + 1} 篇，抽取 ${j.n_tworows || 0} 条 2×2 行`, "ok");
+      reloadSession();
+    }).catch(e => flash("指派失败：" + e, "err"));
 }
 
 // ---------- A4 逐篇文档展示（提取 ↔ 原文对应） ----------

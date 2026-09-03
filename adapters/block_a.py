@@ -804,20 +804,138 @@ def _derive_inclusion_hints(topic):
     return hints or None
 
 
+def _pdf_stem(study):
+    """A4 PDF 落盘的稳定文件基名（同一文献跨轮次恒定）。
+
+    优先用 DOI（文件名可读），无 DOI 时用标题 md5 前 10 位。稳定命名是
+    「重跑不重复下载」的基础：同名文件存在且确为真 PDF 即直接复用。
+    """
+    import hashlib
+    doi = str((study or {}).get("doi") or "").strip().lower()
+    if doi:
+        slug = re.sub(r"[^a-z0-9]+", "_", doi).strip("_")[:90]
+        if slug:
+            return "doi_" + slug
+    title = str((study or {}).get("title") or "").strip().lower()
+    return "t_" + (hashlib.md5(title.encode("utf-8")).hexdigest()[:10] if title else "notitle")
+
+
+def _a4_cached_pdf(study, pdf_dir, cache_map=None):
+    """查该文献已落盘的 PDF（跨轮次复用，避免重复下载）。
+
+    两级查找：① cache_map（调用方由上一轮 A4 结果 per_doc 建立，可兼容旧的
+    docN.pdf 命名）；② 稳定命名文件。命中且确为真 PDF 才复用。
+    """
+    key = str((study or {}).get("doi") or (study or {}).get("title") or "").strip().lower()
+    if key and cache_map:
+        p = cache_map.get(key)
+        if p and os.path.isabs(p) and os.path.exists(p) and _is_pdf(p):
+            return p
+    p = os.path.join(pdf_dir, _pdf_stem(study) + ".pdf")
+    if os.path.exists(p) and _is_pdf(p):
+        return p
+    return None
+
+
+def _a4_extract_pdf(pdf_path, pdf_extractor):
+    """对已落盘 PDF 抽取 2x2 表。返回 (rows, tworows, n_candidates, err)。"""
+    if pdf_extractor is None:
+        return [], [], 0, None
+    try:
+        res = pdf_extractor.extract(pdf_path)
+        rows = pdf_extractor.to_a4_rows(res) or []
+        n_cand = len(res.get("candidates") or [])
+    except Exception as e:  # noqa: BLE001
+        return [], [], 0, f"{type(e).__name__}: {e}"
+    tworows = [r for r in rows if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di"))]
+    return rows, tworows, n_cand, None
+
+
+def _a4_fetch_one(cand, out_path, email, pdf_extractor):
+    """单篇「解析直链 → 下载 → 抽取」（纯 IO/CPU、无共享状态 → 可并行）。
+
+    返回 (out, events)：out 为该篇最终状态，events 为过程事件（downloading /
+    extracting），由主循环按 index 顺序统一 emit。
+    """
+    import pdf_fetch
+    evs = []
+    url = _resolve_pdf_url(cand, email)
+    if not url:
+        return ({"event": "failed", "status": "needs_upload", "gate": "pass_no_oa",
+                 "reason": "通过门控但无 OA 副本（付费墙），需用户上传 PDF",
+                 "pdf": None, "rows": [], "n_rows": 0, "n_tworows": 0}, evs)
+    evs.append({"event": "downloading", "url": url})
+    if not pdf_fetch.download(url, out_path) or not _is_pdf(out_path):
+        return ({"event": "failed", "status": "needs_upload", "gate": "pass_download_fail",
+                 "reason": "通过门控但下载失败/非真 PDF，需用户上传 PDF",
+                 "pdf": None, "rows": [], "n_rows": 0, "n_tworows": 0}, evs)
+    if pdf_extractor is None:
+        return ({"event": "downloaded_no_extract", "status": "downloaded_no_extract",
+                 "gate": "pass_downloaded", "reason": "PDF 已下载，待补抽取",
+                 "pdf": out_path, "rows": [], "n_rows": 0, "n_tworows": 0}, evs)
+    evs.append({"event": "extracting", "pdf": out_path})
+    rows, tworows, n_cand, err = _a4_extract_pdf(out_path, pdf_extractor)
+    if err:
+        return ({"event": "failed", "status": "needs_upload", "gate": "extract_fail",
+                 "reason": f"PDF 下载成功但抽取失败：{err}",
+                 "pdf": out_path, "rows": [], "n_rows": 0, "n_tworows": 0}, evs)
+    return ({"event": "extracted", "status": "extracted", "gate": "pass_downloaded",
+             "reason": None, "pdf": out_path, "rows": rows,
+             "n_rows": len(rows), "n_tworows": len(tworows), "n_candidates": n_cand}, evs)
+
+
+def _ordered_parallel(items, workers, fn):
+    """按提交顺序产出 fn 结果，内部以 workers 大小的滑动窗口并行执行。
+
+    保证：① 并发度不超过 workers；② 输出顺序与 items 一致（前端按 index 定位
+    行，乱序会让进度行跳动）。fn 须自行兜住异常，此处仅兜底跳过异常项。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        it = iter(items)
+        pending, nxt_seq, seq = {}, 0, 0
+        for _ in range(workers):
+            try:
+                item = next(it)
+            except StopIteration:
+                break
+            pending[nxt_seq] = ex.submit(fn, item)
+            nxt_seq += 1
+        while pending:
+            fut = pending.pop(seq)
+            try:
+                res = fut.result()
+            except Exception:  # noqa: BLE001 — fn 未兜住的异常不得拖垮整批
+                res = None
+            if res is not None:
+                yield res
+            try:
+                item = next(it)
+            except StopIteration:
+                pass
+            else:
+                pending[nxt_seq] = ex.submit(fn, item)
+                nxt_seq += 1
+            seq += 1
+
+
 def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
-               inclusion_hints=None, email=None):
-    """生成器：逐篇研究执行 A4 下载+抽取，实时 yield 进度事件（供 Phase 3 实时预览）。
+              inclusion_hints=None, email=None, workers=4, pdf_cache_map=None):
+    """生成器：逐篇研究执行 A4 下载+抽取，实时 yield 进度事件（供工作台实时预览）。
 
     每次 yield 一个事件 dict，关键字段：
-      event: start | skip | failed | deferred | downloading |
-             extracted | downloaded_no_extract | done | error
-      index / total / title / doi / gate / reason / url / pdf /
-      n_rows / n_tworows
+      event: start | cached | skip | failed | deferred | downloading |
+             extracting | extracted | downloaded_no_extract | done | error
+      index / total / title / doi / gate / reason / url / pdf / n_rows / n_tworows
     失败不中断（继续处理下一篇）。末次 yield 为
-      {"event": "done", "result": {<完整 a4_auto_fetch_and_extract dict>}}
-    同步封装 a4_auto_fetch_and_extract 与原行为完全一致（消费至 done 取 result）。
+      {"event": "done", "result": {<完整 a4_auto_fetch_and_extract dict>}}。
+
+    workers：下载/抽取并发度（默认 4）。事件仍按 index 顺序产出，前端观感与串行
+    一致，整体耗时近似降为 1/workers。
+    pdf_cache_map：{文献 key(doi|title 小写) → 已落盘 PDF 绝对路径}；命中即跳过
+    下载、直接抽取（emit cached），实现「重跑不重复下载」。
+    同步封装 a4_auto_fetch_and_extract 与原行为一致（消费至 done 取 result）。
     """
-    import os
     import pdf_fetch
     if email is None:
         email = pdf_fetch.DEFAULT_EMAIL
@@ -839,13 +957,6 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
     else:
         _dep_note = None
 
-    extracted_rows = []        # 仅 2×2 结局表（ai/bi/ci/di 齐全）→ 供下游 B1 合并
-    review_rows = []            # 全量抽取行（含连续量/描述性，ai=None）→ 供 A4 人工核验
-    fetch_log = []
-    needs_upload = []
-    per_doc = []                # 逐篇分组（供工作台 A4 逐篇展示：标题/DOI/状态/行/页码锚点）
-    n_passed = n_dl = n_ext = 0
-    dl_index = 0
     studies_list = [s for s in studies if isinstance(s, dict)]
     total = len(studies_list)
 
@@ -853,117 +964,138 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
         ev.setdefault("total", total)
         return ev
 
+    extracted_rows = []        # 仅 2x2 结局表（ai/bi/ci/di 齐全）→ 供下游 B1 合并
+    review_rows = []           # 全量抽取行（含连续量/描述性）→ 供 A4 人工核验
+    fetch_log = []
+    needs_upload = []
+    per_doc = [None] * total   # 逐篇分组（按 index 定位，供工作台 A4 逐篇展示）
+    n_passed = n_dl = n_ext = n_fetch = 0
+
+    # ── 阶段 1：纯本地判定（零网络）。逐篇 yield start/skip/no_candidate/deferred，
+    #    将「需下载」与「可复用缓存」的篇目按 index 顺序放入 work 队列。
+    work = []
     for i, s in enumerate(studies_list):
         sc = scr_by_key.get(_key(s)) or {}
         title = s.get("title") or ""
         doi = s.get("doi")
-        included = sc.get("include", True)  # screened 为空（未筛）→ 宽松默认纳入
         meta = {"index": i, "total": total, "title": title, "doi": doi}
         yield _emit({"event": "start", **meta})
-        if sc and not included:
+
+        if sc and not sc.get("include", True):  # screened 为空（未筛）→ 宽松默认纳入
             r = {"title": title, "doi": doi, "gate": "relevance_skip",
                  "reason": sc.get("reason", "未通过摘要相关性门控")}
             fetch_log.append(r)
-            per_doc.append({"index": i, "title": title, "doi": doi,
-                            "status": "skip", "reason": r["reason"], "pdf": None,
-                            "rows": [], "n_tworows": 0})
+            per_doc[i] = {"index": i, "title": title, "doi": doi, "status": "skip",
+                          "reason": r["reason"], "pdf": None, "rows": [], "n_tworows": 0}
             yield _emit({"event": "skip", **meta, **r})
             continue
-        if included:
-            n_passed += 1
+        n_passed += 1
 
         cand = _pick_candidate(s)
         if not cand:
             r = {"title": title, "doi": doi, "gate": "no_candidate",
                  "reason": "通过相关性门控但无下载入口（无 PMID/DOI/直链），需用户上传 PDF"}
             fetch_log.append(r); needs_upload.append(r)
-            per_doc.append({"index": i, "title": title, "doi": doi,
-                            "status": "needs_upload", "reason": r["reason"], "pdf": None,
-                            "rows": [], "n_tworows": 0})
-            yield _emit({"event": "failed", **meta, **r})
-            continue
-        # 配额按「成功下载数」计（付费墙/网络失败不消耗配额），确保可下载的 OA 论文不被饿死
-        if n_dl >= max_attempts:
-            r = {"title": title, "doi": doi, "gate": "quota_deferred",
-                 "reason": f"已达 max_attempts={max_attempts} 成功下载，其余通过门控者留待下一轮"}
-            fetch_log.append(r)
-            per_doc.append({"index": i, "title": title, "doi": doi,
-                            "status": "deferred", "reason": r["reason"], "pdf": None,
-                            "rows": [], "n_tworows": 0})
-            yield _emit({"event": "deferred", **meta, **r})
-            continue
-
-        url = _resolve_pdf_url(cand, email)
-        pdf_path = os.path.join(pdf_dir, f"doc{dl_index + 1}.pdf")
-        if not url:
-            r = {"title": title, "doi": doi, "gate": "pass_no_oa",
-                 "reason": "通过门控但无 OA 副本（付费墙），需用户上传 PDF"}
-            fetch_log.append(r); needs_upload.append(r)
-            per_doc.append({"index": i, "title": title, "doi": doi,
-                            "status": "needs_upload", "reason": r["reason"], "pdf": None,
-                            "rows": [], "n_tworows": 0})
-            yield _emit({"event": "failed", **meta, **r})
-            continue
-        yield _emit({"event": "downloading", **meta, "url": url})
-        if not pdf_fetch.download(url, pdf_path) or not _is_pdf(pdf_path):
-            r = {"title": title, "doi": doi, "gate": "pass_download_fail",
-                 "reason": "通过门控但下载失败/非真 PDF，需用户上传 PDF"}
-            fetch_log.append(r); needs_upload.append(r)
-            per_doc.append({"index": i, "title": title, "doi": doi,
-                            "status": "needs_upload", "reason": r["reason"], "pdf": None,
-                            "rows": [], "n_tworows": 0})
+            per_doc[i] = {"index": i, "title": title, "doi": doi, "status": "needs_upload",
+                          "reason": r["reason"], "pdf": None, "rows": [], "n_tworows": 0}
             yield _emit({"event": "failed", **meta, **r})
             continue
 
-        dl_index += 1
-        if pdf_extractor is None:
-            fetch_log.append({"title": title, "doi": doi, "gate": "pass_downloaded",
-                              "pdf": pdf_path, "n_rows": 0, "n_tworows": 0,
-                              "n_candidates": 0,
-                              "note": "PDF 已落盘，但缺 PDF 抽取库，待人工/环境补抽取"})
-            needs_upload.append({"title": title, "doi": doi, "gate": "pass_downloaded",
-                                 "pdf": pdf_path, "reason": "PDF 已下但需补抽取"})
-            per_doc.append({"index": i, "title": title, "doi": doi,
-                            "status": "downloaded_no_extract", "reason": "PDF 已下载，待补抽取",
-                            "pdf": pdf_path, "rows": [], "n_tworows": 0})
-            yield _emit({"event": "downloaded_no_extract", **meta, "pdf": pdf_path})
-            continue
+        cached = _a4_cached_pdf(s, pdf_dir, pdf_cache_map)
+        if cached is None:
+            # 配额按「实际发起下载数」计（缓存复用不消耗；付费墙/网络失败不消耗），
+            # 确保可下载的 OA 论文不被饿死
+            if n_fetch >= max_attempts:
+                r = {"title": title, "doi": doi, "gate": "quota_deferred",
+                     "reason": f"已达 max_attempts={max_attempts} 篇实际下载，其余通过门控者留待下一轮"}
+                fetch_log.append(r)
+                per_doc[i] = {"index": i, "title": title, "doi": doi, "status": "deferred",
+                              "reason": r["reason"], "pdf": None, "rows": [], "n_tworows": 0}
+                yield _emit({"event": "deferred", **meta, **r})
+                continue
+            n_fetch += 1
+            work.append((i, s, cand, os.path.join(pdf_dir, _pdf_stem(s) + ".pdf"), None))
+        else:
+            work.append((i, s, cand, cached, cached))
 
-        yield _emit({"event": "extracting", **meta, "pdf": pdf_path})
+    # ── 阶段 2：下载 + 抽取（并发执行，按 index 顺序产出事件与结果）
+    def _run(item):
+        i, s, cand, out_path, cached = item
+        title, doi = s.get("title") or "", s.get("doi")
+        base = {"index": i, "total": total, "title": title, "doi": doi}
         try:
-            res = pdf_extractor.extract(pdf_path)
-            rows = pdf_extractor.to_a4_rows(res)
-        except Exception as e:  # noqa: BLE001
-            r = {"title": title, "doi": doi, "gate": "extract_fail",
-                 "reason": f"PDF 下载成功但抽取失败：{type(e).__name__}: {e}", "pdf": pdf_path}
+            if cached:
+                evs = [{"event": "cached", "pdf": cached, **base}]
+                if pdf_extractor is not None:
+                    evs.append({"event": "extracting", "pdf": cached, **base})
+                rows, tworows, n_cand, err = _a4_extract_pdf(cached, pdf_extractor)
+                if pdf_extractor is None:
+                    out = {"event": "downloaded_no_extract", "status": "downloaded_no_extract",
+                           "gate": "pass_downloaded", "reason": "PDF 已下载，待补抽取",
+                           "pdf": cached, "rows": [], "n_rows": 0, "n_tworows": 0}
+                elif err:
+                    out = {"event": "failed", "status": "needs_upload", "gate": "extract_fail",
+                           "reason": f"PDF 已缓存但抽取失败：{err}",
+                           "pdf": cached, "rows": [], "n_rows": 0, "n_tworows": 0}
+                else:
+                    out = {"event": "extracted", "status": "extracted", "gate": "pass_downloaded",
+                           "reason": None, "pdf": cached, "rows": rows,
+                           "n_rows": len(rows), "n_tworows": len(tworows),
+                           "n_candidates": n_cand, "cached": True}
+            else:
+                out, evs = _a4_fetch_one(cand, out_path, email, pdf_extractor)
+                evs = [{**e, **base} for e in evs]
+        except Exception as e:  # noqa: BLE001 — 单篇异常不得拖垮整批
+            out = {"event": "failed", "status": "needs_upload", "gate": "worker_error",
+                   "reason": f"处理异常：{type(e).__name__}: {e}",
+                   "pdf": None, "rows": [], "n_rows": 0, "n_tworows": 0}
+            evs = []
+        return i, out, evs
+
+    nw = max(1, int(workers or 1))
+    results = ((_run(it) for it in work) if nw == 1 else _ordered_parallel(work, nw, _run))
+    for i, out, evs in results:
+        s = studies_list[i]
+        title, doi = s.get("title") or "", s.get("doi")
+        for e in evs:
+            yield _emit(dict(e))
+        pdf = out.get("pdf")
+        rows = out.get("rows") or []
+        n_tworows = out.get("n_tworows") or 0
+        if out["status"] == "extracted":
+            tworows = [r for r in rows if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di"))]
+            n_dl += 1
+            n_ext += len(tworows)
+            extracted_rows.extend(tworows)
+            review_rows.extend(rows)
+            fetch_log.append({"title": title, "doi": doi, "gate": "pass_downloaded",
+                              "pdf": pdf, "n_rows": len(rows), "n_tworows": len(tworows),
+                              "n_candidates": out.get("n_candidates", 0),
+                              **({"cached": True} if out.get("cached") else {})})
+        elif out["status"] == "downloaded_no_extract":
+            n_dl += 1
+            fetch_log.append({"title": title, "doi": doi, "gate": "pass_downloaded", "pdf": pdf,
+                              "n_rows": 0, "n_tworows": 0, "n_candidates": 0,
+                              "note": "PDF 已落盘，但缺 PDF 抽取库，待人工/环境补抽取"})
+        else:
+            r = {"title": title, "doi": doi, "gate": out.get("gate", "failed"),
+                 "reason": out.get("reason"), **({"pdf": pdf} if pdf else {})}
             fetch_log.append(r); needs_upload.append(r)
-            per_doc.append({"index": i, "title": title, "doi": doi,
-                            "status": "needs_upload", "reason": r["reason"], "pdf": pdf_path,
-                            "rows": [], "n_tworows": 0})
-            yield _emit({"event": "failed", **meta, **r})
-            continue
-        tworows = [r for r in rows if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di"))]
-        n_ext += len(tworows)
-        n_dl += 1
-        fetch_log.append({"title": title, "doi": doi, "gate": "pass_downloaded",
-                          "pdf": pdf_path, "n_rows": len(rows),
-                          "n_tworows": len(tworows),
-                          "n_candidates": len(res["candidates"])})
-        extracted_rows.extend(tworows)   # 仅 2×2：供 B1
-        review_rows.extend(rows)         # 全量：供人工核验
-        per_doc.append({"index": i, "title": title, "doi": doi,
-                        "status": "extracted", "pdf": pdf_path,
-                        "rows": rows, "n_tworows": len(tworows),
-                        "n_rows": len(rows)})
-        yield _emit({"event": "extracted", **meta, "pdf": pdf_path,
-                     "n_rows": len(rows), "n_tworows": len(tworows)})
+        per_doc[i] = {"index": i, "title": title, "doi": doi, "status": out["status"],
+                      "reason": out.get("reason"), "pdf": pdf, "rows": rows,
+                      "n_rows": len(rows), "n_tworows": n_tworows,
+                      **({"cached": True} if out.get("cached") else {})}
+        yield _emit({"event": out["event"], "index": i, "total": total, "title": title,
+                     "doi": doi, "gate": out.get("gate"), "reason": out.get("reason"),
+                     "pdf": pdf, "n_rows": len(rows), "n_tworows": n_tworows,
+                     **({"cached": True} if out.get("cached") else {})})
 
     result = {
         "extracted_rows": extracted_rows,
         "extracted_rows_review": review_rows,
         "fetch_log": fetch_log,
         "per_doc": per_doc,
-        "n_screened": len(studies_list),
+        "n_screened": total,
         "n_passed": n_passed,
         "n_downloaded": n_dl,
         "n_extracted": n_ext,
@@ -974,16 +1106,19 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
 
 
 def a4_auto_fetch_and_extract(studies, screened, pdf_dir=None, max_attempts=12,
-                              inclusion_hints=None, email=None, on_a4_event=None):
+                              inclusion_hints=None, email=None, on_a4_event=None,
+                              workers=4, pdf_cache_map=None):
     """A3 摘要门控 → 自动落盘 OA 全文 PDF → pdf_extractor 抽取 2×2 表（同步封装）。
 
     消费 a4_stream 至 done，返回完整结果 dict（与原实现行为一致）。
     on_a4_event：可选回调 f(ev)，实时转发 a4_stream 的逐篇进度事件
-    （start/downloading/extracting/extracted/failed/...），供工作台续跑路径实时上屏。
+    （start/cached/downloading/extracting/extracted/failed/...），供工作台续跑路径实时上屏。
+    workers / pdf_cache_map：透传给 a4_stream（并发度 / 已落盘 PDF 复用映射）。
     """
     last = None
     for ev in a4_stream(studies, screened, pdf_dir=pdf_dir, max_attempts=max_attempts,
-                        inclusion_hints=inclusion_hints, email=email):
+                        inclusion_hints=inclusion_hints, email=email, workers=workers,
+                        pdf_cache_map=pdf_cache_map):
         if on_a4_event:
             try:
                 on_a4_event(ev)
@@ -1024,7 +1159,8 @@ def a4_get_result(session_path):
 
 def a4_data_extraction(screened_studies, extraction_table=None, studies=None,
                        auto_fetch=False, auto_fetch_dir=None, max_attempts=12,
-                       inclusion_hints=None, pdf_email=None, on_a4_event=None):
+                       inclusion_hints=None, pdf_email=None, on_a4_event=None,
+                       workers=4, pdf_cache_map=None):
     # 🔴 红线闸：效应量/事件数等关键字段须人工核验放行方可进 Block B
     nha = {
         "type": "approve",
@@ -1052,6 +1188,7 @@ def a4_data_extraction(screened_studies, extraction_table=None, studies=None,
                 studies, screened_studies, pdf_dir=auto_fetch_dir,
                 max_attempts=max_attempts, inclusion_hints=inclusion_hints,
                 email=pdf_email, on_a4_event=on_a4_event,
+                workers=workers, pdf_cache_map=pdf_cache_map,
             )
         except Exception as e:  # noqa: BLE001
             # 自动抓取整段失败不得拖垮 Block A；降级回离线占位并如实说明
@@ -1236,7 +1373,8 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
                 inclusion_hints=None, auto_fetch=True, auto_fetch_dir=None,
                 max_attempts=12, pdf_email=None,
                 override_query=None, override_screened=None, on_line=None,
-                on_a4_event=None, start_stage=None, cached_envelope=None):
+                on_a4_event=None, start_stage=None, cached_envelope=None,
+                workers=4, pdf_cache_map=None):
     """本地优先 Block A 驱动器。返回与 run_pipeline 同构的 dict。
 
     - use_coze=False（默认）：A1/A3 走本地启发式，A2 走本地 ct-literature，A4 本地强执闸。
@@ -1327,7 +1465,7 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
         screened, extraction_table=extraction_table, studies=studies,
         auto_fetch=auto_fetch, auto_fetch_dir=auto_fetch_dir,
         max_attempts=max_attempts, inclusion_hints=hints, pdf_email=pdf_email,
-        on_a4_event=on_a4_event,
+        on_a4_event=on_a4_event, workers=workers, pdf_cache_map=pdf_cache_map,
     )
     s4 = _mk_stage(A4, 3, "await_human", rep4, nha4)
     stages.append(s4)

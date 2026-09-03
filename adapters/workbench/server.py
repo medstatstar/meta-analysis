@@ -42,6 +42,15 @@ os.makedirs(RUNS_DIR, exist_ok=True)
 app = FastAPI(title="meta-analysis workbench", version="0.1.0")
 
 
+def _session_studies(sess):
+    """从会话 envelope 取 A2.studies（best-effort，取不到返回空列表）。"""
+    try:
+        env = ((sess.data.get("blocks") or {}).get("A") or {}).get("envelope") or {}
+        return env.get("A2", {}).get("studies") or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 # ---------------------------------------------------------------------------
 # 状态重建（进度时间轴 + await + form_schema + 审计）
 # ---------------------------------------------------------------------------
@@ -155,6 +164,8 @@ async def _stream_blocking(call, start_msg, stage_hint=""):
                        "index": ev.get("index"), "total": ev.get("total")})
             except Exception:  # noqa: BLE001
                 pass
+        return _push
+
         return _push
 
     def _worker():
@@ -511,11 +522,14 @@ def api_upload_pdf(session_path: str = Form(...), doc_index: int = Form(...),
         ext = pdf_extractor.extract(up_path)
         rows = pdf_extractor.to_a4_rows(ext)
         tworows = [r for r in rows if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di"))]
-        # 落盘该 PDF 到会话 pdf 目录，便于「查看原文页」复用
-        pdf_dir = os.path.dirname(doc["pdf"]) if doc.get("pdf") and os.path.isabs(doc.get("pdf")) \
-            else os.path.join(os.path.dirname(session_path), "pdfs")
+        # 落盘该 PDF 到会话 pdf 目录（稳定命名 block_a._pdf_stem），便于
+        # 「查看原文页」复用 + 后续 a4_stream 重跑直接命中缓存不重下
+        study = next((s for s in _session_studies(sess)
+                      if str(s.get("doi") or "").strip().lower() == str(doc.get("doi") or "").strip().lower()
+                      and doc.get("doi")), None) or {"doi": doc.get("doi"), "title": doc.get("title")}
+        pdf_dir = os.path.join(os.path.dirname(session_path), "pdfs")
         os.makedirs(pdf_dir, exist_ok=True)
-        saved_pdf = os.path.join(pdf_dir, f"doc_upload_{doc_index + 1}.pdf")
+        saved_pdf = os.path.join(pdf_dir, block_a._pdf_stem(study) + ".pdf")
         import shutil
         shutil.copyfile(up_path, saved_pdf)
         doc.update({"status": "extracted", "pdf": saved_pdf, "rows": rows,
@@ -531,6 +545,131 @@ def api_upload_pdf(session_path: str = Form(...), doc_index: int = Form(...),
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"上传抽取失败：{type(e).__name__}: {e}")
+
+
+@app.post("/api/upload_pdf_auto")
+def api_upload_pdf_auto(session_path: str = Form(...), file: UploadFile = File(...)):
+    """上传用户已有 PDF → 自动匹配到会话中的某篇待补文献 → 抽取回写。
+
+    匹配策略（与 A3 上传同源键口径）：
+      ① 从 PDF 前 3 页文本抽 DOI（正则）→ 与 per_doc 的 DOI 归一化精确匹配；
+      ② 失败则按标题 difflib 相似度（≥0.62 取最高分）匹配；
+      ③ 均失败 → 返回 candidates（全部 needs_upload 篇目）供前端手动指派
+         （前端随后调 /api/upload_pdf 带 doc_index 补一刀，避免二次传大文件，
+         故此处先把文件落盘为待指派暂存并返回 staged_path）。
+    匹配成功时 PDF 落盘为该篇稳定命名（block_a._pdf_stem），后续 a4_stream
+    重跑会直接命中缓存、不再重复下载。
+    """
+    import re as _re
+    import difflib
+    import tempfile
+    import shutil
+    if not os.path.exists(session_path):
+        raise HTTPException(400, f"会话不存在：{session_path}")
+    try:
+        import pdf_extractor
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"PDF 抽取库不可用：{type(e).__name__}: {e}")
+
+    tmp = tempfile.mkdtemp(prefix="ma_updfa_")
+    up_path = os.path.join(tmp, "up.pdf")
+    with open(up_path, "wb") as f:
+        f.write(file.file.read())
+
+    def _pdf_text(path, max_pages=3):
+        try:
+            with fitz.open(path) as d:  # noqa: F841 — pdf_extractor 已验证 fitz 可用
+                pass
+        except Exception:
+            pass
+        try:
+            import fitz
+            with fitz.open(path) as doc:
+                return "\n".join(doc[i].get_text() for i in range(min(max_pages, doc.page_count)))
+        except Exception:
+            return ""
+
+    def _norm_title(t):
+        return " ".join(_re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", str(t or "").lower()).split())
+
+    try:
+        sess = FullflowSession.load(session_path)
+        res = block_a.a4_get_result(session_path) or {}
+        pds = res.get("per_doc") or []
+        if not pds:
+            raise HTTPException(400, "会话尚无 A4 逐篇结果（请先跑一次 A4）")
+
+        text = _pdf_text(up_path)
+        m = _re.search(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", text or "")
+        up_doi = m.group(0).rstrip(".,;)").lower() if m else None
+
+        need = [(i, d) for i, d in enumerate(pds)
+                if (d or {}).get("status") in ("needs_upload", "failed", "deferred", None)]
+
+        hit = None
+        if up_doi:
+            for i, d in need:
+                if str(d.get("doi") or "").strip().lower() == up_doi:
+                    hit = (i, d, "doi")
+                    break
+        if hit is None:
+            # 标题相似度：取 PDF 首页前几行拼成参考串，与各篇标题比对
+            first_lines = [ln for ln in (text or "").splitlines() if ln.strip()][:8]
+            ref = _norm_title(" ".join(first_lines))
+            if ref:
+                best, best_score = None, 0.0
+                for i, d in need:
+                    t = _norm_title(d.get("title"))
+                    if not t:
+                        continue
+                    score = max(difflib.SequenceMatcher(None, ref, t).ratio(),
+                                difflib.SequenceMatcher(None, ref[:200], t[:200]).ratio())
+                    if score > best_score:
+                        best, best_score = (i, d), score
+                if best and best_score >= 0.62:
+                    hit = (best[0], best[1], f"title:{best_score:.2f}")
+                elif best:
+                    return {"matched": False,
+                            "staged_path": up_path,
+                            "best_guess": {"index": best[0], "title": best[1].get("title"),
+                                           "score": round(best_score, 2)},
+                            "candidates": [{"index": i, "title": d.get("title"),
+                                            "doi": d.get("doi")} for i, d in need],
+                            "message": f"未能确定匹配（最接近：第 {best[0] + 1} 篇，相似度 {best_score:.2f}）。"
+                                       "请从候选列表手动指派。"}
+
+        if hit is None:
+            return {"matched": False, "staged_path": up_path,
+                    "candidates": [{"index": i, "title": d.get("title"), "doi": d.get("doi")}
+                                   for i, d in need],
+                    "message": "PDF 中未识别出 DOI 且标题无法自动匹配，请从候选列表手动指派。"}
+
+        i, d, how = hit
+        # 落盘为该篇稳定命名 → 后续 a4_stream 重跑直接命中缓存
+        studies = _session_studies(sess)
+        study = next((s for s in studies
+                      if str(s.get("doi") or "").strip().lower() == str(d.get("doi") or "").strip().lower()
+                      and d.get("doi")), None) or {"doi": d.get("doi"), "title": d.get("title")}
+        pdf_dir = os.path.join(os.path.dirname(session_path), "pdfs")
+        os.makedirs(pdf_dir, exist_ok=True)
+        saved_pdf = os.path.join(pdf_dir, block_a._pdf_stem(study) + ".pdf")
+        shutil.copyfile(up_path, saved_pdf)
+
+        ext = pdf_extractor.extract(saved_pdf)
+        rows = pdf_extractor.to_a4_rows(ext)
+        tworows = [r for r in rows if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di"))]
+        d.update({"status": "extracted", "pdf": saved_pdf, "rows": rows,
+                  "n_rows": len(rows), "n_tworows": len(tworows), "reason": None})
+        pds[i] = d
+        res["per_doc"] = pds
+        block_a.a4_persist_result(session_path, res)
+        return {"matched": True, "index": i, "match_via": how, "status": "extracted",
+                "n_rows": len(rows), "n_tworows": len(tworows), "rows": rows,
+                "message": f"已匹配到第 {i + 1} 篇（{d.get('title')}），抽取 {len(tworows)} 条 2×2 行"}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"上传匹配失败：{type(e).__name__}: {e}")
 
 
 @app.get("/api/pdf_page")
