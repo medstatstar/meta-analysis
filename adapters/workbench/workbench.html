@@ -851,52 +851,6 @@ function startA4Preview() {
         <span class="a4reason">${esc(n.reason || "")}</span></div>`).join("");
   }
 
-  // 续跑路径（A3 批准 → A4）的逐篇实时进度面板：每篇下载/抽取事件即刷新，不必等全部完成。
-  function renderA4Live(ev) {
-    let live = $("#a4live");
-    if (!live) {
-      // 首次：用 A4 进度面板接管 #center（原停在 A3 节点）
-      $("#center").innerHTML = `
-        <div class="node">
-          <h2 class="node-title">\u{1F4E5} A4 数据提取进度（逐篇下载 / 抽取）</h2>
-          <p class="node-intro">正在按篇下载全文 PDF 并抽取 2×2 表，每完成一篇即刷新。</p>
-          <div id="a4live" class="a4live"></div>
-        </div>`;
-      live = $("#a4live");
-    }
-    if (!live) return;
-    const id = "a4doc-" + ev.index;
-    let el = document.getElementById(id);
-    if (!el) {
-      el = document.createElement("div");
-      el.id = id; el.className = "a4live-doc";
-      el.innerHTML = `<span class="a4live-idx"></span>
-        <span class="a4live-title"></span>
-        <span class="a4live-badge pill"></span>
-        <span class="a4live-reason"></span>`;
-      live.appendChild(el);
-    }
-    el.querySelector(".a4live-idx").textContent = "#" + ((ev.index || 0) + 1);
-    el.querySelector(".a4live-title").textContent = (ev.title || ev.doi || "(无标题)");
-    const MAP = {
-      start:                  ["var(--muted)", "排队中"],
-      downloading:            ["var(--soft)",  "⬇ 下载中"],
-      extracting:             ["var(--soft)",  "🔬 抽取中"],
-      extracted:              ["var(--green)", "✓ 已抽取"],
-      downloaded_no_extract: ["var(--soft)",  "⚠ 已下·待补抽"],
-      skip:                   ["var(--muted)", "跳过(未过门控)"],
-      deferred:               ["var(--muted)", "延后(配额)"],
-      failed:                 ["var(--red)",   "✕ 需上传"],
-    };
-    const m = MAP[ev.event] || ["var(--muted)", (ev.event || "…")];
-    const badge = el.querySelector(".a4live-badge");
-    badge.style.background = m[0] + "22"; badge.style.color = m[0]; badge.textContent = m[1];
-    const reason = el.querySelector(".a4live-reason");
-    if (ev.event === "extracted") reason.textContent = `2×2 行 ${ev.n_tworows || 0} / 候选 ${ev.n_rows || 0}`;
-    else if (ev.reason) reason.textContent = ev.reason;
-    else if (ev.url) reason.textContent = "下载源：" + String(ev.url).slice(0, 90);
-    el.scrollIntoView({block: "nearest"});
-  }
 
   setBusy(true, "下载并抽取");
   log("▶ 开始下载全文 PDF 并抽取数据…");
@@ -920,6 +874,53 @@ function startA4Preview() {
     },
     onError(msg) { statusEl.textContent = "失败"; log("✕ " + msg, "err"); flash("预览失败：" + msg, "err"); }
   }).then(() => { btn.disabled = false; setBusy(false); });
+}
+
+// 续跑路径（A3 批准 → A4）的逐篇实时进度面板：每篇下载/抽取事件即刷新，不必等全部完成。
+function renderA4Live(ev) {
+  let live = $("#a4live");
+  if (!live) {
+    // 首次：用 A4 进度面板接管 #center（原停在 A3 节点）
+    $("#center").innerHTML = `
+      <div class="node">
+        <h2 class="node-title">\u{1F4E5} A4 数据提取进度（逐篇下载 / 抽取）</h2>
+        <p class="node-intro">正在按篇下载全文 PDF 并抽取 2×2 表，每完成一篇即刷新。</p>
+        <div id="a4live" class="a4live"></div>
+      </div>`;
+    live = $("#a4live");
+  }
+  if (!live) return;
+  const id = "a4doc-" + ev.index;
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = id; el.className = "a4live-doc";
+    el.innerHTML = `<span class="a4live-idx"></span>
+      <span class="a4live-title"></span>
+      <span class="a4live-badge pill"></span>
+      <span class="a4live-reason"></span>`;
+    live.appendChild(el);
+  }
+  el.querySelector(".a4live-idx").textContent = "#" + ((ev.index || 0) + 1);
+  el.querySelector(".a4live-title").textContent = (ev.title || ev.doi || "(无标题)");
+  const MAP = {
+    start:                  ["var(--muted)", "排队中"],
+    downloading:            ["var(--soft)",  "⬇ 下载中"],
+    extracting:             ["var(--soft)",  "🔬 抽取中"],
+    extracted:              ["var(--green)", "✓ 已抽取"],
+    downloaded_no_extract: ["var(--soft)",  "⚠ 已下·待补抽"],
+    skip:                   ["var(--muted)", "跳过(未过门控)"],
+    deferred:               ["var(--muted)", "延后(配额)"],
+    failed:                 ["var(--red)",   "✕ 需上传"],
+  };
+  const m = MAP[ev.event] || ["var(--muted)", (ev.event || "…")];
+  const badge = el.querySelector(".a4live-badge");
+  badge.style.background = m[0] + "22"; badge.style.color = m[0]; badge.textContent = m[1];
+  const reason = el.querySelector(".a4live-reason");
+  if (ev.event === "extracted") reason.textContent = `2×2 行 ${ev.n_tworows || 0} / 候选 ${ev.n_rows || 0}`;
+  else if (ev.reason) reason.textContent = ev.reason;
+  else if (ev.url) reason.textContent = "下载源：" + String(ev.url).slice(0, 90);
+  el.scrollIntoView({block: "nearest"});
 }
 
 // ---------- A4 逐篇文档展示（提取 ↔ 原文对应） ----------
