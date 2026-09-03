@@ -1002,9 +1002,9 @@ function setBusy(on, label) {
     if (!TICK_TMR) {
       TICK0 = Date.now();
       TICK_TMR = setInterval(() => {
-        const s = ((Date.now() - TICK0) / 1000).toFixed(1);
+        const s = Math.floor((Date.now() - TICK0) / 1000);
         st.innerHTML = `<span class="pill soft">⏳ <span class="spin">◍</span> 运行中 ${s}s</span>`;
-      }, 200);
+      }, 1000);
       const bar = document.getElementById("logbar");
       if (bar.classList.contains("collapsed")) toggleLog();
     }
