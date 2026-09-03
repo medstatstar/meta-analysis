@@ -96,6 +96,9 @@ adapters/workbench/evidence_log.*
 adapters/workbench/references*
 adapters/workbench/lit_report.*
 adapters/workbench/pdfs/
+# A4 PDF 统一缓存目录（绝对路径、跨入口共享；含迁移来的 legacy_docN 失名文件，不进版本库）
+adapters/pdf_cache/
+adapters/workbench/workbench_server.log
 adapters/workbench/driver_demo.py
 # 测试/演示会话（cases/ 下运行时生成，非技能通用资产）
 cases/fullflow_session_*.json

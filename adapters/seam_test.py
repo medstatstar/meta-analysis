@@ -22,7 +22,9 @@ import pdf_extractor   # A4 抓取（本地 pdf_extractor）
 import pdf_fetch       # OA PDF 下载（DOI/PMID → Unpaywall/PMC）
 
 SEAM_DIR = r"C:/Users/WintoneFileSrv/WorkBuddy/2026-08-30-19-37-44/meta_analysis_case/seam_test"
-PDF_DIR = os.path.join(SEAM_DIR, "pdfs")
+# 统一到 block_a 的 A4 缓存目录（绝对路径、不依赖 cwd），与工作台/上传端点共享，
+# 落盘命名用 _pdf_stem，且下载前查 _a4_cached_pdf —— 杜绝 docN 覆盖式命名与重复下载。
+PDF_DIR = block_a.A4_PDF_CACHE_DIR
 os.makedirs(PDF_DIR, exist_ok=True)
 
 TOPIC = "SGLT2 inhibitor randomized controlled trial cardiovascular"
@@ -103,49 +105,49 @@ def main():
             continue
 
         # 通过门控 + 有候选 → 下载（受 MAX_ATTEMPTS 配额约束）
-        if attempted >= MAX_ATTEMPTS:
-            n_deferred += 1
-            results.append({"gate": "quota_deferred", "title": title, "doi": doi,
-                            "reason": f"通过门控但超过本次 MAX_ATTEMPTS={MAX_ATTEMPTS}"})
-            continue
-        attempted += 1
-        kind, ident = cand
-        dl_index += 1
-        pdf_path = os.path.join(PDF_DIR, f"doc{dl_index}.pdf")
-        url = None
-        tried = []
-        try:
-            if kind == "url":
-                url = ident
-                tried.append(("直链", ident))
-            elif kind == "pmid":
-                url = pdf_fetch.pmid_to_pdf(ident)
-                tried.append(("pmid→PMC", ident))
-            elif kind == "doi":
-                # Unpaywall → PMC OA 兜底
-                url = pdf_fetch.doi_to_pdf(ident, pdf_fetch.DEFAULT_EMAIL)
-                tried.append(("doi→Unpaywall", ident))
-                if not url:
-                    url = pdf_fetch.doi_to_pmc_pdf(ident)
-                    tried.append(("doi→PMC-OA", ident))
-        except Exception as e:
+        # 下载前先查统一缓存：已落盘且确为真 PDF 直接复用，绝不重复下载/覆盖。
+        cached = block_a._a4_cached_pdf(study, PDF_DIR)
+        pdf_path = cached or os.path.join(PDF_DIR, block_a._pdf_stem(study) + ".pdf")
+        if cached:
+            kind, ident = "cached", os.path.basename(cached)
+            print(f"  [缓存] ♻ {title[:48]} → 复用 {ident}，跳过下载")
+            ok = True  # _a4_cached_pdf 已用 _is_pdf 校验为真 PDF
+        else:
+            if attempted >= MAX_ATTEMPTS:
+                n_deferred += 1
+                results.append({"gate": "quota_deferred", "title": title, "doi": doi,
+                                "reason": f"通过门控但超过本次 MAX_ATTEMPTS={MAX_ATTEMPTS}"})
+                continue
+            attempted += 1
+            kind, ident = cand
             url = None
-            print(f"  [{kind}={ident}] → 解析异常: {e}")
-        if not url:
-            print(f"  [下载] ⛔ {title[:48]} → 无 OA 副本"
-                  f"（试过: {[t[0] for t in tried]}），需用户上传")
-            results.append({"gate": "pass_no_oa", "title": title, "doi": doi,
-                            "kind": kind, "id": ident, "status": "no_oa",
-                            "tried": [t[0] for t in tried],
-                            "note": "通过相关性门控但无开放获取全文，需用户手动上传 PDF"})
-            continue
-        ok = pdf_fetch.download(url, pdf_path)
-        if not ok or not is_pdf(pdf_path):
-            print(f"  [下载] ⛔ {title[:48]} → 下载失败/非 PDF（{str(url)[:70]}）")
-            results.append({"gate": "pass_download_fail", "title": title, "doi": doi,
-                            "kind": kind, "id": ident, "status": "download_fail",
-                            "url": str(url), "tried": [t[0] for t in tried]})
-            continue
+            tried = []
+            try:
+                if kind == "url":
+                    url = ident
+                    tried.append(("直链", ident))
+                elif kind == "pmid":
+                    url = pdf_fetch.pmid_to_pdf(ident)
+                    tried.append(("pmid→PMC", ident))
+                elif kind == "doi":
+                    # Unpaywall → PMC OA 兜底
+                    url = pdf_fetch.doi_to_pdf(ident, pdf_fetch.DEFAULT_EMAIL)
+                    tried.append(("doi→Unpaywall", ident))
+                    if not url:
+                        url = pdf_fetch.doi_to_pmc_pdf(ident)
+                        tried.append(("doi→PMC-OA", ident))
+            except Exception as e:
+                url = None
+                print(f"  [{kind}={ident}] → 解析异常: {e}")
+            if not url:
+                print(f"  [下载] ⛔ {title[:48]} → 无 OA 副本"
+                      f"（试过: {[t[0] for t in tried]}），需用户上传")
+                results.append({"gate": "pass_no_oa", "title": title, "doi": doi,
+                                "kind": kind, "id": ident, "status": "no_oa",
+                                "tried": [t[0] for t in tried],
+                                "note": "通过相关性门控但无开放获取全文，需用户手动上传 PDF"})
+                continue
+            ok = pdf_fetch.download(url, pdf_path)
         res = pdf_extractor.extract(pdf_path)
         rs = res["review_summary"]
         tworows = [r for r in res["rows"]

@@ -451,10 +451,7 @@ def api_a4_pdf_cache(session_path: Optional[str] = None):
     目录优先级：session_path 同级 pdfs → 否则默认 os.getcwd()/pdfs（与 a4_stream 一致）。
     仅返回确为真 PDF 的文件名，前端据此展示「已缓存 N 篇，将自动复用」。
     """
-    if session_path and os.path.isabs(session_path) and os.path.exists(os.path.dirname(session_path)):
-        pdf_dir = os.path.join(os.path.dirname(session_path), "pdfs")
-    else:
-        pdf_dir = os.path.join(os.getcwd(), "pdfs")
+    pdf_dir = block_a.A4_PDF_CACHE_DIR
     files = []
     if os.path.isdir(pdf_dir):
         for fn in sorted(os.listdir(pdf_dir)):
@@ -546,7 +543,7 @@ def api_upload_pdf(session_path: str = Form(...), doc_index: int = Form(...),
         study = next((s for s in _session_studies(sess)
                       if str(s.get("doi") or "").strip().lower() == str(doc.get("doi") or "").strip().lower()
                       and doc.get("doi")), None) or {"doi": doc.get("doi"), "title": doc.get("title")}
-        pdf_dir = os.path.join(os.path.dirname(session_path), "pdfs")
+        pdf_dir = block_a.A4_PDF_CACHE_DIR
         os.makedirs(pdf_dir, exist_ok=True)
         saved_pdf = os.path.join(pdf_dir, block_a._pdf_stem(study) + ".pdf")
         import shutil
@@ -669,7 +666,7 @@ def api_upload_pdf_auto(session_path: str = Form(...), file: UploadFile = File(.
         study = next((s for s in studies
                       if str(s.get("doi") or "").strip().lower() == str(d.get("doi") or "").strip().lower()
                       and d.get("doi")), None) or {"doi": d.get("doi"), "title": d.get("title")}
-        pdf_dir = os.path.join(os.path.dirname(session_path), "pdfs")
+        pdf_dir = block_a.A4_PDF_CACHE_DIR
         os.makedirs(pdf_dir, exist_ok=True)
         saved_pdf = os.path.join(pdf_dir, block_a._pdf_stem(study) + ".pdf")
         shutil.copyfile(up_path, saved_pdf)

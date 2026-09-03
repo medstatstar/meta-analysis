@@ -804,6 +804,12 @@ def _derive_inclusion_hints(topic):
     return hints or None
 
 
+# ── A4 PDF 统一缓存目录（绝对路径，不依赖启动 cwd；a4_stream / seam_test / 工作台上传
+#    端点全部共享此目录，避免「adapters/pdfs 与 workbench/pdfs 双目录并存」「从不同 cwd
+#    启动落到不同目录」「docN 覆盖式命名」导致的互相覆盖与重复下载）。
+A4_PDF_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdf_cache")
+
+
 def _pdf_stem(study):
     """A4 PDF 落盘的稳定文件基名（同一文献跨轮次恒定）。
 
@@ -950,7 +956,7 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
     if email is None:
         email = pdf_fetch.DEFAULT_EMAIL
     if pdf_dir is None:
-        pdf_dir = os.path.join(os.getcwd(), "pdfs")
+        pdf_dir = A4_PDF_CACHE_DIR
     os.makedirs(pdf_dir, exist_ok=True)
 
     # study→screened 按 doi/title 对齐（二者顺序一致亦可 zip）
