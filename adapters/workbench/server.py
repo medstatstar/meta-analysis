@@ -284,12 +284,13 @@ async def api_start_stream(req: StartReq):
     阻塞计算放线程执行，期间推送阶段提示 + 心跳，供前端底部信息栏实时显示，
     解决「单击提交后界面长期冻结无反馈」的问题。
     """
-    def _call(on_line=None):
+    def _call(on_line=None, on_a4_event=None):
         return run_fullflow(
             req.topic, max_results=req.max_results, year_from=req.year_from,
             effect_measure=req.effect_measure, nma=req.nma,
             pause_at=set(req.pause_at) if req.pause_at else None,
-            session_dir=req.session_dir, on_line=on_line)
+            session_dir=req.session_dir, on_line=on_line,
+            on_a4_event=on_a4_event)
 
     msg = (f"启动流程 · 主题「{req.topic}」· 检索上限 {req.max_results}"
            + (f" · 起始年 {req.year_from}" if req.year_from else "")
@@ -371,8 +372,9 @@ async def api_decide_stream(req: DecideReq):
         "decided_by": "workbench",
     }
 
-    def _call(on_line=None):
-        return resume_fullflow(req.session_path, decision, on_line=on_line)
+    def _call(on_line=None, on_a4_event=None):
+        return resume_fullflow(req.session_path, decision, on_line=on_line,
+                               on_a4_event=on_a4_event)
 
     extra = "（含修订，将重算下游阶段）" if req.revision else ""
     return await _stream_blocking(_call,
