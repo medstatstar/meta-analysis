@@ -1052,10 +1052,23 @@ def extract(pdf_path, study_id=None, reported_summary=None):
 
 
 def to_a4_rows(result, study_prefix="S"):
-    """提取结果 → fullflow A4 extraction_table 兼容行（剥掉 _review 等内部字段）。"""
+    """提取结果 → fullflow A4 extraction_table 兼容行。
+
+    兼容原行为：剥掉 _ 前缀内部字段。但**保留**可溯源的公开元数据
+    （source_page / anchor / confidence / measure / arm），供工作台「逐篇文档展示」
+    把抽取值与原文页码锚点对应起来（pdf_extractor v0.1.1 起）。
+    """
     out = []
     for i, r in enumerate(result.get("rows", []), 1):
         row = {k: v for k, v in r.items() if not k.startswith("_") and v is not None}
+        # 从 _review 提升溯源字段（原名 page 易与 row 内字段冲突 → 改名 source_page）
+        rev = r.get("_review") or {}
+        if "source_page" not in row and rev.get("page") is not None:
+            row["source_page"] = rev["page"]
+        if "anchor" not in row and rev.get("anchor"):
+            row["anchor"] = rev["anchor"]
+        if "confidence" not in row and rev.get("confidence"):
+            row["confidence"] = rev["confidence"]
         row["study"] = row.get("study") or f"{study_prefix}{i}"
         out.append(row)
     return out

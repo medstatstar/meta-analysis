@@ -137,17 +137,16 @@ SCHEMA = {
     "A4.data_extraction": {
         "title": "数据提取核验（🔴 红线）",
         "gate_type": "redline",
-        "intro": "提取数据（TE/seTE/事件数）须经人工核验放行方可进入 Block B。可修订 2×2 表后 revise。",
+        "intro": "下载全文 PDF 并抽取 2×2 表（TE/seTE/事件数），须经人工核验放行方可进入 Block B。"
+                 "点「⬇ 下载全文并抽取数据」开始；逐篇展示提取结果与原文页对应关系，可就地修订。",
         "panels": [
-            {"label": "提取概览", "kind": "object", "path": "stage", "fields": [
+            {"label": "提取概览", "kind": "object", "path": "a4_result", "fields": [
                 {"path": "n_screened", "label": "初筛通过"},
                 {"path": "n_downloaded", "label": "已下载全文"},
-                {"path": "n_extracted", "label": "已抽取"},
-                {"path": "needs_user_upload", "label": "待上传 PDF"},
+                {"path": "n_extracted", "label": "已抽取（含 2×2 篇数）"},
             ]},
-            {"label": "提取数据（2×2 / 效应量）", "kind": "rowlist",
-             "path": "editable.extracted_rows", "editable": True,
-             "revision_key": "extracted_rows", "columns": "auto"},
+            {"label": "逐篇文档（提取 ↔ 原文对应）", "kind": "a4documents"},
+            {"label": "待上传 / 补抽取 PDF", "kind": "a4uploads"},
         ],
     },
     "B4.quality_gate": {

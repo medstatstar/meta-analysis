@@ -101,6 +101,27 @@
   .a4title { font-weight:500; max-width:42%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .a4badge { flex:0 0 auto; }
   .a4reason { color:var(--muted); font-size:12px; margin-left:auto; text-align:right; max-width:46%; }
+  /* A4 逐篇文档展示 */
+  .a4doc { border:1px solid var(--line); border-radius:10px; margin:10px 0; overflow:hidden; }
+  .a4doc-head { display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--panel-2); flex-wrap:wrap; }
+  .a4doc-idx { font-weight:700; color:var(--accent); }
+  .a4doc-head .a4title { max-width:none; white-space:normal; }
+  .a4doi { color:var(--muted); font-size:11px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .a4doc-body { padding:8px 12px 12px; }
+  .a4row2 { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:8px 0; background:#fff; }
+  .a4row2-k { font-weight:600; margin-bottom:6px; display:flex; gap:8px; align-items:center; }
+  .a4row2 .tag { font-size:11px; background:var(--accent-soft); color:var(--accent); padding:1px 6px; border-radius:6px; }
+  .a4row2 .tag2 { font-size:11px; background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:6px; }
+  .a4row2-grid { display:grid; grid-template-columns:auto 1fr 1fr; gap:4px 10px; align-items:center; font-size:12px; }
+  .a4row2-grid label { color:var(--muted); }
+  .a4cell { width:74px; padding:3px 6px; border:1px solid var(--line); border-radius:5px; font-size:13px; }
+  .a4row2-anchor { margin-top:6px; font-size:12px; color:var(--muted); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .a4page { margin-top:8px; text-align:center; background:#525659; padding:8px; border-radius:6px; }
+  .a4page img { max-width:100%; }
+  .a4page-cap { color:#e5e7eb; font-size:11px; margin-top:4px; }
+  .a4doc-actions { margin-top:8px; }
+  .a4up-card { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:8px 0; }
+  .a4up-card .a4title { max-width:none; white-space:normal; font-weight:500; }
   /* 底部信息栏：滚动显示后台输出 / 进度 */
   body { padding-bottom: 176px; }
   body.log-collapsed { padding-bottom: 46px; }
@@ -546,9 +567,9 @@ function renderNode() {
   if (aw.stage_id === "A4.data_extraction") {
     const prev = document.createElement("div");
     prev.className = "panel"; prev.id = "a4preview";
-    prev.innerHTML = `<div class="pl">📥 A4 实时预览（下载 + 抽取进度）</div>
-      <p class="node-intro" style="margin:0 0 8px">逐篇实时回传状态；下载失败 / 付费墙 / 无入口的篇目会单独列出，供你补传 PDF。</p>
-      <div class="actions"><button class="btn-revise" id="btn-a4prev" onclick="startA4Preview()">▶ 开始实时预览</button>
+    prev.innerHTML = `<div class="pl">📥 下载全文 PDF 并抽取数据</div>
+      <p class="node-intro" style="margin:0 0 8px">逐篇实时回传状态；下载失败 / 付费墙 / 无入口的篇目会单独列出，供你补传 PDF。完成后下方「逐篇文档」展示提取结果与原文页对应关系。</p>
+      <div class="actions"><button class="btn-revise" id="btn-a4prev" onclick="startA4Preview()">⬇ 下载全文并抽取数据</button>
         <span id="a4prev-status" class="pill soft" style="display:none"></span></div>
       <div id="a4prev-list" style="margin-top:10px"></div>`;
     $("#center").appendChild(prev);
@@ -585,6 +606,10 @@ function renderPanel(p, ctx) {
           <span class="rl-xlsx-hint">在 Excel 中改「裁决 / 理由」两列后上传，自动按 DOI / 标题匹配回写</span>
         </div>` + inner;
     }
+  } else if (p.kind === "a4documents") {
+    inner = renderA4Documents();
+  } else if (p.kind === "a4uploads") {
+    inner = renderA4Uploads();
   } else if (p.kind === "json") {
     inner = `<div class="json">${esc(JSON.stringify(data, null, 2))}</div>`;
   } else {
@@ -774,15 +799,18 @@ function startA4Preview() {
        <span class="a4reason">${esc(n.reason || "")}</span></div>`).join("");
   }
 
-  setBusy(true, "A4 实时预览");
-  log("▶ A4 实时预览：开始下载 + 抽取…");
+  setBusy(true, "下载并抽取");
+  log("▶ 开始下载全文 PDF 并抽取数据…");
   streamPost("/api/a4_preview", {session_path: STATE.session.path}, {
     onEvent(ev) {
       if (ev.event === "done") {
         const r0 = ev.result || {};
         statusEl.textContent = `完成 · 下载 ${r0.n_downloaded} / 抽取 ${r0.n_extracted} / 待上传 ${(r0.needs_user_upload||[]).length}`;
-        log(`✓ A4 预览完成 · 下载 ${r0.n_downloaded} / 抽取 ${r0.n_extracted} / 待上传 ${(r0.needs_user_upload||[]).length}`, "ok");
-        if ((r0.needs_user_upload || []).length) renderA4Upload(r0.needs_user_upload);
+        log(`✓ 下载并抽取完成 · 下载 ${r0.n_downloaded} / 抽取 ${r0.n_extracted} / 待上传 ${(r0.needs_user_upload||[]).length}`, "ok");
+        // 重新载入会话（a4 结果已落盘），渲染逐篇文档 + 待上传面板
+        fetch(apiUrl("/api/session?path=" + encodeURIComponent(STATE.session.path)))
+          .then(r => r.json()).then(s => { STATE = s; renderNode(); })
+          .catch(e => log("重载会话失败：" + e, "err"));
       } else if (ev.event === "error") {
         statusEl.textContent = "错误"; log("✕ " + ev.message, "err"); flash(ev.message, "err");
       } else if (ev.event === "extracted" || ev.event === "failed") {
@@ -793,6 +821,132 @@ function startA4Preview() {
     },
     onError(msg) { statusEl.textContent = "失败"; log("✕ " + msg, "err"); flash("预览失败：" + msg, "err"); }
   }).then(() => { btn.disabled = false; setBusy(false); });
+}
+
+// ---------- A4 逐篇文档展示（提取 ↔ 原文对应） ----------
+const A4DOC_STATUS = {
+  extracted:            ["#16a34a", "✓ 已抽取"],
+  downloaded_no_extract:["#f59e0b", "已下载·待补抽取"],
+  needs_upload:         ["#dc2626", "待上传 PDF"],
+  skip:                 ["#6b7785", "未过门控"],
+  deferred:             ["#6b7785", "延后(配额)"],
+  failed:               ["#dc2626", "失败"],
+};
+
+function renderA4Documents() {
+  const res = (STATE.await && STATE.await.a4_result) || {};
+  const docs = res.per_doc || [];
+  if (!docs.length)
+    return `<div class="empty">尚无逐篇结果。点上方「⬇ 下载全文并抽取数据」开始；也可到「待上传 / 补抽取 PDF」手动上传。</div>`;
+  return docs.map((d, di) => {
+    const st = A4DOC_STATUS[d.status] || ["#6b7785", d.status || "未知"];
+    const rows = (d.rows && d.rows.length)
+      ? d.rows.map((r, ri) => a4RowHtml(d, di, r, ri)).join("")
+      : `<div class="empty">本篇未抽取到结构化 2×2 行（${esc(d.reason || "无原文 / 模板未命中")}）</div>`;
+    return `<div class="a4doc" id="a4doc-${di}">
+      <div class="a4doc-head">
+        <span class="a4doc-idx">#${di + 1}</span>
+        <span class="a4title">${esc(d.title || "(无标题)")}</span>
+        <span class="pill" style="background:${st[0]}22;color:${st[0]}">${st[1]}</span>
+        ${d.doi ? `<span class="a4doi">${esc(d.doi)}</span>` : ""}
+        ${d.pdf ? `<span class="a4doi">📄 ${esc(d.pdf)}</span>` : ""}
+      </div>
+      <div class="a4doc-body">${rows}
+        <div class="a4doc-actions"><button class="btn-mini" onclick="a4SaveDoc(${di})">💾 保存本篇修订</button></div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function a4RowHtml(d, di, r, ri) {
+  const cell = (k) => `<input class="a4cell" data-di="${di}" data-ri="${ri}" data-k="${esc(k)}" value="${esc(r[k] ?? "")}">`;
+  const page = r.source_page;
+  const viewBtn = (d.pdf && page)
+    ? `<button class="btn-mini" onclick="a4ViewPage(${di}, ${page})">🔍 查看原文第 ${page} 页</button>` : "";
+  return `<div class="a4row2">
+    <div class="a4row2-k">${esc(r.study || ("R" + (ri + 1)))}
+      ${r.measure ? `<span class="tag">${esc(r.measure)}</span>` : ""}
+      ${r.confidence ? `<span class="tag2">${esc(r.confidence)}</span>` : ""}</div>
+    <div class="a4row2-grid">
+      <label>实验组 事件 a</label>${cell("ai")}${cell("bi")}
+      <label>对照组 事件 c</label>${cell("ci")}${cell("di")}
+      <label>效应量 TE</label>${cell("te")}${cell("sete")}
+    </div>
+    <div class="a4row2-anchor">${r.anchor ? `锚点：${esc(r.anchor)}` : ""} ${viewBtn}</div>
+  </div>`;
+}
+
+function a4ViewPage(di, page) {
+  const id = `a4page-${di}-${page}`;
+  const ex = document.getElementById(id);
+  if (ex) { ex.remove(); return; }
+  const url = apiUrl(`/api/pdf_page?session_path=${encodeURIComponent(STATE.session.path)}&doc_index=${di}&page=${page}`);
+  const box = document.createElement("div");
+  box.id = id; box.className = "a4page";
+  box.innerHTML = `<img src="${url}" alt="原文第 ${page} 页"><div class="a4page-cap">原文第 ${page} 页 · 上方对应行的提取数据即来自此页</div>`;
+  const docEl = document.getElementById(`a4doc-${di}`);
+  if (docEl) docEl.appendChild(box);
+}
+
+function a4SaveDoc(di) {
+  const res = (STATE.await && STATE.await.a4_result) || {};
+  const docs = res.per_doc || [];
+  const doc = docs[di]; if (!doc) return;
+  const rows = (doc.rows || []).map((r, ri) => {
+    const nr = Object.assign({}, r);
+    document.querySelectorAll(`[data-di="${di}"][data-ri="${ri}"]`).forEach(inp => {
+      const k = inp.dataset.k, v = inp.value.trim();
+      nr[k] = (["ai","bi","ci","di","te","sete"].includes(k) && v === "") ? null : v;
+    });
+    return nr;
+  });
+  const fd = new FormData();
+  fd.append("session_path", STATE.session.path);
+  fd.append("doc_index", di);
+  fd.append("rows_json", JSON.stringify(rows));
+  fetch(apiUrl("/api/a4_save_doc_edits"), { method: "POST", body: fd })
+    .then(r => r.json()).then(j => {
+      if (j.ok) flash(`✓ 第 ${di + 1} 篇修订已保存（${j.n_tworows} 条 2×2）`, "ok");
+      else flash("保存失败：" + JSON.stringify(j), "err");
+    }).catch(e => flash("保存失败：" + e, "err"));
+}
+
+function renderA4Uploads() {
+  const res = (STATE.await && STATE.await.a4_result) || {};
+  const docs = (res.per_doc || []).filter(d => d.status === "needs_upload" || d.status === "downloaded_no_extract");
+  if (!docs.length)
+    return `<div class="empty">无待上传 / 补抽取的 PDF（全部已抽取或自动跳过）。</div>`;
+  return docs.map((d) => {
+    const di = d.index;
+    return `<div class="a4up-card">
+      <div class="a4title">${esc(d.title || "(无标题)")} ${d.doi ? `<span class="a4doi">${esc(d.doi)}</span>` : ""}</div>
+      <div class="a4reason" style="max-width:none;text-align:left;margin:4px 0">${esc(d.reason || "")}</div>
+      <label class="btn-mini file">⬆ 上传此篇 PDF
+        <input type="file" accept=".pdf" onchange="a4UploadPdf(${di}, this)" style="display:none"></label>
+      <span id="a4up-status-${di}"></span>
+    </div>`;
+  }).join("");
+}
+
+function a4UploadPdf(di, el) {
+  const f = el.files && el.files[0]; if (!f) return;
+  const st = document.getElementById(`a4up-status-${di}`);
+  if (st) st.textContent = "上传并抽取中…";
+  const fd = new FormData();
+  fd.append("session_path", STATE.session.path);
+  fd.append("doc_index", di);
+  fd.append("file", f);
+  fetch(apiUrl("/api/upload_pdf"), { method: "POST", body: fd })
+    .then(r => r.json()).then(j => {
+      if (j.message) {
+        if (st) st.textContent = "✓ " + j.message;
+        flash("✓ " + j.message, "ok");
+        return fetch(apiUrl("/api/session?path=" + encodeURIComponent(STATE.session.path)))
+          .then(r => r.json()).then(s => { STATE = s; renderNode(); });
+      }
+      if (st) st.textContent = "✕ " + JSON.stringify(j);
+      flash("上传失败：" + JSON.stringify(j), "err");
+    }).catch(e => { if (st) st.textContent = "✕ " + e; flash("上传失败：" + e, "err"); });
 }
 
 function renderAudit() {

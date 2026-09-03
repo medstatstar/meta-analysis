@@ -843,6 +843,7 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
     review_rows = []            # 全量抽取行（含连续量/描述性，ai=None）→ 供 A4 人工核验
     fetch_log = []
     needs_upload = []
+    per_doc = []                # 逐篇分组（供工作台 A4 逐篇展示：标题/DOI/状态/行/页码锚点）
     n_passed = n_dl = n_ext = 0
     dl_index = 0
     studies_list = [s for s in studies if isinstance(s, dict)]
@@ -863,6 +864,9 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
             r = {"title": title, "doi": doi, "gate": "relevance_skip",
                  "reason": sc.get("reason", "未通过摘要相关性门控")}
             fetch_log.append(r)
+            per_doc.append({"index": i, "title": title, "doi": doi,
+                            "status": "skip", "reason": r["reason"], "pdf": None,
+                            "rows": [], "n_tworows": 0})
             yield _emit({"event": "skip", **meta, **r})
             continue
         if included:
@@ -873,6 +877,9 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
             r = {"title": title, "doi": doi, "gate": "no_candidate",
                  "reason": "通过相关性门控但无下载入口（无 PMID/DOI/直链），需用户上传 PDF"}
             fetch_log.append(r); needs_upload.append(r)
+            per_doc.append({"index": i, "title": title, "doi": doi,
+                            "status": "needs_upload", "reason": r["reason"], "pdf": None,
+                            "rows": [], "n_tworows": 0})
             yield _emit({"event": "failed", **meta, **r})
             continue
         # 配额按「成功下载数」计（付费墙/网络失败不消耗配额），确保可下载的 OA 论文不被饿死
@@ -880,6 +887,9 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
             r = {"title": title, "doi": doi, "gate": "quota_deferred",
                  "reason": f"已达 max_attempts={max_attempts} 成功下载，其余通过门控者留待下一轮"}
             fetch_log.append(r)
+            per_doc.append({"index": i, "title": title, "doi": doi,
+                            "status": "deferred", "reason": r["reason"], "pdf": None,
+                            "rows": [], "n_tworows": 0})
             yield _emit({"event": "deferred", **meta, **r})
             continue
 
@@ -889,6 +899,9 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
             r = {"title": title, "doi": doi, "gate": "pass_no_oa",
                  "reason": "通过门控但无 OA 副本（付费墙），需用户上传 PDF"}
             fetch_log.append(r); needs_upload.append(r)
+            per_doc.append({"index": i, "title": title, "doi": doi,
+                            "status": "needs_upload", "reason": r["reason"], "pdf": None,
+                            "rows": [], "n_tworows": 0})
             yield _emit({"event": "failed", **meta, **r})
             continue
         yield _emit({"event": "downloading", **meta, "url": url})
@@ -896,6 +909,9 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
             r = {"title": title, "doi": doi, "gate": "pass_download_fail",
                  "reason": "通过门控但下载失败/非真 PDF，需用户上传 PDF"}
             fetch_log.append(r); needs_upload.append(r)
+            per_doc.append({"index": i, "title": title, "doi": doi,
+                            "status": "needs_upload", "reason": r["reason"], "pdf": None,
+                            "rows": [], "n_tworows": 0})
             yield _emit({"event": "failed", **meta, **r})
             continue
 
@@ -907,6 +923,9 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
                               "note": "PDF 已落盘，但缺 PDF 抽取库，待人工/环境补抽取"})
             needs_upload.append({"title": title, "doi": doi, "gate": "pass_downloaded",
                                  "pdf": pdf_path, "reason": "PDF 已下但需补抽取"})
+            per_doc.append({"index": i, "title": title, "doi": doi,
+                            "status": "downloaded_no_extract", "reason": "PDF 已下载，待补抽取",
+                            "pdf": pdf_path, "rows": [], "n_tworows": 0})
             yield _emit({"event": "downloaded_no_extract", **meta, "pdf": pdf_path})
             continue
 
@@ -918,6 +937,9 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
             r = {"title": title, "doi": doi, "gate": "extract_fail",
                  "reason": f"PDF 下载成功但抽取失败：{type(e).__name__}: {e}", "pdf": pdf_path}
             fetch_log.append(r); needs_upload.append(r)
+            per_doc.append({"index": i, "title": title, "doi": doi,
+                            "status": "needs_upload", "reason": r["reason"], "pdf": pdf_path,
+                            "rows": [], "n_tworows": 0})
             yield _emit({"event": "failed", **meta, **r})
             continue
         tworows = [r for r in rows if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di"))]
@@ -929,6 +951,10 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
                           "n_candidates": len(res["candidates"])})
         extracted_rows.extend(tworows)   # 仅 2×2：供 B1
         review_rows.extend(rows)         # 全量：供人工核验
+        per_doc.append({"index": i, "title": title, "doi": doi,
+                        "status": "extracted", "pdf": pdf_path,
+                        "rows": rows, "n_tworows": len(tworows),
+                        "n_rows": len(rows)})
         yield _emit({"event": "extracted", **meta, "pdf": pdf_path,
                      "n_rows": len(rows), "n_tworows": len(tworows)})
 
@@ -936,6 +962,7 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
         "extracted_rows": extracted_rows,
         "extracted_rows_review": review_rows,
         "fetch_log": fetch_log,
+        "per_doc": per_doc,
         "n_screened": len(studies_list),
         "n_passed": n_passed,
         "n_downloaded": n_dl,
@@ -969,6 +996,34 @@ def a4_auto_fetch_and_extract(studies, screened, pdf_dir=None, max_attempts=12,
         if ev.get("event") == "done":
             last = ev["result"]
     return last
+
+
+def a4_persist_result(session_path, result):
+    """把 A4 预览结果（含 per_doc 逐篇分组、pdf 绝对路径、页码锚点）落盘到会话。
+
+    供工作台「逐篇文档展示」直接读取（STATE.await.a4_result），并支持上传 PDF 后
+    就地回写单篇状态。同时兼容 legacy data[\"await\"]。
+    """
+    from fullflow import FullflowSession
+    sess = FullflowSession.load(session_path)
+    ff = (sess.data.setdefault("last_view", {}) or {}).setdefault("fullflow", {}) or {}
+    aw = (ff.setdefault("await", {}) or {})
+    aw["a4_result"] = result
+    ff["await"] = aw
+    legacy = sess.data.get("await")
+    if isinstance(legacy, dict):
+        legacy["a4_result"] = result
+        sess.data["await"] = legacy
+    sess.save()
+    return result
+
+
+def a4_get_result(session_path):
+    """读取已落盘的 A4 结果（无则返回 None）。"""
+    from fullflow import FullflowSession
+    sess = FullflowSession.load(session_path)
+    ff = (sess.data.get("last_view") or {}).get("fullflow") or {}
+    return (ff.get("await") or {}).get("a4_result")
 
 
 def a4_data_extraction(screened_studies, extraction_table=None, studies=None,

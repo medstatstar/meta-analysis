@@ -31,7 +31,7 @@ from fullflow import FullflowSession, run_fullflow, resume_fullflow, rewind_full
 import literature_probe  # noqa: E402
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form  # noqa: E402
-from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse  # noqa: E402
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, Response  # noqa: E402
 from typing import Optional  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
@@ -404,6 +404,12 @@ async def api_a4_preview(req: A4PreviewReq):
             if ev is None:
                 break
             yield _sse(ev)
+            # done 事件后把逐篇结果落盘，供工作台「逐篇文档展示」读取与编辑
+            if ev.get("event") == "done" and req.session_path and os.path.exists(req.session_path):
+                try:
+                    block_a.a4_persist_result(req.session_path, ev["result"])
+                except Exception:  # noqa: BLE001 落盘失败不影响预览
+                    pass
 
     return StreamingResponse(_gen(), media_type="text/event-stream")
 
@@ -455,6 +461,122 @@ def api_upload_screening(session_path: str = Form(...), file: UploadFile = File(
         "stats": stats,
         "state": build_state(FullflowSession.load(session_path)),
     }
+
+
+@app.post("/api/upload_pdf")
+def api_upload_pdf(session_path: str = Form(...), doc_index: int = Form(...),
+                   file: UploadFile = File(...)):
+    """上传某篇待补 PDF → 抽取 2×2 表 → 回写该篇到会话的 A4 逐篇结果。
+
+    用于 A4 中「付费墙/下载失败/无入口」需人工上传的篇目：上传后即时抽取并
+    更新该篇状态（needs_upload → extracted），返回更新后的逐篇条目。
+    """
+    import tempfile  # 局部导入（与 export/upload_screening 一致）
+    if not os.path.exists(session_path):
+        raise HTTPException(400, f"会话不存在：{session_path}")
+    try:
+        import pdf_extractor  # 懒加载（依赖 fitz，已在 venv 安装）
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"PDF 抽取库不可用：{type(e).__name__}: {e}")
+    tmp = tempfile.mkdtemp(prefix="ma_updf_")
+    up_path = os.path.join(tmp, "up.pdf")
+    with open(up_path, "wb") as f:
+        f.write(file.file.read())
+    try:
+        sess = FullflowSession.load(session_path)
+        res = block_a.a4_get_result(session_path) or {}
+        pds = res.get("per_doc") or []
+        if not (0 <= doc_index < len(pds)):
+            raise HTTPException(400, f"doc_index 越界：{doc_index} / {len(pds)}")
+        doc = pds[doc_index]
+        ext = pdf_extractor.extract(up_path)
+        rows = pdf_extractor.to_a4_rows(ext)
+        tworows = [r for r in rows if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di"))]
+        # 落盘该 PDF 到会话 pdf 目录，便于「查看原文页」复用
+        pdf_dir = os.path.dirname(doc["pdf"]) if doc.get("pdf") and os.path.isabs(doc.get("pdf")) \
+            else os.path.join(os.path.dirname(session_path), "pdfs")
+        os.makedirs(pdf_dir, exist_ok=True)
+        saved_pdf = os.path.join(pdf_dir, f"doc_upload_{doc_index + 1}.pdf")
+        import shutil
+        shutil.copyfile(up_path, saved_pdf)
+        doc.update({"status": "extracted", "pdf": saved_pdf, "rows": rows,
+                    "n_rows": len(rows), "n_tworows": len(tworows),
+                    "reason": None})
+        pds[doc_index] = doc
+        res["per_doc"] = pds
+        block_a.a4_persist_result(session_path, res)
+        return {"index": doc_index, "status": "extracted", "n_rows": len(rows),
+                "n_tworows": len(tworows), "rows": rows,
+                "message": f"第 {doc_index + 1} 篇已抽取 {len(tworows)} 条 2×2 行"}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"上传抽取失败：{type(e).__name__}: {e}")
+
+
+@app.get("/api/pdf_page")
+def api_pdf_page(session_path: str, doc_index: int = 0, page: int = 1, dpi: int = 110):
+    """渲染某篇 PDF 的指定页为 PNG，供工作台「查看原文页」内联展示（fitz）。
+
+    仅允许渲染来自该会话 A4 结果 per_doc 中记录的本地 PDF，杜绝任意路径读取。
+    """
+    if not os.path.exists(session_path):
+        raise HTTPException(400, f"会话不存在：{session_path}")
+    try:
+        import fitz
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"PDF 渲染库不可用：{type(e).__name__}: {e}")
+    try:
+        res = block_a.a4_get_result(session_path) or {}
+        pds = res.get("per_doc") or []
+        if not (0 <= doc_index < len(pds)):
+            raise HTTPException(400, f"doc_index 越界：{doc_index} / {len(pds)}")
+        pdf_path = (pds[doc_index] or {}).get("pdf")
+        if not pdf_path or not os.path.isabs(pdf_path) or not os.path.exists(pdf_path):
+            raise HTTPException(404, "该篇无本地 PDF（可能尚未下载/上传）")
+        with fitz.open(pdf_path) as doc:
+            if not (1 <= page <= doc.page_count):
+                raise HTTPException(400, f"页码越界：{page} / {doc.page_count}")
+            pix = doc[page - 1].get_pixmap(dpi=max(40, min(dpi, 200)))
+        return Response(content=pix.tobytes("png"), media_type="image/png")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"渲染失败：{type(e).__name__}: {e}")
+
+
+@app.post("/api/a4_save_doc_edits")
+def api_a4_save_doc_edits(session_path: str = Form(...), doc_index: int = Form(...),
+                           rows_json: str = Form(...)):
+    """保存用户在「逐篇文档」面板对某篇抽取行的就地修订（2×2 / 效应量）。
+
+    仅更新 a4_result.per_doc[doc_index].rows 并重算 n_tworows，不涉及红线 decide。
+    """
+    if not os.path.exists(session_path):
+        raise HTTPException(400, f"会话不存在：{session_path}")
+    try:
+        new_rows = json.loads(rows_json)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"rows_json 解析失败：{e}")
+    try:
+        res = block_a.a4_get_result(session_path) or {}
+        pds = res.get("per_doc") or []
+        if not (0 <= doc_index < len(pds)):
+            raise HTTPException(400, f"doc_index 越界：{doc_index} / {len(pds)}")
+        doc = dict(pds[doc_index])
+        doc["rows"] = new_rows
+        doc["n_rows"] = len(new_rows)
+        doc["n_tworows"] = sum(1 for r in new_rows
+                               if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di")))
+        pds[doc_index] = doc
+        res["per_doc"] = pds
+        block_a.a4_persist_result(session_path, res)
+        return {"ok": True, "index": doc_index, "n_rows": doc["n_rows"],
+                "n_tworows": doc["n_tworows"]}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"保存失败：{type(e).__name__}: {e}")
 
 
 @app.get("/", response_class=HTMLResponse)
