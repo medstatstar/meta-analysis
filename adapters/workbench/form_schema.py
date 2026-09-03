@@ -145,8 +145,7 @@ SCHEMA = {
                 {"path": "n_downloaded", "label": "已下载全文"},
                 {"path": "n_extracted", "label": "已抽取（含 2×2 篇数）"},
             ]},
-            {"label": "逐篇文档（提取 ↔ 原文对应）", "kind": "a4documents"},
-            {"label": "待上传 / 补抽取 PDF", "kind": "a4uploads"},
+            {"label": "逐篇文档（提取 ↔ 原文对应 · 待补传 PDF 可直接在此篇目下上传）", "kind": "a4documents"},
         ],
     },
     "B4.quality_gate": {
@@ -268,11 +267,13 @@ def schema_for(stage_id, kind=None):
         return s
     gate_type = "redline" if kind == "gate" else "soft"
     return {
-        "title": stage_id or "未知节点",
+        "title": stage_id or "通用确认节点",
         "gate_type": gate_type,
-        "intro": "通用确认节点（无专门表单，展示原始数据）。",
+        "intro": "这是「通用确认节点」：该步骤系统已自动完成、并在此暂停，等你确认后才会继续。"
+                 "下方是此步骤返回的原始数据（只读），请核对关键信息。"
+                 "确认无误 → 点「确认放行」继续；若要回退修改 → 点「打回」。",
         "panels": [
-            {"label": "数据", "kind": "json", "path": "stage", "editable": False},
+            {"label": "本步骤返回的数据（只读）", "kind": "json", "path": "stage", "editable": False},
         ],
     }
 

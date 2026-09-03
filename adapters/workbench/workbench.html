@@ -621,9 +621,9 @@ function renderNode() {
   if (aw.stage_id === "A4.data_extraction") {
     const prev = document.createElement("div");
     prev.className = "panel"; prev.id = "a4preview";
-    prev.innerHTML = `<div class="pl">📥 下载全文 PDF 并抽取数据</div>
-      <p class="node-intro" style="margin:0 0 8px">逐篇实时回传状态；下载失败 / 付费墙 / 无入口的篇目会单独列出，供你补传 PDF。完成后下方「逐篇文档」展示提取结果与原文页对应关系。</p>
-      <div class="actions"><button class="btn-revise" id="btn-a4prev" onclick="startA4Preview()">⬇ 下载全文并抽取数据</button>
+    prev.innerHTML = `<div class="pl">📥 下载全文 PDF 并抽取数据（A4 红线 · 需人工核验）</div>
+      <p class="node-intro" style="margin:0 0 8px">点下方按钮，系统将<b>逐篇下载全文 PDF 并抽取 2×2 效应量</b>（事件数 / TE / seTE），这步会<b>真实联网、可能耗时较长</b>；<b>付费墙 / 下载失败 / 无入口</b>的篇目会在下方「逐篇文档」里标红，并可直接在该篇目下补传 PDF。运行期间按钮禁用，<b>请勿重复点击</b>。</p>
+      <div class="actions"><button class="btn-revise" id="btn-a4prev" onclick="startA4Preview()">⬇ 开始下载并逐篇抽取 2×2 数据</button>
         <span id="a4prev-status" class="pill soft" style="display:none"></span></div>
       <div id="a4prev-list" style="margin-top:10px"></div>`;
     $("#center").appendChild(prev);
@@ -790,8 +790,9 @@ function viewStage(sid) {
   const sr = (STATE.stage_results || {})[sid] || {};
   const box = $("#center");
   if (!sc) {
-    box.innerHTML = `<h2 class="node-title">${esc(sid)} <span class="pill soft">未配置面板</span></h2>` +
-      `<div class="panel"><div class="pl">原始数据</div><div class="json">${esc(JSON.stringify(sr, null, 2))}</div></div>` +
+    box.innerHTML = `<h2 class="node-title">${esc(sid)} <span class="pill soft">只读</span></h2>` +
+      `<p class="node-intro">该节点无专用面板，下方为其返回的原始数据（只读）。</p>` +
+      `<div class="panel"><div class="pl">本步骤返回的数据（只读）</div><div class="json">${esc(JSON.stringify(sr, null, 2))}</div></div>` +
       `<div class="actions"><button class="btn-skip" onclick="backToCurrent()">← 返回</button></div>`;
     return;
   }
@@ -808,8 +809,9 @@ function viewStage(sid) {
 
 // ---------- A4 实时预览（SSE 流式消费） ----------
 function startA4Preview() {
-  const btn = $("#btn-a4prev"); if (!btn) return;
+  const btn = $("#btn-a4prev"); if (!btn || btn.disabled) return;
   btn.disabled = true;
+  btn.textContent = "⏳ 抽取进行中…（请勿重复点击）";
   const listEl = $("#a4prev-list"); listEl.innerHTML = "";
   const statusEl = $("#a4prev-status"); statusEl.style.display = "inline-block";
   statusEl.textContent = "连接中…";
@@ -883,7 +885,10 @@ function startA4Preview() {
       } else { addRow(ev); }
     },
     onError(msg) { statusEl.textContent = "失败"; log("✕ " + msg, "err"); flash("预览失败：" + msg, "err"); }
-  }).then(() => { btn.disabled = false; setBusy(false); });
+  }).then(() => {
+    if (btn) { btn.disabled = true; btn.textContent = "✓ 抽取完成（刷新页面可重跑）"; }
+    setBusy(false);
+  });
 }
 
 // 续跑路径（A3 批准 → A4）的逐篇实时进度面板：每篇下载/抽取事件即刷新，不必等全部完成。
@@ -1035,7 +1040,12 @@ function renderA4Documents() {
         ${d.pdf ? `<span class="a4doi">📄 ${esc(d.pdf)}</span>` : ""}
       </div>
       <div class="a4doc-body">${rows}
-        <div class="a4doc-actions"><button class="btn-mini" onclick="a4SaveDoc(${di})">💾 保存本篇修订</button></div>
+        <div class="a4doc-actions">
+        ${["needs_upload","downloaded_no_extract","failed"].includes(d.status)
+          ? `<label class="btn-mini file">⬆ 上传此篇 PDF<input type="file" accept=".pdf" onchange="a4UploadPdf(${(d.index !== undefined ? d.index : di)}, this)" style="display:none"></label>`
+          : ""}
+        <button class="btn-mini" onclick="a4SaveDoc(${di})">💾 保存本篇修订</button>
+      </div>
       </div>
     </div>`;
   }).join("");
