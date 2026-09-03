@@ -444,6 +444,25 @@ async def api_a4_preview(req: A4PreviewReq):
     return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
+@app.get("/api/a4_pdf_cache")
+def api_a4_pdf_cache(session_path: Optional[str] = None):
+    """返回 A4 抽取将复用的本地 PDF 缓存清单（供界面提前告知用户「不重下」）。
+
+    目录优先级：session_path 同级 pdfs → 否则默认 os.getcwd()/pdfs（与 a4_stream 一致）。
+    仅返回确为真 PDF 的文件名，前端据此展示「已缓存 N 篇，将自动复用」。
+    """
+    if session_path and os.path.isabs(session_path) and os.path.exists(os.path.dirname(session_path)):
+        pdf_dir = os.path.join(os.path.dirname(session_path), "pdfs")
+    else:
+        pdf_dir = os.path.join(os.getcwd(), "pdfs")
+    files = []
+    if os.path.isdir(pdf_dir):
+        for fn in sorted(os.listdir(pdf_dir)):
+            if fn.lower().endswith(".pdf") and block_a._is_pdf(os.path.join(pdf_dir, fn)):
+                files.append(fn)
+    return {"pdf_dir": pdf_dir, "count": len(files), "files": files}
+
+
 @app.get("/api/export_screening")
 def api_export_screening(session_path: str):
     """导出当前 A3 裁决表为 xlsx（ct-literature 模板 + 裁决/理由列），供用户下载编辑。"""

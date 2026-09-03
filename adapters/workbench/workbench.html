@@ -621,12 +621,22 @@ function renderNode() {
   if (aw.stage_id === "A4.data_extraction") {
     const prev = document.createElement("div");
     prev.className = "panel"; prev.id = "a4preview";
-    prev.innerHTML = `<div class="pl">📥 下载全文 PDF 并抽取数据（A4 红线 · 需人工核验）</div>
-      <p class="node-intro" style="margin:0 0 8px">点下方按钮，系统将<b>逐篇下载全文 PDF 并抽取 2×2 效应量</b>（事件数 / TE / seTE），这步会<b>真实联网、可能耗时较长</b>；<b>付费墙 / 下载失败 / 无入口</b>的篇目会在下方「逐篇文档」里标红，并可直接在该篇目下补传 PDF。运行期间按钮禁用，<b>请勿重复点击</b>。</p>
-      <div class="actions"><button class="btn-revise" id="btn-a4prev" onclick="startA4Preview()">⬇ 开始下载并逐篇抽取 2×2 数据</button>
+    prev.innerHTML = `<div class="pl">📥 抽取 2×2 效应量（A4 红线 · 需人工核验）</div>
+      <p class="node-intro" style="margin:0 0 8px"><b>不会重复下载你已经下好的 PDF。</b>点下方按钮，系统会<b>逐篇抽取 2×2 效应量</b>（事件数 / TE / seTE）：本地 <code>pdfs/</code> 里已有的 PDF 直接复用、跳过联网；<b>只有缺失或上次下载失败的篇目</b>才重新抓取。这步会<b>真实联网、可能耗时较长</b>；<b>付费墙 / 下载失败 / 无入口</b>的篇目会在下方「逐篇文档」里标红，可直接在该篇目下补传 PDF。运行期间按钮禁用，<b>请勿重复点击</b>。</p>
+      <div class="actions"><button class="btn-revise" id="btn-a4prev" onclick="startA4Preview()">⬇ 抽取 2×2 数据（本地已下载不重下）</button>
         <span id="a4prev-status" class="pill soft" style="display:none"></span></div>
+      <div id="a4pdf-cache" class="a4cache" style="margin:6px 0 0;color:var(--soft)"></div>
       <div id="a4prev-list" style="margin-top:10px"></div>`;
     $("#center").appendChild(prev);
+    // 提前告知用户将复用多少本地 PDF（证据，避免「是不是要重下」的疑惑）
+    fetch(apiUrl("/api/a4_pdf_cache"))
+      .then(r => r.ok ? r.json() : null).then(j => {
+        const el = $("#a4pdf-cache");
+        if (!el || !j) return;
+        el.innerHTML = j.count > 0
+          ? `📂 本地已缓存 <b>${j.count}</b> 篇 PDF，将自动复用、不重复下载：<span style="opacity:.8">${j.files.slice(0,8).map(esc).join("、")}${j.count>8?" …":""}</span>`
+          : `📂 本地暂无可复用 PDF，本次将从联网抓取开始。`;
+      }).catch(() => {});
   }
 }
 
