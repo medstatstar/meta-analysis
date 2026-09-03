@@ -823,8 +823,9 @@ def _pdf_stem(study):
 def _a4_cached_pdf(study, pdf_dir, cache_map=None):
     """查该文献已落盘的 PDF（跨轮次复用，避免重复下载）。
 
-    两级查找：① cache_map（调用方由上一轮 A4 结果 per_doc 建立，可兼容旧的
-    docN.pdf 命名）；② 稳定命名文件。命中且确为真 PDF 才复用。
+    三级查找：① cache_map（调用方由上一轮 A4 结果 per_doc 建立，可兼容旧的
+    docN.pdf 命名）；② 当前稳定命名文件；③ 裸 DOI 命名（兼容旧版 /a4_stream
+    未带协议前缀时落盘的 doi_<裸doi>.pdf）。命中且确为真 PDF 才复用。
     """
     key = str((study or {}).get("doi") or (study or {}).get("title") or "").strip().lower()
     if key and cache_map:
@@ -834,6 +835,15 @@ def _a4_cached_pdf(study, pdf_dir, cache_map=None):
     p = os.path.join(pdf_dir, _pdf_stem(study) + ".pdf")
     if os.path.exists(p) and _is_pdf(p):
         return p
+    # ③ 裸 DOI 兼容：旧版把 PDF 存为 doi_<去掉 https://doi.org/ 的裸 doi stem>
+    doi = str((study or {}).get("doi") or "").strip().lower()
+    if doi:
+        bare = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi).strip("/")
+        if bare:
+            slug = re.sub(r"[^a-z0-9]+", "_", bare).strip("_")[:90]
+            lp = os.path.join(pdf_dir, "doi_" + slug + ".pdf")
+            if os.path.exists(lp) and _is_pdf(lp):
+                return lp
     return None
 
 
