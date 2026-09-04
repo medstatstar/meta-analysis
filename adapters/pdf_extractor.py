@@ -525,6 +525,7 @@ def narrative_effects(pages):
             if pv > 1:  # P 值域 [0,1]；拦截 'group 30' 类残网命中
                 continue
             out.append({
+                "kind": "pvalue",
                 "measure": "P",
                 "reported": {"p": round(pv, 6), "sig": pv < 0.05},
                 "_meta": {"source": "narrative", "page": p["page"],
@@ -988,7 +989,12 @@ def extract(pdf_path, study_id=None, reported_summary=None):
     effects = narrative_effects(doc["pages"])
     rows.extend([e for e in effects if e.get("measure") != "P"])
     rows.extend(narrative_continuous(doc["pages"]))
+    # 候选：① p 值（measure='P'，供显著性参考）；② 正文/表中「事件/总数」计数提及
+    # （narrative_candidates，零幻觉，全部 needs_review，供人工判断是否为可入 2×2 的计数）
+    # —— 之前 narrative_candidates 定义后从未被调用，导致综述类文献下载后界面一片空白。
+    ncs = narrative_candidates(doc["pages"])
     candidates = [e for e in effects if e.get("measure") == "P"]
+    candidates.extend(ncs)
 
     # 校验 + 置信路由
     review = []
@@ -1033,9 +1039,16 @@ def extract(pdf_path, study_id=None, reported_summary=None):
 
     # 正文候选全部列为 needs_review 项（供审核台逐条处理）
     for cand in candidates:
-        review.append({"kind": "pvalue", "confidence": "needs_review",
-                       "page": cand["_meta"]["page"], "reported": cand["reported"],
-                       "anchor": cand["_meta"]["anchor"]})
+        meta = cand.get("_meta") or {}
+        if cand.get("kind") == "pvalue":
+            review.append({"kind": "pvalue", "confidence": "needs_review",
+                           "page": meta.get("page"), "reported": cand.get("reported"),
+                           "anchor": meta.get("anchor")})
+        else:
+            review.append({"kind": cand.get("kind", "candidate"),
+                           "confidence": "needs_review", "page": cand.get("page"),
+                           "snippet": cand.get("snippet"),
+                           "payload": cand.get("payload")})
 
     n_v = sum(1 for x in review if x.get("confidence") == "verified")
     n_r = sum(1 for x in review if x.get("confidence") == "needs_review")

@@ -858,17 +858,23 @@ def _a4_cached_pdf(study, pdf_dir, cache_map=None):
 
 
 def _a4_extract_pdf(pdf_path, pdf_extractor):
-    """对已落盘 PDF 抽取 2x2 表。返回 (rows, tworows, n_candidates, err)。"""
+    """对已落盘 PDF 抽取 2x2 表。返回 (rows, tworows, n_candidates, err, candidates)。
+
+    n_candidates：真实可抽取信号数 = 结构化行(to_a4_rows) + 正文计数候选
+    （事件/总数 提及，含 p 值）。之前只数 p 值候选，会误导"抽了但没用"。
+    candidates：透传给工作台逐篇面板，展示"正文计数提及（需人工判断）"。
+    """
     if pdf_extractor is None:
-        return [], [], 0, None
+        return [], [], 0, None, []
     try:
         res = pdf_extractor.extract(pdf_path)
         rows = pdf_extractor.to_a4_rows(res) or []
-        n_cand = len(res.get("candidates") or [])
+        cands = res.get("candidates") or []
+        n_cand = len(rows) + len(cands)
     except Exception as e:  # noqa: BLE001
-        return [], [], 0, f"{type(e).__name__}: {e}"
+        return [], [], 0, f"{type(e).__name__}: {e}", []
     tworows = [r for r in rows if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di"))]
-    return rows, tworows, n_cand, None
+    return rows, tworows, n_cand, None, cands
 
 
 def _a4_fetch_one(cand, out_path, email, pdf_extractor):
@@ -894,13 +900,13 @@ def _a4_fetch_one(cand, out_path, email, pdf_extractor):
                  "gate": "pass_downloaded", "reason": "PDF 已下载，待补抽取",
                  "pdf": out_path, "rows": [], "n_rows": 0, "n_tworows": 0}, evs)
     evs.append({"event": "extracting", "pdf": out_path})
-    rows, tworows, n_cand, err = _a4_extract_pdf(out_path, pdf_extractor)
+    rows, tworows, n_cand, err, cands = _a4_extract_pdf(out_path, pdf_extractor)
     if err:
         return ({"event": "failed", "status": "needs_upload", "gate": "extract_fail",
                  "reason": f"PDF 下载成功但抽取失败：{err}",
                  "pdf": out_path, "rows": [], "n_rows": 0, "n_tworows": 0}, evs)
     return ({"event": "extracted", "status": "extracted", "gate": "pass_downloaded",
-             "reason": None, "pdf": out_path, "rows": rows,
+             "reason": None, "pdf": out_path, "rows": rows, "candidates": cands,
              "n_rows": len(rows), "n_tworows": len(tworows), "n_candidates": n_cand}, evs)
 
 
@@ -1048,7 +1054,7 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
                 evs = [{"event": "cached", "pdf": cached, **base}]
                 if pdf_extractor is not None:
                     evs.append({"event": "extracting", "pdf": cached, **base})
-                rows, tworows, n_cand, err = _a4_extract_pdf(cached, pdf_extractor)
+                rows, tworows, n_cand, err, cands = _a4_extract_pdf(cached, pdf_extractor)
                 if pdf_extractor is None:
                     out = {"event": "downloaded_no_extract", "status": "downloaded_no_extract",
                            "gate": "pass_downloaded", "reason": "PDF 已下载，待补抽取",
@@ -1059,7 +1065,7 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
                            "pdf": cached, "rows": [], "n_rows": 0, "n_tworows": 0}
                 else:
                     out = {"event": "extracted", "status": "extracted", "gate": "pass_downloaded",
-                           "reason": None, "pdf": cached, "rows": rows,
+                           "reason": None, "pdf": cached, "rows": rows, "candidates": cands,
                            "n_rows": len(rows), "n_tworows": len(tworows),
                            "n_candidates": n_cand, "cached": True}
             else:
@@ -1103,6 +1109,7 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
             fetch_log.append(r); needs_upload.append(r)
         per_doc[i] = {"index": i, "title": title, "doi": doi, "status": out["status"],
                       "reason": out.get("reason"), "pdf": pdf, "rows": rows,
+                      "candidates": out.get("candidates") or [],
                       "n_rows": len(rows), "n_tworows": n_tworows,
                       **({"cached": True} if out.get("cached") else {})}
         yield _emit({"event": out["event"], "index": i, "total": total, "title": title,

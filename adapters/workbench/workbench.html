@@ -136,6 +136,11 @@
   .a4page img { max-width:100%; }
   .a4page-cap { color:#e5e7eb; font-size:11px; margin-top:4px; }
   .a4doc-actions { margin-top:8px; }
+  .a4cands { margin-top:10px; border-top:1px dashed var(--line); padding-top:8px; }
+  .a4cands summary { cursor:pointer; font-size:12px; color:var(--soft); user-select:none; }
+  .a4cands-list { margin:8px 0 0; padding-left:16px; font-size:12px; line-height:1.7; }
+  .a4cands-list li { margin:2px 0; }
+  .a4cand-snippet { color:var(--soft); opacity:.8; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; }
   .a4up-card { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:8px 0; }
   .a4up-card .a4title { max-width:none; white-space:normal; font-weight:500; }
   /* 底部信息栏：滚动显示后台输出 / 进度 */
@@ -696,7 +701,10 @@ function renderNode() {
         <span id="a4prev-status" class="pill soft" style="display:none"></span></div>
       <div id="a4pdf-cache" class="a4cache" style="margin:6px 0 0;color:var(--soft)"></div>
       <div id="a4prev-list" style="margin-top:10px"></div>`;
-    $("#center").appendChild(prev);
+    // 抽取框置于「批准 / 打回」决策框之上：表明先抽完数据、再决定是否放行
+    const actsEl = document.getElementById("acts");
+    if (actsEl) $("#center").insertBefore(prev, actsEl);
+    else $("#center").appendChild(prev);
     // 提前告知用户将复用多少本地 PDF（证据，避免「是不是要重下」的疑惑）
     fetch(apiUrl("/api/a4_pdf_cache"))
       .then(r => r.ok ? r.json() : null).then(j => {
@@ -822,7 +830,7 @@ function renderActions() {
     const hint = document.createElement("div");
     hint.className = "acts-hint";
     hint.innerHTML = "🟢 <b>继续</b>：核对上方逐篇抽取数据无误后，点绿色「批准 / 放行」进入下一阶段；" +
-      "缺 PDF 的篇目到「待上传 / 补抽取 PDF」面板上传。修改某篇数据后记得点该篇的「💾 保存本篇修订」。";
+      "缺 PDF 的篇目到「待上传 / 补抽取 PDF」面板上传。修改某篇数据后失焦即自动保存。";
     box.appendChild(hint);
   }
   const note = document.createElement("input");
@@ -1107,6 +1115,13 @@ const A4DOC_STATUS = {
   failed:               ["#dc2626", "失败"],
 };
 
+function doiLink(doi) {
+  if (!doi) return "";
+  const u = /^https?:\/\//i.test(doi) ? doi : "https://doi.org/" + doi.replace(/^doi:/i, "");
+  const disp = doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").replace(/^doi:/i, "");
+  return `<a class="a4doi" href="${esc(u)}" target="_blank" rel="noopener" title="在 doi.org 打开">🔗 ${esc(disp)}</a>`;
+}
+
 function renderA4Documents() {
   const res = (STATE.await && STATE.await.a4_result) || {};
   const docs = res.per_doc || [];
@@ -1122,7 +1137,7 @@ function renderA4Documents() {
         <span class="a4doc-idx">#${di + 1}</span>
         <span class="a4title">${esc(d.title || "(无标题)")}</span>
         <span class="pill" style="background:${st[0]}22;color:${st[0]}">${st[1]}</span>
-        ${d.doi ? `<span class="a4doi">${esc(d.doi)}</span>` : ""}
+        ${d.doi ? doiLink(d.doi) : ""}
         ${d.pdf ? `<span class="a4doi">📄 ${esc(d.pdf)}</span>` : ""}
       </div>
       <div class="a4doc-body">${rows}
@@ -1130,15 +1145,35 @@ function renderA4Documents() {
         ${["needs_upload","downloaded_no_extract","failed"].includes(d.status)
           ? `<label class="btn-mini file">⬆ 上传此篇 PDF<input type="file" accept=".pdf" onchange="a4UploadPdf(${(d.index !== undefined ? d.index : di)}, this)" style="display:none"></label>`
           : ""}
-        <button class="btn-mini" onclick="a4SaveDoc(${di})">💾 保存本篇修订</button>
       </div>
+      ${renderA4Candidates(d.candidates, di)}
       </div>
     </div>`;
   }).join("");
 }
 
+function renderA4Candidates(cands, di) {
+  if (!cands || !cands.length) return "";
+  const items = cands.map(c => {
+    const page = c.page || (c._meta && c._meta.page) || null;
+    const pageLink = page ? `<a class="a4doi" href="${esc(apiUrl("/api/pdf_page?session_path=" + encodeURIComponent(STATE.session.path) + "&doc_index=" + di + "&page=" + page))}" target="_blank" rel="noopener" title="查看原文该页">p${page}</a>` : "";
+    if (c.kind === "dichot_counts" || (c.payload && c.payload.events !== undefined)) {
+      const pl = c.payload || {};
+      return `<li>📊 计数提及：事件 ${esc(pl.events)} / 总数 ${esc(pl.total)} ${pageLink}
+        <span class="a4cand-snippet">…${esc((c.snippet || "").slice(-90))}</span></li>`;
+    }
+    if (c.kind === "pvalue" || c.measure === "P") {
+      const rp = c.reported || {};
+      return `<li>🅿 显著性 p=${esc(rp.p)} ${rp.sig ? "（显著）" : ""} ${pageLink}</li>`;
+    }
+    return `<li>提及 ${pageLink} <span class="a4cand-snippet">…${esc((c.snippet || "").slice(-90))}</span></li>`;
+  }).join("");
+  return `<details class="a4cands"><summary>正文候选提及（${cands.length} 条 · 需人工判断能否入 2×2）</summary>
+    <ul class="a4cands-list">${items}</ul></details>`;
+}
+
 function a4RowHtml(d, di, r, ri) {
-  const cell = (k) => `<input class="a4cell" data-di="${di}" data-ri="${ri}" data-k="${esc(k)}" value="${esc(r[k] ?? "")}">`;
+  const cell = (k) => `<input class="a4cell" data-di="${di}" data-ri="${ri}" data-k="${esc(k)}" value="${esc(r[k] ?? "")}" onchange="a4AutoSave(${di})">`;
   const page = r.source_page;
   const viewBtn = (d.pdf && page)
     ? `<button class="btn-mini" onclick="a4ViewPage(${di}, ${page})">🔍 查看原文第 ${page} 页</button>` : "";
@@ -1190,6 +1225,13 @@ function a4SaveDoc(di) {
     }).catch(e => flash("保存失败：" + e, "err"));
 }
 
+// 单元格失焦即自动保存本篇修订（替代原「💾 保存本篇修订」按钮；上传 PDF 后抽取结果亦自动接受）
+let _a4_autosave_t;
+function a4AutoSave(di) {
+  clearTimeout(_a4_autosave_t);
+  _a4_autosave_t = setTimeout(() => a4SaveDoc(di), 400);
+}
+
 function renderA4Uploads() {
   const res = (STATE.await && STATE.await.a4_result) || {};
   const docs = (res.per_doc || []).filter(d => d.status === "needs_upload" || d.status === "downloaded_no_extract");
@@ -1198,7 +1240,7 @@ function renderA4Uploads() {
   return docs.map((d) => {
     const di = d.index;
     return `<div class="a4up-card">
-      <div class="a4title">${esc(d.title || "(无标题)")} ${d.doi ? `<span class="a4doi">${esc(d.doi)}</span>` : ""}</div>
+      <div class="a4title">${esc(d.title || "(无标题)")} ${d.doi ? doiLink(d.doi) : ""}</div>
       <div class="a4reason" style="max-width:none;text-align:left;margin:4px 0">${esc(d.reason || "")}</div>
       <label class="btn-mini file">⬆ 上传此篇 PDF
         <input type="file" accept=".pdf" onchange="a4UploadPdf(${di}, this)" style="display:none"></label>
