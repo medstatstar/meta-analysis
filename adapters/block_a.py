@@ -503,13 +503,19 @@ def a3_screening(studies, inclusion_hints=None):
         seen.add(key)
         inc, reason = _heuristic_include(s, inclusion_hints)
         is_rev, rev_reason = is_likely_review(s)
+        if is_rev and inc:
+            # review-guard：命中综述特征 → 默认排除（从源头不送 A4 抽取，综述本无原始 2×2）。
+            # 只降不升：已被启发式剔除的保持其更严的排除理由；人工可在裁决下拉翻回「纳入」
+            # （decision_of 显式 decision 优先，翻回即生效），故这是"默认排除"而非硬锁。
+            inc = False
+            reason = f"review-guard 默认排除：{rev_reason}（如确需此综述请在裁决中翻为纳入）"
         entry = {
             "title": s.get("title"),
             "year": s.get("year"),
             "doi": s.get("doi"),
             "include": inc,
             "reason": reason,
-            # review-guard：纯*警告*标记，绝不覆盖 include/decision（人工裁决优先）
+            # review-guard：疑似综述标记（供前台黄徽标 + 默认排除依据，人工裁决优先）
             "is_review": is_rev,
             "review_reason": rev_reason,
             # 透传摘要片段，供人工/下载决策判断"是否真相关"
@@ -534,16 +540,24 @@ def _a3_nha_from_screened(screened):
     n_inc = decs.count(DECISION_INCLUDE)
     n_exc = decs.count(DECISION_EXCLUDE)
     n_uncertain = decs.count(DECISION_UNCERTAIN)
+    # review-guard：命中综述特征且被默认排除的篇数（供提示语说明"为何自动剔除"）
+    n_rev_excl = sum(1 for s in screened
+                     if s.get("is_review") and decision_of(s) == DECISION_EXCLUDE)
+    rev_note = (f"其中 {n_rev_excl} 篇疑似综述（review/meta）已被默认排除——综述无原始 2×2 数据，"
+                f"如确需保留请在对应行翻为「纳入」；"
+                if n_rev_excl else "")
     return {
         "type": "review",
         "prompt": (f"初筛裁决（软停）：去重后 {len(screened)} 篇，"
                    f"纳入 {n_inc} / 剔除 {n_exc} / 低置信 {n_uncertain}。"
+                   f"{rev_note}"
                    f"低置信需人工定夺（默认随纳入走，但请复核）。"
                    f"请逐条确认或翻转，重点复核剔除项以防误剔关键研究。"),
         "required": True,
         "gate": "none",
         "summary": {"n_total": len(screened), "n_include": n_inc,
-                    "n_exclude": n_exc, "n_uncertain": n_uncertain},
+                    "n_exclude": n_exc, "n_uncertain": n_uncertain,
+                    "n_review_excluded": n_rev_excl},
         "decisions": [_a3_decision_row(s) for s in screened],
     }
 
@@ -1054,7 +1068,9 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
         meta = {"index": i, "total": total, "title": title, "doi": doi}
         yield _emit({"event": "start", **meta})
 
-        if sc and not sc.get("include", True):  # screened 为空（未筛）→ 宽松默认纳入
+        # 门控以 decision_of() 为准（人工显式 decision 优先于 include 布尔）：
+        # review-guard 默认排除的综述，人工在裁决下拉翻为「纳入」后此处即放行。
+        if sc and decision_of(sc) == DECISION_EXCLUDE:
             r = {"title": title, "doi": doi, "gate": "relevance_skip",
                  "reason": sc.get("reason", "未通过摘要相关性门控")}
             fetch_log.append(r)

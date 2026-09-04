@@ -82,6 +82,8 @@ SCHEMA = {
         "title": "初筛逐条裁决",
         "gate_type": "soft",
         "intro": "逐条裁决：纳入 / 剔除 / 低置信（低置信 = 需人工定夺，默认随纳入走）。"
+                 "review-guard：标题/摘要命中综述特征（review / meta-analysis / systematic review 等）的篇目"
+                 "默认剔除（综述无原始 2×2 数据，避免无效抽取），行上打「🔍 疑似综述」徽标，如确需保留可翻为「纳入」。"
                  "点标题行可展开刊名、日期、卷期页、作者、摘要等详情；"
                  "上方筛选按钮可按裁决结果单独查看。"
                  "也可用「⬇ 下载裁决表」导出 Excel、改完「裁决/理由」两列后「⬆ 上传更新」批量回写。"
@@ -92,6 +94,7 @@ SCHEMA = {
                 {"path": "n_include", "label": "纳入"},
                 {"path": "n_exclude", "label": "剔除"},
                 {"path": "n_uncertain", "label": "低置信"},
+                {"path": "n_review_excluded", "label": "其中疑似综述默认剔除"},
             ]},
             {"label": "逐条决策", "kind": "rowlist", "path": "nha.decisions",
              "editable": True, "revision_key": "screened",
