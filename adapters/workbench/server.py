@@ -261,6 +261,7 @@ class A4PreviewReq(BaseModel):
     pdf_dir: Optional[str] = None
     max_attempts: int = 12
     email: Optional[str] = None
+    cached_only: bool = False        # True=仅抽本地已下载 PDF 的篇目，待上传篇目不排队
 
 class TopicHelpReq(BaseModel):
     topic: str
@@ -431,7 +432,8 @@ async def api_a4_preview(req: A4PreviewReq):
             for ev in block_a.a4_stream(studies, screened or [],
                                         pdf_dir=req.pdf_dir,
                                         max_attempts=req.max_attempts,
-                                        email=req.email):
+                                        email=req.email,
+                                        cached_only=req.cached_only):
                 q.put(ev)
         except Exception as e:  # noqa: BLE001
             q.put({"event": "error", "message": f"{type(e).__name__}: {e}"})

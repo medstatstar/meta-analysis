@@ -702,7 +702,7 @@ function renderNode() {
     const prev = document.createElement("div");
     prev.className = "panel"; prev.id = "a4preview";
     prev.innerHTML = `<div class="pl">📥 抽取 2×2 效应量（A4 红线 · 需人工核验）</div>
-      <p class="node-intro" style="margin:0 0 8px"><b>不会重复下载你已经下好的 PDF。</b>点下方按钮，系统会<b>逐篇抽取 2×2 效应量</b>（事件数 / TE / seTE）：本地 <code>pdfs/</code> 里已有的 PDF 直接复用、跳过联网；<b>只有缺失或上次下载失败的篇目</b>才重新抓取。这步会<b>真实联网、可能耗时较长</b>；<b>付费墙 / 下载失败 / 无入口</b>的篇目会在下方「逐篇文档」里标红，可直接在该篇目下补传 PDF。运行期间按钮禁用，<b>请勿重复点击</b>。</p>
+      <p class="node-intro" style="margin:0 0 8px"><b>只抽本地已下载的 PDF，不联网重抓。</b>点下方按钮，系统<b>仅对本地已落盘的全文 PDF 逐篇抽取 2×2 效应量</b>（事件数 / TE / seTE）：<b>没有已下载 PDF 的篇目不会进入队列</b>，会留在下方「待上传 PDF」面板等补传。<b>付费墙 / 无入口</b>的篇目在「逐篇文档」里标红，可直接在该篇目下补传 PDF 后重跑本按钮。运行期间按钮禁用，<b>请勿重复点击</b>。</p>
       <div class="actions"><button class="btn-revise" id="btn-a4prev" onclick="startA4Preview()">⬇ 抽取 2×2 数据（本地已下载不重下）</button>
         <span id="a4prev-status" class="pill soft" style="display:none"></span></div>
       <div id="a4pdf-cache" class="a4cache" style="margin:6px 0 0;color:var(--soft)"></div>
@@ -938,6 +938,7 @@ function startA4Preview() {
     const dot = el.querySelector(".a4dot");
     const MAP = {
       start:               ["#94a3b8", "排队中",            "#94a3b8"],
+      cached:              ["var(--soft)", "复用本地PDF",   "#2563eb"],
       downloading:         ["var(--accent)", "下载中",      "#2563eb"],
       extracting:          ["var(--soft)", "抽取中",       "#f59e0b"],
       extracted:           ["var(--green)", "✓ 已抽取",    "#16a34a"],
@@ -972,7 +973,7 @@ function startA4Preview() {
 
   setBusy(true, "下载并抽取");
   log("▶ 开始下载全文 PDF 并抽取数据…");
-  streamPost("/api/a4_preview", {session_path: STATE.session.path}, {
+  streamPost("/api/a4_preview", {session_path: STATE.session.path, cached_only: true}, {
     onEvent(ev) {
       if (ev.event === "done") {
         const r0 = ev.result || {};

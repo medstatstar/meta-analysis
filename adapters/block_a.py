@@ -1007,7 +1007,8 @@ def _ordered_parallel(items, workers, fn):
 
 
 def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
-              inclusion_hints=None, email=None, workers=4, pdf_cache_map=None):
+              inclusion_hints=None, email=None, workers=4, pdf_cache_map=None,
+              cached_only=False):
     """生成器：逐篇研究执行 A4 下载+抽取，实时 yield 进度事件（供工作台实时预览）。
 
     每次 yield 一个事件 dict，关键字段：
@@ -1066,7 +1067,6 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
         title = s.get("title") or ""
         doi = s.get("doi")
         meta = {"index": i, "total": total, "title": title, "doi": doi}
-        yield _emit({"event": "start", **meta})
 
         # 门控以 decision_of() 为准（人工显式 decision 优先于 include 布尔）：
         # review-guard 默认排除的综述，人工在裁决下拉翻为「纳入」后此处即放行。
@@ -1081,6 +1081,20 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
         n_passed += 1
 
         cand = _pick_candidate(s)
+        cached = _a4_cached_pdf(s, pdf_dir, pdf_cache_map)
+
+        # 仅抽本地已下载：无 PDF 的篇目不排队、不进入实时抽取列表；
+        # 仍记入 per_doc(status=needs_upload) 与 needs_upload，供 done 后「待上传」面板展示与补传。
+        if cached_only and cached is None:
+            r = {"title": title, "doi": doi, "gate": "no_local_pdf",
+                 "reason": "本地无已下载 PDF，本次仅抽本地已下载篇目（待上传的请在下方列表补传后重跑）"}
+            fetch_log.append(r); needs_upload.append(r)
+            per_doc[i] = {"index": i, "title": title, "doi": doi, "status": "needs_upload",
+                          "reason": r["reason"], "pdf": None, "rows": [], "n_tworows": 0}
+            continue  # 不 yield 任何事件 → 不出现在实时抽取列表
+
+        yield _emit({"event": "start", **meta})
+
         if not cand:
             r = {"title": title, "doi": doi, "gate": "no_candidate",
                  "reason": "通过相关性门控但无下载入口（无 PMID/DOI/直链），需用户上传 PDF"}
@@ -1090,7 +1104,6 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
             yield _emit({"event": "failed", **meta, **r})
             continue
 
-        cached = _a4_cached_pdf(s, pdf_dir, pdf_cache_map)
         if cached is None:
             # 配额按「实际发起下载数」计（缓存复用不消耗；付费墙/网络失败不消耗），
             # 确保可下载的 OA 论文不被饿死
