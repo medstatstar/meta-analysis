@@ -350,9 +350,6 @@ async function loadSession(path) {
 async function decide(action, btn) {
   if (!STATE) return;
   const aw = STATE.await;
-  if (action === "revised" && Object.keys(DRAFT).length === 0) {
-    flash("revise 需要先编辑至少一个字段", "err"); return;
-  }
   // 防重复点击：立即禁用所有决策按钮并显示「提交中…」
   const buttons = $("#acts").querySelectorAll("button");
   buttons.forEach(b => { b.disabled = true; });
@@ -491,7 +488,7 @@ async function a3UploadExcel(fileEl) {
     STATE = data.state; DRAFT = {}; render();
     const s = data.stats || {};
     log(`Excel 更新完成：匹配 ${s.matched || 0} / 更新 ${s.updated || 0} / 未匹配 ${s.unmatched || 0}。`
-        + `已回到 A3 软停，请复核后点「修订后放行」。`, "ok");
+        + `已回到 A3 软停，请复核后点「批准 / 放行」。`, "ok");
     flash("Excel 已更新并回写 A3", "ok");
   } catch (e) {
     log("上传失败：" + e.message, "err");
@@ -837,9 +834,16 @@ function renderActions() {
     b.onclick = onclick || (() => decide(action, b)); box.appendChild(b);
   };
   if (opts.includes("approved")) mk("✓ 批准 / 放行", "btn-approve", "approved");
-  if (opts.includes("revised")) mk("✎ 修订后放行", "btn-revise", "revised");
   if (opts.includes("skipped")) mk("⏭ 跳过", "btn-skip", "skipped");
   if (opts.includes("rejected")) mk("✕ 打回 / 回退", "btn-reject", "rejected", openRejectPicker);
+  if (opts.includes("skipped")) {
+    const sh = document.createElement("div");
+    sh.className = "acts-hint";
+    sh.style.marginTop = "6px";
+    sh.innerHTML = "⏭ <b>跳过</b>：本会话不再在此步停靠确认，已有结果保留、下游照常计算；" +
+      "🔴 红线闸不可跳过（只能批准 / 打回）。";
+    box.appendChild(sh);
+  }
   bindDraftInputs($("#center"));
 }
 function collectDraft(el) {
