@@ -1076,7 +1076,10 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
             fetch_log.append(r)
             per_doc[i] = {"index": i, "title": title, "doi": doi, "status": "skip",
                           "reason": r["reason"], "pdf": None, "rows": [], "n_tworows": 0}
-            yield _emit({"event": "skip", **meta, **r})
+            # 仅抽本地已下载模式下，跳过的篇目不进实时抽取列表（与待上传篇目一致）；
+            # 其状态仍记入 per_doc(status=skip)，供 A4 逐篇文档面板展示，且不进 needs_upload。
+            if not cached_only:
+                yield _emit({"event": "skip", **meta, **r})
             continue
         n_passed += 1
 
