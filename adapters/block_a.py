@@ -620,8 +620,12 @@ def export_screening_xlsx(session_path, out_path, lang="zh"):
         sys.path.insert(0, _ct)
     import export_xlsx as ex  # noqa: F401  (懒加载；import 失败即抛，由端点捕获)
     meta = {"topic": sess.data.get("topic", ""), "total": len(works)}
+    # 裁决列下拉选项：中文显示标签 + 英文 internal 值，与 _DECISION_ALIAS 口径
+    # 一致（parse_screening_xlsx 经 _norm_decision 归一）。双标签兼容预填英文值。
+    decision_options = ["纳入", "排除", "低置信", "include", "exclude", "uncertain"]
     ex.export_workbook({"count": len(works), "works": works, "meta": meta},
-                       out_path, lang=lang, decisions=ct_decisions)
+                       out_path, lang=lang, decisions=ct_decisions,
+                       decision_options=decision_options)
     return out_path, len(works)
 
 
