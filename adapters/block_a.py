@@ -378,6 +378,40 @@ def _heuristic_include(study, inclusion_hints=None):
 
 
 # ---------------------------------------------------------------------------
+# A3 review-guard：综述/二次研究检测（零幻觉、纯关键词；*警告*信号，不覆盖人工裁决）
+# 目的：综述/meta 本身无原始 2×2 表，送进 A4 抽取只会 0 行、浪费配额。在 A3 打标 +
+# A4 抽取前软警告，让人先判断是否排除，而非静默抽空。
+# ---------------------------------------------------------------------------
+_REVIEW_STRONG = re.compile(
+    r"systematic review|meta[- ]?analysis|scoping review|umbrella review|"
+    r"overview of (the )?(literature|studies|reviews)|rapid review|narrative review|"
+    r"literature review|pooled analysis|quantitative synthesis|"
+    r"系统综述|荟萃分析|meta\s*分析|范围综述|伞状综述|综述", re.I)
+_REVIEW_WEAK = re.compile(r"\b(review|综述)\b", re.I)
+_REVIEW_WEAK_EXCLUDE = re.compile(r"(peer|under|in)\s+review\b", re.I)
+
+
+def is_likely_review(study):
+    """标题/摘要级综述检测。返回 (bool, reason_or_None)。
+
+    - 强短语（systematic review / meta-analysis / 系统综述 / 荟萃分析 …）直接判综述；
+    - 弱信号（裸 review/综述）接受，但排除「peer/under/in review」误伤；
+    - 纯*警告*：绝不把 include 翻成 exclude，人工裁决优先。
+    """
+    if not isinstance(study, dict):
+        return False, None
+    title = str(study.get("title") or "")
+    abstract = str(study.get("abstract_snippet") or study.get("abstract") or "")
+    text = (title + " " + abstract).lower()
+    m = _REVIEW_STRONG.search(text)
+    if m:
+        return True, f"命中综述特征：{m.group(0).strip()}"
+    if _REVIEW_WEAK.search(text) and not _REVIEW_WEAK_EXCLUDE.search(text):
+        return True, "标题/摘要含 review/综述（弱信号）"
+    return False, None
+
+
+# ---------------------------------------------------------------------------
 # A3 决策三态（include / exclude / uncertain）
 # 后台原本只有 bool include，「低置信」靠 reason 里含「待人工」隐式表达，
 # 前台无法按三态筛选。此处显式化，同时保留 include 布尔以兼容下游
@@ -437,12 +471,21 @@ def _a3_meta(s):
 def _a3_decision_row(s):
     """screened 记录 → 前台「逐条决策」一行（三态 + 元数据）。"""
     d = decision_of(s)
+    # review-guard：优先用已存标记；Excel 回写重建的 screened 可能无该字段，
+    # 此时从条目本身（标题/摘要）回退重算，保证徽标一致。
+    is_rev = bool(s.get("is_review"))
+    rev_reason = s.get("review_reason")
+    if not is_rev and (s.get("title") or s.get("abstract_snippet")):
+        is_rev, rev_reason = is_likely_review(s)
     row = {
         "title": s.get("title"),
         "decision": d,
         # 兼容字段：uncertain 视为宽松纳入（与既有下游语义一致）
         "include": d != DECISION_EXCLUDE,
         "reason": s.get("reason"),
+        # review-guard：标记疑似综述/meta，供前台打黄标提醒人工复核
+        "is_review": is_rev,
+        "review_reason": rev_reason,
     }
     row.update(_a3_meta(s))
     return row
@@ -459,12 +502,16 @@ def a3_screening(studies, inclusion_hints=None):
             continue
         seen.add(key)
         inc, reason = _heuristic_include(s, inclusion_hints)
+        is_rev, rev_reason = is_likely_review(s)
         entry = {
             "title": s.get("title"),
             "year": s.get("year"),
             "doi": s.get("doi"),
             "include": inc,
             "reason": reason,
+            # review-guard：纯*警告*标记，绝不覆盖 include/decision（人工裁决优先）
+            "is_review": is_rev,
+            "review_reason": rev_reason,
             # 透传摘要片段，供人工/下载决策判断"是否真相关"
             "abstract_snippet": s.get("abstract_snippet"),
         }
@@ -1111,7 +1158,13 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
                       "reason": out.get("reason"), "pdf": pdf, "rows": rows,
                       "candidates": out.get("candidates") or [],
                       "n_rows": len(rows), "n_tworows": n_tworows,
+                      "is_review": is_likely_review(s)[0],
                       **({"cached": True} if out.get("cached") else {})}
+        # review-guard 软警告：疑似综述/meta 却抽出 0 行 → 提示属正常，避免误判"抽取失败"
+        if per_doc[i]["is_review"] and out["status"] == "extracted" and len(rows) == 0:
+            per_doc[i]["review_note"] = ("⚠ 该文献疑似综述/meta（" +
+                (is_likely_review(s)[1] or "review 特征") +
+                "），本就无原始 2×2 表，抽取为 0 属正常；如需原始数据请打回到筛选层重新裁决")
         yield _emit({"event": out["event"], "index": i, "total": total, "title": title,
                      "doi": doi, "gate": out.get("gate"), "reason": out.get("reason"),
                      "pdf": pdf, "n_rows": len(rows), "n_tworows": n_tworows,

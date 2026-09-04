@@ -143,6 +143,12 @@
   .a4cand-snippet { color:var(--soft); opacity:.8; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; }
   .a4up-card { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:8px 0; }
   .a4up-card .a4title { max-width:none; white-space:normal; font-weight:500; }
+  /* review-guard：疑似综述/meta 徽标 + A4 软警告条 */
+  .rev-badge { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:10px;
+    background:#fff4e5; color:#a05a00; border:1px solid #ffd8a8; font-size:11px; font-weight:600;
+    vertical-align:middle; white-space:nowrap; }
+  .a4rev-note { margin:6px 0 2px; padding:6px 10px; border-radius:7px; font-size:12px; line-height:1.5;
+    background:#fff4e5; color:#8a4b00; border:1px solid #ffd8a8; }
   /* 底部信息栏：滚动显示后台输出 / 进度 */
   body { padding-bottom: 176px; }
   body.log-collapsed { padding-bottom: 46px; }
@@ -798,7 +804,13 @@ function renderRowlist(p, data, ctx) {
       if (c.type === "bool") return `<td>${raw ? "是" : "否"}</td>`;
       if (c.expand)
         return `<td class="rl-title"><span class="rl-toggle ${A3_EXPANDED.has(i) ? "open" : ""}" onclick="a3ToggleExpand(${i})">${A3_EXPANDED.has(i) ? "▾" : "▸"}</span>` +
-               `<a class="rl-title-link" onclick="a3ToggleExpand(${i})">${esc(raw ?? "—")}</a></td>`;
+               `<a class="rl-title-link" onclick="a3ToggleExpand(${i})">${esc(raw ?? "—")}</a>` +
+               (row.is_review ? `<span class="rev-badge" title="${esc(row.review_reason || "疑似综述/meta，建议复核或排除")}">🔍 疑似综述</span>` : "") +
+               `</td>`;
+      if (c.path === "title")
+        return `<td class="rl-title">${esc(raw ?? "—")}` +
+               (row.is_review ? `<span class="rev-badge" title="${esc(row.review_reason || "疑似综述/meta，建议复核或排除")}">🔍 疑似综述</span>` : "") +
+               `</td>`;
       return `<td>${esc(raw ?? "—")}</td>`;
     }).join("");
     let det = "";
@@ -1139,7 +1151,9 @@ function renderA4Documents() {
         <span class="pill" style="background:${st[0]}22;color:${st[0]}">${st[1]}</span>
         ${d.doi ? doiLink(d.doi) : ""}
         ${d.pdf ? `<span class="a4doi">📄 ${esc(d.pdf)}</span>` : ""}
+        ${d.is_review ? `<span class="rev-badge">🔍 疑似综述</span>` : ""}
       </div>
+      ${d.review_note ? `<div class="a4rev-note">${esc(d.review_note)}</div>` : ""}
       <div class="a4doc-body">${rows}
         <div class="a4doc-actions">
         ${["needs_upload","downloaded_no_extract","failed"].includes(d.status)
