@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-bug_report.py — ct- 系列「技能错误报告」客户端适配器 (ct-base §20.3)
+bug_report.py — ct- 系列「技能错误报告」共享适配器模板 (ct-base §20.3)
 
-功能（各 ct- 叶子技能复制到自身 adapters/ 目录后使用，§16.9 出站目录）：
+功能（供各 ct- 叶子技能复制到自身 adapters/ 目录后使用，§16.9 出站目录）：
   1. detect_error_signal(): 会话内错误信号判定（工具化；触发规则仍以 SKILL.md agent 规则为准）
   2. build_report(): 组装「脱敏」错误报告（固定白名单信封；description 为自由文本问题描述）
-  3. render_report_text(): 渲染为可读文本，供用户三阶段确认
+  3. render_report_text(): 渲染为可读文本，供用户两阶段确认（①展示并提议 → ②确认发送）
   4. confirm_prompt(): 双语一次性提议文案（i18n 提示，中英）
-  5. send_to_endpoint(): POST 到「统一 bug-report coze 端点」（仅 action=report）
-  6. save_local_report(): 本地兜底（无 coze 调用时生成 md + 作者邮箱，数据不出域）
+  5. send_to_endpoint(): POST 到「统一 bug-report coze 端点」（仅 action=report）；返回含 history（同 query_origin 上一条历史记录 JSON 或 ""）
+  6. confirm_thanks() / build_followup() / parse_history(): 发送成功后「历史回执」文案生成（§20.3 历史回执：2.1 感谢 + 2.2 已修复通知 / 2.3 未修复通知）
+  7. save_local_report(): 本地兜底（无 coze 调用时生成 md + 作者邮箱，数据不出域）
 
 【职责边界】本文件是「报告客户端」，只负责上报：
   - 唯一动作 = report（写一条脱敏报告到统一端点）。
@@ -23,7 +24,7 @@ bug_report.py — ct- 系列「技能错误报告」客户端适配器 (ct-base 
     所用算法或函数（如 Schoenfeld 公式、ss_survival_logrank）/ 错误消息原文」，必要时可写数值与
     研究设计内容（如 HR=0.75、power=0.85、1:1 分配比）**——以能复现问题为准。
     唯一硬边界：不写可识别个人/机构/受试者的身份信息（姓名、ID、邮箱、单位、受试者编号）。
-    内容最终由用户在三阶段确认②检视把关（用户同意才发送）。
+    内容最终由用户在两阶段确认①检视把关（用户同意才发送）。
   - 仅标准库；端点是占位符，叶子技能接入时替换为真实统一端点 URL。
   - 出站鉴权：send 前必须经技能既有出站授权闸门（§5）确认；本文件不自行授权。
   - query_origin（§8.6）：sha256(hostname)，随每个报告发送，服务端归因/限流。
@@ -39,9 +40,15 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-# coze_token 提供通用 XOR+base64 混淆（算法单份，key 各自维护）
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from coze_token import obf_decode
+# ── §8.6 硬件绑定机器标识：统一从本技能 scripts/hardware_id.py 导入（ct-base 共享件 vendored 副本）──
+# 任何叶子技能复制本文件时，须配套复制 scripts/hardware_id.py。取不到时回退主机名（保证永不崩）。
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "scripts"))
+try:
+    from hardware_id import hardware_id as _hardware_id
+except Exception:  # pragma: no cover
+    _hardware_id = None
 
 # ── 报告信封：硬白名单字段（§20.3.2 脱敏铁律）───────────────────────────
 # 只允许这些键；值类型固定。任何未列入信封的用户数据键（原始数据表/受试者记录）都会在 sanitize 时被剔除。
@@ -56,36 +63,15 @@ REPORT_SCHEMA = {
     "engine_status": str,    # 引擎状态摘要（如 "coze ok" / "r_engine error"）；无则 ""
     "description": str,      # 用户把关制问题描述（现象/复现/算法或函数/可含数值与研究设计；不含可识别身份信息）
     "locale": str,           # 会话语言（"zh"/"en"）
-    "query_origin": str,     # §8.6 客户端标识（sha256(hostname)）
-    "session_hash": str,     # 会话指纹（sha256(hostname+date)），不含会话内容
+    "query_origin": str,     # §8.6 客户端标识（硬件绑定 sha256，跨账号/主机名稳定）
+    "session_hash": str,      # 会话指纹（硬件标识+日期），不含会话内容
     "attempts": int,         # 同检验重试次数（1 = 首次失败）
 }
 
-# ── 统一报告端点（已发布 2026-08-21，ct-bugreport 正式域名）──────────────
-# 全库共用一个端点（§20.3.5）：接收 → 校验 → 飞书表格落库 → 通知。
-DEFAULT_ENDPOINT = "https://ct-bugreport.coze.site/run"
+# ── 统一报告端点（占位符；各技能接入时替换为真实 URL）──────────────────
+# 全库共用一个端点（§20.3.5），由作者一次性建设：接收 → 校验 → 落库 → 通知。
+DEFAULT_ENDPOINT = "https://ct-bugreport.coze.site/run"  # TODO: 替换为实际部署 URL
 AUTHOR_EMAIL = "medstatstar@gmail.com"  # §13.2 联系方式（本地兜底）
-
-# ── 端点访问 token：公共凭据（§5 公用凭据最低线 = XOR+base64 混淆内嵌）──
-# 用户授权（2026-08-21）：该 token 绑定公开端点、无个人归属，可随技能发布；
-# OBFUSCATION 非加密（密钥随脚本、可逆），仅防明文扫描/误读，不得宣称安全存储。
-_OBFUSCATION_KEY = b"ct-bugreport-coze-obf-v1-3c9e"
-_EMBEDDED_SECRETS = {
-    "ct_bugreport_coze": (
-        "Bg1nChcgEQw_BjgneBkmSytEJhEvQAJBd3AqDywOLR4sISUeKB02Cjh6MhY0V2AbLCFkDnxuA1Z3HzEeYTU4VTwhExUrI2cPNgAOHjULLBRYVFR5E1pWLh1iCz8IFi0iGBEOQhUjSCNaDjFTRxQCXV8vVCsWPUQVHD4qMxsmGARPKgQwMWAVMC1JMVlMYghJCwYyXQsjMTQSIyo7QH5THz8GHC0yPFcgSHQDWm8sD0ReKxgxRgYzJkQ7aSoXNyFkXSwMSkV_R1BWdjYUHUw1M1c7Dx8XPA5KUCIQBh8gNi8cOnJnSQduLAo7RCgPBDUJHTUfIRsvFkMNTigJE3RECBtpMAwPAR0UURdUOBcSKEscdyVWCj9qORcCahoBSGBaST8nGx4sHwRAKBoIQDpXIl83D2BaLDJsQ395dhlwDBQdTlE_DTsPHwYTIxgKDUkzWDUkX0USaX9cOwsjCS0fNA8EQ1xADUAAQQEDQxV3Kw1VYxxSH34JUlQsIHxTODM_UT4rEQNiNzYDLENfTAAYEHdXdi5dVwcaSgwEIUUQPCQ1QFkxJw0RXzkTVGE3Z3xBCQgNIEdaFTMpBC4IOj8ATyA5TlNMGjAqdxxlTEs3ZiQKBwAaFgUALkUdRTtKFScuLncLGj9iQWlXZCReKws9QlRFIR5WRCgDFmUbGSg2Zh0XEBRACXVmTnQNVwdoUww-O1E3CQobSjEWShN5DAQHewRyZH4waSQmHVw4Ig0ZUzMwNERMJSJOV1VWVjNoJGFjejB7KCkeX1sRVxopKgYeE2oTBRwEb102IHk3XB50AE43FjBlDCIAIRU1NxsseDkcOzxeOFAWQhRFGFcoU10gQXQmLTA8UD0EFxh1UiANL3gIMSheJlB1VjJTJzkwWToxMEFSICQeA0ExWjgSYRYDCmgUUkYCC3UJJDBoFjo9IlAlPjkgYCIGQ1x5XzoMWhhlWQIJFCYnOH0uAAMrHCRXBSMeBA=="
-    ),
-}
-
-
-def get_endpoint_token() -> str:
-    """取 bugreport 端点访问 token（内嵌混淆 blob 解码；解析失败回退空串）。"""
-    blob = _EMBEDDED_SECRETS.get("ct_bugreport_coze")
-    if blob:
-        try:
-            return obf_decode(blob, _OBFUSCATION_KEY)
-        except Exception:  # pragma: no cover
-            return ""
-    return ""
 
 # ── 内置双语文案（一次性提示走 i18n 精神：中英各一版，供 agent 原样复述）──
 _MSGS = {
@@ -134,7 +120,10 @@ def _current_locale():
 
 
 def query_origin() -> str:
-    """§8.6 调用来源标识：sha256(hostname)，客户端生成。"""
+    """§8.6 调用来源标识：硬件绑定的 sha256（SMBIOS UUID / MachineGuid / machine-id），
+    跨 Windows 账号 / 改主机名 / 重装系统稳定；取不到时回退主机名。"""
+    if _hardware_id is not None:
+        return _hardware_id()
     try:
         host = socket.gethostname()
     except Exception:  # pragma: no cover
@@ -143,10 +132,10 @@ def query_origin() -> str:
 
 
 def session_hash() -> str:
-    """会话指纹：hostname + 日期哈希（不含会话内容，仅用于服务端去重/归因）。"""
+    """会话指纹：硬件标识 + 日期哈希（不含会话内容，仅用于服务端去重/归因）。"""
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return hashlib.sha256(
-        (socket.gethostname() + "|" + day).encode("utf-8", "replace")).hexdigest()[:16]
+    base = _hardware_id() if _hardware_id is not None else socket.gethostname()
+    return hashlib.sha256((base + "|" + day).encode("utf-8", "replace")).hexdigest()[:16]
 
 
 def sanitize_report(report: dict) -> dict:
@@ -177,7 +166,7 @@ def build_report(skill: str, skill_version: str, test: str,
     description：用户把关制问题描述（可选，推荐填写以协助作者 debug）。
       写「现象 / 复现步骤 / 期望 vs 实际 / 所用算法或函数 / 错误消息原文」，
       必要时可含数值与研究设计（如 HR=0.75、power=0.85、1:1 分配比）——以能复现为准；
-      唯一硬边界：不写可识别个人/机构/受试者的身份信息；由用户在三阶段确认②检视把关。"""
+      唯一硬边界：不写可识别个人/机构/受试者的身份信息；由用户在两阶段确认①检视把关。"""
     return sanitize_report({
         "skill": skill, "skill_version": skill_version, "test": test or "unknown",
         "error_type": error_type, "error_code": error_code or "",
@@ -272,25 +261,23 @@ def send_to_endpoint(report: dict, endpoint: str = None, token: str = None,
     """POST 到统一 bug-report 端点（action=report，唯一动作；治理动作不在此实现）。返回 {status, note}。
 
     - 调用方必须先经技能既有出站授权闸门（§5）确认；
-    - token 默认取内嵌公共凭据（§5 XOR+base64），可由调用方显式覆盖；
-    - 出参为字符串（线上协议 2026-08-21 起字符串返回），此处解析为 dict 返回。
+    - token 由作者发放（§20.3.5）；叶子接入时按 §5 公共凭据 XOR+base64 混淆内嵌（见 ct-samplesize 实装）；
+    - 协议（2026-08-21 线上实测）：① 网关入口校验 `Authorization: Bearer <token>` 头（缺头 401）；
+      ② 应用层 payload 也带 `token` 字段（服务端配置后校验）。两端必须一致携带。
     """
     r = sanitize_report(report)
     url = endpoint or DEFAULT_ENDPOINT
-    token = token if token is not None else get_endpoint_token()
     payload = json.dumps({
         "action": "report",
         "report": r,
         "query_origin": r.get("query_origin"),
-        "token": token,  # 应用层静态 token（服务端 CT_BUGREPORT_TOKEN 配置后生效；可空）
+        "token": token or "",
         "ts": datetime.now(timezone.utc).isoformat(),
     }, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=payload, method="POST", headers={
         "Content-Type": "application/json; charset=utf-8",
         "User-Agent": "ct-bug-report/1.0",
-        # ⚠️ 2026-08-21 线上实测：coze 平台网关入口校验 Bearer 头（401 即缺此头）；
-        # token 为公共凭据（§5 混淆内嵌），随包发布安全
-        "Authorization": "Bearer %s" % token,
+        "Authorization": "Bearer %s" % (token or ""),
     })
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -338,8 +325,8 @@ def save_local_report(report: dict, outdir: str = ".") -> str:
 
 
 if __name__ == "__main__":
-    # 自检：生成带问题描述的示例报告并本地落盘（不发网络）
-    demo = build_report(skill="ct-samplesize", skill_version="5.0.3",
+    # 模板自检：生成带问题描述的示例报告并本地落盘（不发网络）
+    demo = build_report(skill="ct-samplesize", skill_version="5.0.1",
                         test="survival", error_type="engine_error",
                         error_code="R_ENGINE_ERROR", engine_status="coze r engine error",
                         description="survival 检验（ss_survival_logrank，Schoenfeld 公式）"

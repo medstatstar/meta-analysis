@@ -123,6 +123,8 @@ def a1_topic_selection(topic, registry_probe=None):
         "scope_warning": scope_warning,
         "coze_ready": False,
         "note": "本地启发式兜底；双库（Cochrane/PubMed）探针评分与 PROSPERO 查重需 coze 或 ct-registry 支持。",
+        # 新增：选题可行性评估（拥挤度 / 证据量 / 方向稀缺度）
+        "feasibility": {"crowding": "unknown", "expected_studies": None, "risk_alert": None},
     }
     # A1 查重探针：真实调 ct-registry（CT.gov 来源）已注册试验数，供选题拥挤度判断
     if registry_probe:
@@ -131,8 +133,20 @@ def a1_topic_selection(topic, registry_probe=None):
         if total is not None:
             if total == 0:
                 report["scope_warning"] = (report["scope_warning"] or "") + " 注册库未检索到相关试验，属空白/新兴方向。"
+                report["feasibility"]["crowding"] = "empty"
+                report["feasibility"]["risk_alert"] = "⚠️ 方向空白，可能原始研究极少，预期可纳入研究数量不足（meta 至少 k≥2）。"
+            elif total < 5:
+                report["feasibility"]["crowding"] = "low"
+                report["feasibility"]["expected_studies"] = total
+                report["feasibility"]["risk_alert"] = f"⚠️ 注册库仅 {total} 项，预期可纳入研究较少，meta 分析效能可能不足。"
             elif total >= 200:
                 report["scope_warning"] = (report["scope_warning"] or "") + f" 注册库已检索到 {total} 项相关试验，方向可能已较拥挤，建议明确差异化角度。"
+                report["feasibility"]["crowding"] = "high"
+                report["feasibility"]["expected_studies"] = total
+            else:
+                report["feasibility"]["crowding"] = "moderate"
+                report["feasibility"]["expected_studies"] = total
+
     # 供工作台 A1 面板「PICOS 报告」文本框预填（editable_payload.report 的源）
     # —— 对齐 EDITABLE_KEYS["A1.topic_selection"]=["report"]，避免文本框空白。
     _rep = ["# PICOS 选题报告（本地启发式生成，请确认/修订后放行）", "",
@@ -145,8 +159,17 @@ def a1_topic_selection(topic, registry_probe=None):
         _rep.append(f"⚠️ 缺失维度：{', '.join(missing)}（本地启发式无法自动推断，请人工补全）")
     if scope_warning:
         _rep.append(f"⚠️ {scope_warning}")
+    # 新增：可行性信号
+    fea = report.get("feasibility", {})
+    if fea.get("crowding") and fea["crowding"] != "unknown":
+        _rep.append(f"📊 拥挤度：{fea['crowding']}" +
+                    (f"（预期约 {fea['expected_studies']} 项）" if fea.get("expected_studies") else ""))
+    if fea.get("risk_alert"):
+        _rep.append(fea["risk_alert"])
     if registry_probe:
         _rep.append(f"📋 注册库探针：{registry_probe.get('status')}（total={registry_probe.get('total')}）")
+    _rep.append("")
+    _rep.append("**后续步骤**：确认方向 → A2 检索 → A3 筛选 → A4 数据提取 → Block B 分析 → Block C 撰写。")
     report["report"] = "\n".join(_rep)
     nha = {
         "type": "confirm",
@@ -244,8 +267,17 @@ def a1_registry_check(topic, max_results=10, workdir=None):
 # ---------------------------------------------------------------------------
 # A2 检索委派 ct-literature（真实本地执行，不经 coze）
 # ---------------------------------------------------------------------------
-def a2_build_tool_card(topic, max_results=50, year_from=None, out_dir="."):
-    params = {"topic": topic, "max": max_results, "out_dir": out_dir}
+def a2_build_tool_card(topic, max_results=50, year_from=None, out_dir=".",
+                       include_reviews=False):
+    """Build the ct-literature tool card for A2 retrieval.
+
+    include_reviews (default False): when False, review-type publications are
+    excluded at the source (Europe PMC + OpenAlex both filter them out), so the
+    retrieval quota is spent on original studies rather than reviews that would
+    be excluded by A3 review-guard anyway. Set True for umbrella-review or
+    scoping-review scenarios where reviews are the target evidence."""
+    params = {"topic": topic, "max": max_results, "out_dir": out_dir,
+              "include_reviews": include_reviews}
     if year_from is not None:
         params["year_from"] = year_from
     return {
@@ -334,18 +366,15 @@ def _read_literature_dir(out_dir):
     return studies
 
 
-def a2_literature_search(topic, max_results=50, year_from=None, out_dir=".", on_line=None):
+def a2_literature_search(topic, max_results=50, year_from=None, out_dir=".",
+                         on_line=None, include_reviews=False):
     """构建 ct-literature tool_card → execute_tool_cards 本地执行 → 解析文献列表。
 
-    ct-literature 真实行为：数据写入 --out-dir 文件（stdout 仅日志），故优先从
-    返回 result 抽取（兼容 mock/未来 coze 形态），为空时回退读 --out-dir 文件。
-    返回 (studies, tool_card_outputs, card)。skill 未安装 / 网络失败 → status=error，
-    studies=[]，不抛错。
-
-    on_line：可选回调 f(line)，实时接收 ct-literature 子进程的进度输出
-    （经 execute_tool_cards 转发），供工作台底部信息栏展示；None 时行为不变。
+    include_reviews：是否允许综述类文献进入检索结果。默认 False（源头排除），
+    节省检索配额；仅在伞评/范围综述等需要综述作为证据时设为 True。
     """
-    card = a2_build_tool_card(topic, max_results, year_from, out_dir=out_dir)
+    card = a2_build_tool_card(topic, max_results, year_from, out_dir=out_dir,
+                              include_reviews=include_reviews)
     outs = cc.execute_tool_cards([card], out_dir=out_dir, on_line=on_line)
     studies = []
     if outs:
@@ -394,12 +423,22 @@ _REVIEW_WEAK_EXCLUDE = re.compile(r"(peer|under|in)\s+review\b", re.I)
 def is_likely_review(study):
     """标题/摘要级综述检测。返回 (bool, reason_or_None)。
 
+    - ★B1 (2026-09-04) 优先采信 API 权威 pubType 字段：study["pub_types"]
+      （Europe PMC pubTypeList / OpenAlex / Crossref type 经 literature_probe 归一化入），
+      含 "review" 变体即 100% 判综述——这是出版商自标 "Review" 标签的元数据等价物，
+      比关键词可靠；API 未标注的综述仍由下方关键词兜底（不误判、不漏判）。
     - 强短语（systematic review / meta-analysis / 系统综述 / 荟萃分析 …）直接判综述；
     - 弱信号（裸 review/综述）接受，但排除「peer/under/in review」误伤；
     - 纯*警告*：绝不把 include 翻成 exclude，人工裁决优先。
     """
     if not isinstance(study, dict):
         return False, None
+    # ★B1：pubType 硬信号优先（有则采信，零误判）
+    _pts = study.get("pub_types")
+    if isinstance(_pts, list):
+        for _pt in _pts:
+            if isinstance(_pt, str) and re.search(r"review", _pt, re.I):
+                return True, f"pubType 标注综述：{_pt.strip()}"
     title = str(study.get("title") or "")
     abstract = str(study.get("abstract_snippet") or study.get("abstract") or "")
     text = (title + " " + abstract).lower()
@@ -938,8 +977,12 @@ def _a4_extract_pdf(pdf_path, pdf_extractor):
     return rows, tworows, n_cand, None, cands
 
 
-def _a4_fetch_one(cand, out_path, email, pdf_extractor):
+def _a4_fetch_one(cand, out_path, email, pdf_extractor, study=None):
     """单篇「解析直链 → 下载 → 抽取」（纯 IO/CPU、无共享状态 → 可并行）。
+
+    本地直链下载失败时，若 study 含 DOI，自动委托 coze publisher_pdf_batch
+    （服务端真实浏览器 + 补充链）救援反爬/付费墙出版商 PDF，落盘到同一缓存目录
+    后走统一抽取。coze 不可用时静默降级为 needs_upload（与旧行为一致）。
 
     返回 (out, events)：out 为该篇最终状态，events 为过程事件（downloading /
     extracting），由主循环按 index 顺序统一 emit。
@@ -953,9 +996,21 @@ def _a4_fetch_one(cand, out_path, email, pdf_extractor):
                  "pdf": None, "rows": [], "n_rows": 0, "n_tworows": 0}, evs)
     evs.append({"event": "downloading", "url": url})
     if not pdf_fetch.download(url, out_path) or not _is_pdf(out_path):
-        return ({"event": "failed", "status": "needs_upload", "gate": "pass_download_fail",
-                 "reason": "通过门控但下载失败/非真 PDF，需用户上传 PDF",
-                 "pdf": None, "rows": [], "n_rows": 0, "n_tworows": 0}, evs)
+        # 本地直链下载失败 → 委托 coze 服务端真实浏览器救援（反爬/付费墙出版商）
+        coze_ok = False
+        doi = (study or {}).get("doi")
+        if doi:
+            evs.append({"event": "coze_rescue", "doi": doi})
+            try:
+                from pdf_fetch import _coze_pdf_download
+                info = _coze_pdf_download(doi, out_path)
+                coze_ok = bool(info) and _is_pdf(out_path)
+            except Exception:
+                coze_ok = False
+        if not coze_ok:
+            return ({"event": "failed", "status": "needs_upload", "gate": "pass_download_fail",
+                     "reason": "通过门控但下载失败/非真 PDF，需用户上传 PDF",
+                     "pdf": None, "rows": [], "n_rows": 0, "n_tworows": 0}, evs)
     if pdf_extractor is None:
         return ({"event": "downloaded_no_extract", "status": "downloaded_no_extract",
                  "gate": "pass_downloaded", "reason": "PDF 已下载，待补抽取",
@@ -1148,7 +1203,7 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
                            "n_rows": len(rows), "n_tworows": len(tworows),
                            "n_candidates": n_cand, "cached": True}
             else:
-                out, evs = _a4_fetch_one(cand, out_path, email, pdf_extractor)
+                out, evs = _a4_fetch_one(cand, out_path, email, pdf_extractor, study=s)
                 evs = [{**e, **base} for e in evs]
         except Exception as e:  # noqa: BLE001 — 单篇异常不得拖垮整批
             out = {"event": "failed", "status": "needs_upload", "gate": "worker_error",
@@ -1169,9 +1224,17 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
         n_tworows = out.get("n_tworows") or 0
         if out["status"] == "extracted":
             tworows = [r for r in rows if all(r.get(k) is not None for k in ("ai", "bi", "ci", "di"))]
+            # 可计算效应量行（te/sete 齐全且来自表格模板，anchor 含 'table#'）：
+            # 表格行 = 原文结构化报告（作者自算 HR/OR/RR 或 m±SD），可安全进 B 合并；
+            # 叙述行（anchor 含 'text:'）多为综述正文对他引结果的转述，非本篇原始数据 → 不收。
+            eff_rows = [dict(r, TE=r.get("te"), seTE=r.get("sete"))
+                        for r in rows
+                        if r.get("te") is not None and r.get("sete") is not None
+                        and str(r.get("anchor") or "").startswith("p") and "table#" in str(r.get("anchor") or "")]
             n_dl += 1
-            n_ext += len(tworows)
+            n_ext += len(tworows) + len(eff_rows)
             extracted_rows.extend(tworows)
+            extracted_rows.extend(eff_rows)
             review_rows.extend(rows)
             fetch_log.append({"title": title, "doi": doi, "gate": "pass_downloaded",
                               "pdf": pdf, "n_rows": len(rows), "n_tworows": len(tworows),
@@ -1191,6 +1254,7 @@ def a4_stream(studies, screened, pdf_dir=None, max_attempts=12,
                       "candidates": out.get("candidates") or [],
                       "n_rows": len(rows), "n_tworows": n_tworows,
                       "is_review": is_likely_review(s)[0],
+                      "included": True,   # A4 红线核验：人工可剔除（false = 不进 Block B 合并）
                       **({"cached": True} if out.get("cached") else {})}
         # review-guard 软警告：疑似综述/meta 却抽出 0 行 → 提示属正常，避免误判"抽取失败"
         if per_doc[i]["is_review"] and out["status"] == "extracted" and len(rows) == 0:
@@ -1486,7 +1550,7 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
                 max_attempts=12, pdf_email=None,
                 override_query=None, override_screened=None, on_line=None,
                 on_a4_event=None, start_stage=None, cached_envelope=None,
-                workers=4, pdf_cache_map=None):
+                workers=4, pdf_cache_map=None, include_reviews=False):
     """本地优先 Block A 驱动器。返回与 run_pipeline 同构的 dict。
 
     - use_coze=False（默认）：A1/A3 走本地启发式，A2 走本地 ct-literature，A4 本地强执闸。
@@ -1532,6 +1596,8 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
             reg_probe = {"status": "error", "total": None, "returned": None,
                          "sample": [], "note": f"registry 探针异常: {type(e).__name__}: {e}"}
         rep1, nha1 = a1_topic_selection(topic, registry_probe=reg_probe)
+        # A1 页面「纳入综述」开关初值 = 本次 A 块配置（A1 revision 可随后覆盖）
+        rep1["include_reviews"] = bool(include_reviews)
         s1 = _mk_stage(A1, 0, "await_human", rep1, nha1)
         stages.append(s1)
         _st = _soft_stop(env, pid, stages, tool_card_outputs, s1, A1, pause_at, human_decision)
@@ -1546,7 +1612,8 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
         # 境外库 0 命中 → 只检索了 OpenAlex」式的沉默漏检。
         strategy = _translate_topic_authoritative(search_topic)
         studies, outs2, _card2 = a2_literature_search(strategy["translated_query"], max_results,
-                                                      year_from, out_dir, on_line=on_line)
+                                                      year_from, out_dir, on_line=on_line,
+                                                      include_reviews=include_reviews)
         tool_card_outputs += outs2
         nha2 = _a2_coverage_nha(studies, outs2, _card2, max_results, year_from, strategy=strategy)
         s2 = _mk_stage(A2, 1, "completed",

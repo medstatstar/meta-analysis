@@ -1,6 +1,117 @@
 # Changelog / 变更日志
 
-All notable changes to the `meta-analysis` skill are recorded here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), versioning follows [Semantic Versioning](https://semver.org/).
+All notable changes to the `meta-analysis` skill are recorded here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), versioning follows [Semantic Semantic Versioning](https://semver.org/).
+
+---
+
+## [2.9.16] — Unreleased — pdf_fetch 多通道回退上移 coze + workbench A4 批量匹配
+
+- **workbench「数据提取核验（🔴 红线）」新增「📤 批量上传并匹配文献」**（实测反馈）：A4 面板 actions 首位新增按钮 + 折叠面板——上传 `.txt/.csv/.xlsx` 或粘贴 **DOI / PMID / 标题** 清单 → 新端点 `/api/a4_batch_match`（Europe PMC core 逐条解析；DOI/PMID 精确、标题先短语后 token-AND 近似并标 `fuzzy` 提示人工确认；去重 DOI 归一键；标注是否已在 A4 per_doc）→ 勾选后 `/api/a4_batch_add` 幂等追加为 `status=needs_upload` 待补篇（复用「补传 PDF → 抽取」通路）。纯元数据匹配，不下载正文。前端 `toggleA4Match / a4BatchMatch / a4BatchAdd`；实测 DOI/PMID/标题三类输入均命中。
+- **架构（与 ct-literature v0.9.7 同规）**：`adapters/pdf_fetch.py` 的多通道/预印本回退算法一律上移 coze `publisher_pdf` 服务端（补充链 = Unpaywall → PPR bioRxiv/medRxiv → arXiv，作者级同篇校验，2026-09-06 起服务端实现）。本地 `fetch_pdf` 主路径改为：① 委托 coze（服务端含 A 路径 + 补充链）；② coze 不可用时仅本地直下降级（open_access_url / Unpaywall / PMC）；③ 本地 `_try_preprint_fallback`（PPR/arXiv）停用（保留为历史参考），不再本地实现预印本检索下载、不再为回退预取 title/authors（省 Crossref 反查）。CLI `--with-*` 开关兼容保留（自动由服务端生效）；docstring/usage 同步。
+
+---
+
+## [2.9.15] — 2026-09-06 — C3 真实 API 参考文献核验 + A1 选题报告可行性信号
+
+> **目标**：C3 参考完整性核验从纯结构检查升级为真实 API 核验（CrossRef + PubMed E-utilities），防 AI 虚构/拼接参考文献（JAMA 2026-08 红线）；A1 选题报告补可行性信号（拥挤度 / 预期研究数 / 方向稀缺度）。
+
+### Added
+- **新 `adapters/ref_verify.py`**：CrossRef (`api.crossref.org/works/<DOI>`) + PubMed (`esummary.fcgi?id=<PMID>`) 双库真实核验。单条 `verify_reference()` 含双侧 DOI+PMID 交叉验证（PubMed 传回的 DOI 与传入 DOI 核对 → 防拼接幻觉）；批量 `verify_references()` 自动去重 + polite delay。撤稿文献（CrossRef type=retraction / PubMed pubtype 含 retraction）自动标 critical；作者不一致、DOI 不匹配均标 mismatch。零第三方依赖（纯 urllib + json），网络失败 status="error" 不阻塞。
+- **增强 `c3_reference_verify`（block_c）**：接入 `verify_references`，每条参考真实查 CrossRef/PubMed；n_retracted / n_not_found / n_mismatch 计数 + 详细 issue 列表；撤稿/虚构/拼接任一标 critical → C3 reference_verification 红线闸阻断。
+
+### Changed
+- **增强 `a1_topic_selection`（block_a）**：报告新增 `feasibility` 结构（crowding / expected_studies / risk_alert）；拥挤度分 4 档（empty/low/moderate/high），来自 ct-registry 注册数推断；空/低方向自动给风险提示（meta 需 k≥2）；文本报告同步追加 📊 拥挤度行与 ⚠️ 风险行。
+
+### 验证
+- py_compile 全绿；合成 mock 测试 9 项全过（OK / not_found / retracted / mismatch / error / batch / c3 集成 / A1 拥挤 / A1 空方向）。
+
+---
+
+## [2.9.14] — 2026-09-05 — A4 逐篇剔除（不进合并）+ 抽取行治理
+
+> **目标**：数据提取核验（A4 红线）界面允许把误纳入的文献剔除（如 review 漏网 / 抽取错源），被剔除篇的抽取行不进 Block B 合并；同时治理"综述正文被当原始研究抽取"。
+> 退出标准：① per_doc 有 included 开关，剔除后卡片置灰可恢复；② approve 时剔除篇行不进 handoff.studies_for_b；③ 叙述性抽取行（他引转述）不再自动进 extracted_rows。✅ 全达成（E2E 双向实测）。
+
+### Added
+- **A4 逐篇剔除/恢复**：`per_doc[i]` 新增 `included=True`（block_a a4_stream）；`server.py` 新增 `POST /api/a4_set_doc_included`（就地更新 included + excluded_reason，重算 n_extracted/n_included_docs/n_excluded_docs）；前端每篇卡片操作区加「✕ 剔除本篇（不进合并）/ ↩ 恢复纳入」，剔除篇整卡置灰 + excl pill + 说明条（`.a4doc-excluded` 等样式）。
+- **A4 approve 携带剔除态**：前端 `approveA4()` 在放行前把各 included 篇的抽取行汇总为 `revision.extracted_rows`（被剔除篇行排除）、剔除清单入 `revision.excluded` 再提交；`fullflow._extraction_input` 改用 `latest_revision`（不限 action，approved 携带 revision 亦被采用），使放行不重抽、剔除真正生效。
+
+### Changed
+- **抽取行治理（block_a a4_stream）**：`extracted_rows` 从"仅 2×2"扩为"2×2 + 来自表格模板的效应量行"（te/sete 齐全且 anchor 含 `table#`，转 TE/seTE 大写供 Block B）；叙述性行（anchor 含 `text:`，多为综述正文对他引结果的转述）**不再自动进 extracted_rows**——根治"综述抽出一堆错源效应量"。
+
+### 诊断结论（10.3945/an.111.000893 = Adv Nutr 2012 REVIEW）
+- 该 PDF 首页 RUNNING HEAD 即 "REVIEW"，Europe PMC pubType 含 `Review`/`review-article`（B1 硬信号应命中），但 ff-3770 会话中该记录来自 OpenAlex（type=article、无 abstract、pub_types 未透传）→ review-guard 三道全漏 → 进 A4。属 **ct-literature 合并归一化未透传 pub_types** — **已修复（ct-literature v0.9.6+ 见 CHANGELOG (6)）**：`fetch_europepmc._extract` 现保存 `pub_types`，`fetch_openalex._extract` 从 `type` 派生，`normalize.merge` 做 union-dedup 合并。
+- 抽取 5 行全为 narrative 行（"HR (p3)"/"RR (p3)"/"farction" 等错 study 名）→ 现已被"叙述行不收"规则排除；用户在 A4 界面可进一步用「剔除」显式标出。
+
+### 验证
+- py_compile + node --check 通过；`/api/a4_set_doc_included` HTTP 实测 200（剔除持久化 + 计数 1/19）；函数级 E2E：剔除该篇 → handoff.studies_for_b=0，全保留 → =5。
+
+---
+
+## [2.9.13] — 2026-09-05 — 工作台 UI 视觉升级（对齐 ct-base workbench_ui 规范）
+
+> **目标**：工作台"太简单不够美观"——按 ct-base `references/workbench_ui.md` 的视觉规范做纯 CSS 层升级，不动 JS 逻辑/类名/DOM 结构。
+> 退出标准：① 深色品牌渐变顶栏 + 反色控件；② 卡片阴影层次 + 列表斑马纹 + 状态 pill 边框化；③ logo 换技能 icon 色系 SVG（禁 emoji 当图标）；④ JS 语法与 HTTP 渲染验证通过。✅ 达成。
+
+### Changed
+- **`workbench.html` 追加 ct-base 视觉层**：`--wb-*` 设计令牌（brand clinical-indigo 系）、深色渐变顶栏（`--wb-topbar-bg` + `--wb-on-topbar` 反色）、卡片圆角/阴影层次、表格斑马纹 + hover、按钮渐变主色 + hover 亮度、pill 边框化、JSON/代码块统一浅底、细窄滚动条。
+- **header logo**：`🧬` emoji → 内联 SVG（技能 icon.svg 紫系同心圆 + 聚合菱形，34px），对齐 ct-base §5.2 logo 规范。
+- **装饰性 emoji 清理**：logbar 标题 `🗂` 移除（ct-base §4.4 禁 emoji 当图标）。
+- 业务文案内功能性指示符（✅ 状态徽标 / ⬇ 上传 / 🔗 DOI 等）保留——由 JS 模板生成，全量 SVG 化留作后续（避免大面积模板改动风险）。
+
+### 验证
+- `node --check` 抽取内联 JS 通过；HTTP GET / 返回 200 且含 `wb-brand`/`--wb-topbar-bg`/`--wb-row-alt` 等新标记；server 已重启载入。
+
+---
+
+## [2.9.12] — 2026-09-05 — 修复回退/交接闸 422 + A1 纳入综述开关 + PDF 入口分类模板
+
+> **目标**：① 修复工作台「打回/回退」与块间交接（handoff_confirm）批准失效；② A1 选题页可直接决定"检索是否纳入综述"；③ 沉淀 PDF 下载入口分门别类模板。
+> 退出标准：① handoff approve 不再 422、rewind 全链路 200；② A1 revision.include_reviews 覆盖 cfg 传入 A2（端到端实测 true 生效）；③ 模板覆盖 5 类框架且有代码/实测证据。
+
+### Fixed
+- **handoff_confirm 交接点 approve 422**：`server.py DecideReq.stage_id` 原为必填 `str`，而块间交接 await 的 `stage_id` 为 `null` → pydantic 422 → 交接点永远无法批准（表现为"回退后流程卡死/回退不起作用"）。改为 `Optional[str] = None`（后端 `_validate_decision` 对 handoff_confirm 本就不校验 stage_id）。
+- **rewind 请求路径**：`workbench.html rejectAndRewind()` 用裸 `fetch("/api/rewind")`，未走 `apiUrl()` → file:// 打开工作台时必然失败。改用 `apiUrl("/api/rewind")`（与其余 API 调用一致）。
+
+### Added
+- **A1「是否纳入综述类文献（检索范围）」开关**：`form_schema.py` A1 新增 `kind=bool` 可编辑面板（revision_key=include_reviews）；`fullflow.py` `EDITABLE_KEYS["A1.topic_selection"]` 增 `include_reviews`、新增 `FullflowSession.latest_revision()`（读不限 action 的最新 revision）、`_run_block` A 分支用 A1 revision 的 include_reviews 覆盖 cfg；`block_a.run_block_a` 把 include_reviews 写入 A1 stage_result 作初值；前端 `renderPanel` 支持 `kind=bool`、`collectDraft` 支持独立 checkbox（整键存 true/false）。端到端实测：A1 approve + `revision.include_reviews=true` → A2 检索卡片收到 `"include_reviews": true`。
+- **PDF 下载入口分类模板**：`references/pdf-download-portals.md` —— A 聚合 API（Unpaywall/Europe PMC core/OpenAlex）、B OA 仓储模板（PMC `/pdf/`、预印本 `.full.pdf`、MDPI `/pdf?version=`，后二者命中用户实例并有代码/检索数据佐证）、C 出版商文章页 DOM（pdf_cf_guard 规则）、D 签名直链（SD X-Amz 书签 + CDP 边界，2026-09-05 实测结论）、E 付费墙人工上传；附决策速查表。`SKILL.md` 边界段补引用。
+
+### Changed
+- 工作台 server 已重启载入修复（端口 8765）。
+
+---
+
+## [2.9.11] — 2026-09-05 — A4 下载文档列表不展示已排除篇目
+
+> **目标**：A3 筛选裁决「排除」（review-guard / 相关性门控，status=skip）的文献不进 A4 下载文档列表，只保留需要下载/已下载/待上传的篇目，消除"已排除还显示在下载清单"的困惑。
+> 退出标准：① 实时进度面板 skip 事件不上屏；② 逐篇文档展示过滤 status=skip；③ 过滤后 doc_index 仍按 per_doc 原始位置定位（后端不感知）。✅ 全部达成（JS 语法校验通过）。
+
+### Changed
+- **workbench.html `renderA4Documents()`**：`per_doc` 先过滤 `status !== "skip"`；展示编号与所有后端定位（doc_index / pdf_page / a4SaveDoc / a4ViewPage / 上传指派）改用 `d.index`（per_doc 原始位置），避免过滤后 map 位置与原始位置错位；空态区分"筛选后无需要下载" vs "尚无结果"。
+- **workbench.html `renderA4Live()`（续跑实时进度）**：`skip` / `relevance_skip` 事件直接 return，不建行。
+- **workbench.html `doA4Preview.addRow()`（A4 预览实时进度）**：同上，skip 事件不上屏。
+- **deferred（配额延后）保留展示**：语义为"本轮配额未轮到、仍需下载"，与 skip（明确不下载）区分。
+
+---
+
+## [2.9.10] — 2026-09-05 — A2 源头排除综述：节省检索配额 + 避免 10.3390/ijms27114705 类困惑
+
+> **目标**：默认从检索源头排除综述类文献（Review / Systematic Review / Meta-Analysis），节省检索配额，避免用户困惑（如 10.3390/ijms27114705 在 A3 被标记 review 但仍占用 A2 配额）。
+> 退出标准：① Europe PMC / OpenAlex 双源头加 NOT review 过滤；② meta-analysis 默认 include_reviews=False；③ 前端加"包含综述"开关；④ 伞评/范围综述场景可显式开启。✅ 全部达成（代码级验证）。
+
+### Added
+- **Europe PMC 源头排除综述**：`fetch_europepmc.py` 新增 `include_reviews=True` 参数；`False` 时追加 `AND NOT (PUBLICATION_TYPE:"Review" OR PUBLICATION_TYPE:"Systematic Review" OR PUBLICATION_TYPE:"Meta-Analysis")` 过滤串；CLI 暴露 `--include-reviews/--no-include-reviews`（argparse.BooleanOptionalAction）。
+- **OpenAlex 源头排除综述**：`fetch_openalex.py` 新增 `include_reviews=True` 参数；`False` 且无指定 `review_type` 时追加 `type:article` 过滤（拦截 `type:review` 条目）；CLI 同上。
+- **编排层透传**：`ct_literature.run()` 新增 `include_reviews=True`，透传给两个 fetcher。
+- **block_a A2 默认排除综述**：`a2_build_tool_card()` / `a2_literature_search()` / `run_block_a()` 新增 `include_reviews=False`（默认源头排除综述）；`tool_mapping_meta.json` 的 ct-literature arg_map 新增 `include_reviews` → `--include-reviews`。
+- **coze_client 布尔参数透传**：`execute_tool_cards` 的 arg_map 循环识别 `include_*` / `exclude_*` 命名风格的 bool 参数，自动转为 `--no-*` 标志（BooleanOptionalAction 语义）。
+- **前端开关**：`workbench.html` 启动表单新增"包含综述类文献"复选框（默认不勾选），`doStart()` 读取后写入 `opt.include_reviews`。
+- **server / fullflow 透传**：`StartReq` 新增 `include_reviews: bool = False`；`api_start_stream._call` 透传给 `run_fullflow`；`run_fullflow` 写入 `cfg`；`fullflow._run_block` 透传给 `block_a.run_block_a`。
+
+### Verified
+- 编译验证：`py_compile` 全部 7 个修改文件通过。
+- 语义验证：Europe PMC 过滤串语法对齐官方 search grammar（PUBLICATION_TYPE 为索引字段）；OpenAlex `type:article` 与既有 `_openalex_type_for()` 不冲突（仅在 `review_type="all"` 且 `include_reviews=False` 时生效）。
 
 ---
 

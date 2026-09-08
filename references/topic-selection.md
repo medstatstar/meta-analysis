@@ -28,6 +28,50 @@ methodological compliance.
 **Not applicable**: user is already at data-extraction / pooling stage →
 route to the normal analysis pipeline (Core Functions in SKILL.md).
 
+## Topic Gating (选题门控) — ct-literature routing
+
+> **First action on the topic track (before any probe).** The topic track must
+> NOT silently run the in-skill probe. It must first run the deterministic gate
+> `python scripts/topic_gate.py --topic "<topic>"` and route on its decision.
+> The gate is **zero-LLM, zero-network**: it only checks whether ct-literature
+> is installed and assembles the right command. The install-vs-simple *question*
+> is asked by the agent (AskUserQuestion), not by the script.
+
+### Decision tree
+
+```
+python scripts/topic_gate.py --topic "<topic>"
+        │
+        ├─ ct_literature_installed = true  →  recommended_path = "ct_literature"
+        │     ▸ Directly invoke ct-literature for full retrieval (no prompt):
+        │         cd <ct_literature_dir> && python scripts/ct_literature.py \
+        │           --topic "<topic>" --review-type meta-analysis \
+        │           --with-europepmc --with-semantic-scholar --year-from <y-5> \
+        │           --safety --prisma --run --out-dir ./lit
+        │     ▸ Use its .merged.json / Excel / HTML as the Stage-4 novelty evidence.
+        │
+        └─ ct_literature_installed = false →  recommended_path = "ct_search_prompt"
+              ▸ AskUserQuestion to the user:
+                  A) Install ct-literature then continue  (recommended; full retrieval)
+                     → show install hint, pause until installed, then run as above.
+                  B) Do a simple analysis now  (no install)
+                     → directly call the ct-search remote service:
+                         python adapters/ctsearch_client.py search \
+                           --source europepmc --keyword "<topic>" --year-from <y-5> --run
+                     → use its real hit counts + top titles as Stage-4 dedup evidence.
+              ▸ Absolute fallback (ct-search unreachable even in branch B):
+                run the in-skill `adapters/literature_probe.py` (direct Europe PMC,
+                fully coze-independent). Never leave topic selection without a
+                real-hit-count probe.
+```
+
+### Why this path
+- **ct-literature is the best evidence base** (6-source retrieval + dedup + PRISMA + anti-hallucination), so when installed it is used directly — no degraded default.
+- **ct-search remote is the lightweight equivalent** of the in-skill probe but richer (OpenAlex/Europe PMC/bioRxiv/…, same backend ct-literature uses) and **needs no ct-literature install** — the correct "simple analysis" branch when the user declines to install.
+- The in-skill `literature_probe.py` (direct Europe PMC) remains only as the **offline ultimate fallback**, not the default.
+
+⛔ **Red line preserved**: regardless of which path supplied them, candidate ranking MUST be grounded in the probe's real `hit_count` + the 4-dim score card (R7). The LLM never free-forms "which direction is good".
+
 ## Dual path entry（双路径入口）
 
 | User signal | Path | Output |
@@ -115,13 +159,16 @@ Score with anchors, run R1–R6, choose meta type via decision tree.
 
 ### Stage 4 — Dedup search + PRISMA/AMSTAR-2 pre-check
 See `dedup-search.md` and `compliance-precheck.md`.
-**Dedup is self-contained**: run the in-skill Europe PMC probe
-`adapters/literature_probe.py` (`dedup_probe`) for the **Cochrane (CDSR)** and
-**PubMed/MEDLINE** layers — live, by default, no other skill required. It returns
-real `hit_count` + top titles that directly feed the novelty dimension and the R7
-ranking. PROSPERO and non-English DBs remain guided manual steps (no clean public
-API). Templates are only a fallback when the network is unavailable.
-- **Gate 4**: dedup evidence (live `hit_count` from the probe) + compliance risk 🟢/🟡/🔴 recorded → Stage 5. If `any_error` (network down), mark dedup **"unverified"** and state so in the report.
+**Which dedup source to use is decided by the Topic Gating (见上文「选题门控」)**:
+- **ct-literature installed** → use its `.merged.json` (full 6-source retrieval + dedup) as the dedup evidence.
+- **ct-literature NOT installed, user chose simple analysis** → use the **ct-search remote** probe `python adapters/ctsearch_client.py search --source europepmc --keyword "<topic>" --run` (real `hit_count` + top titles).
+- **Absolute fallback** (ct-search unreachable) → run the in-skill Europe PMC probe `adapters/literature_probe.py` (`dedup_probe`) for the **Cochrane (CDSR)** and **PubMed/MEDLINE** layers — live, no other skill required.
+
+All three paths return real `hit_count` + top titles that directly feed the novelty
+dimension and the R7 ranking. PROSPERO and non-English DBs remain guided manual
+steps (no clean public API). Templates are only a fallback when the network is
+unavailable.
+- **Gate 4**: dedup evidence (live `hit_count` from the chosen probe) + compliance risk 🟢/🟡/🔴 recorded → Stage 5. If `any_error` (network down), mark dedup **"unverified"** and state so in the report.
 
 ### Stage 5 — Topic report generation
 Mode A (recommended): `python scripts/generate_topic_report.py input.json output.md|html`.

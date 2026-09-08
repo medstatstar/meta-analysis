@@ -1248,7 +1248,17 @@ def execute_tool_cards(cards, out_dir: str = ".", cwd: str | None = None,
                        for c in spec["cmd"]]
                 for pname, flag in (spec.get("arg_map") or {}).items():
                     if pname in params:
-                        cmd += [flag, str(params[pname])]
+                        val = params[pname]
+                        # Boolean-style flags (BooleanOptionalAction: --flag / --no-flag).
+                        # Convention: flag name "include-X" maps to --include-X / --no-include-X.
+                        # Since fetcher default is True, only append --no-* when explicitly False.
+                        if isinstance(val, bool) and ("include" in pname or "exclude" in pname):
+                            if not val:
+                                # Append the negative variant: --include-X → --no-include-X
+                                cmd.append("--no-" + flag.lstrip("-"))
+                            # True = default → no flag needed
+                        else:
+                            cmd += [flag, str(val)]
                 for f in (spec.get("fixed_flags") or []):
                     cmd.append(f)
                 timeout_s = card.get("timeout_sec", 120)
@@ -1256,10 +1266,12 @@ def execute_tool_cards(cards, out_dir: str = ".", cwd: str | None = None,
                     # 流式路径：逐行读 stdout（stderr 合并）→ 实时回调，同时收集完整输出。
                     # 显式 utf-8 + errors=replace：后台进度行含 emoji/中文，避免 Windows
                     # 默认编码（cp936）解码失败打断检索。
+                    # CREATE_NO_WINDOW：阻止 Windows 为子进程弹出控制台窗口（提交时不要黑框）。
                     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                             stderr=subprocess.STDOUT, text=True,
                                             bufsize=1, encoding="utf-8",
-                                            errors="replace", cwd=cwd)
+                                            errors="replace", cwd=cwd,
+                                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                     chunks = []
                     for line in proc.stdout:
                         chunks.append(line)
@@ -1273,7 +1285,8 @@ def execute_tool_cards(cards, out_dir: str = ".", cwd: str | None = None,
                 else:
                     # 原路径（默认）：一次性捕获，行为与改动前完全一致。
                     proc = subprocess.run(cmd, capture_output=True, text=True,
-                                          timeout=timeout_s, cwd=cwd)
+                                          timeout=timeout_s, cwd=cwd,
+                                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                     stdout_text, stderr_text, rc = proc.stdout, proc.stderr, proc.returncode
                 if rc != 0:
                     outputs.append({"card_ref": cref, "need_tool": need, "status": "error",
@@ -1325,7 +1338,8 @@ def run_stage_local(env: dict, debug: bool = False, transport=None) -> dict:
             _json.dump(inp, f, ensure_ascii=False)
         try:
             proc = _sp.run([rscript, run_task, "--input", ip, "--output", op],
-                           capture_output=True, text=True, timeout=180)
+                           capture_output=True, text=True, timeout=180,
+                           creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
         except Exception as e:  # noqa: BLE001
             return {"status": "error",
                     "notes": f"本地 R 引擎调用失败: {type(e).__name__}: {e}",

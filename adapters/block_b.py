@@ -254,7 +254,8 @@ def b1_nma_r(network_studies, effect_measure="OR", reference=None):
             with open(rfile, "w", encoding="utf-8") as f:
                 f.write(_NMA_R_SCRIPT)
             proc = subprocess.run([R_BIN, rfile, inp, outp], capture_output=True,
-                                 text=True, timeout=120)
+                                 text=True, timeout=120,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if proc.returncode != 0:
                 return {"status": "error", "reason": f"R exit {proc.returncode}: {proc.stderr[:300]}"}
             if not os.path.isfile(outp):

@@ -37,7 +37,9 @@ SCHEMA = {
     "A1.topic_selection": {
         "title": "选题确认（PICOS）",
         "gate_type": "soft",
-        "intro": "上方为系统推断的 PICOS（只读），下方文本框已预填报告，确认或修订后放行。",
+        "intro": "上方为系统推断的 PICOS（只读），下方文本框已预填报告，确认或修订后放行。\n"
+                 "若本分析是伞评 / 范围综述（需要把已发表的综述/meta 当作证据），勾选「纳入综述类文献」；"
+                 "默认不勾 = 检索与分析都排除综述，仅纳入原始研究。",
         "panels": [
             {"label": "PICOS 推断（只读）", "kind": "object", "path": "stage.picos", "fields": [
                 {"path": "P", "label": "人群 P"},
@@ -46,8 +48,14 @@ SCHEMA = {
                 {"path": "O", "label": "结局 O"},
                 {"path": "S", "label": "设计 S"},
             ]},
-            {"label": "缺失维度（只读）", "kind": "json", "path": "stage.missing_dimensions"},
-            {"label": "注册库探针（只读）", "kind": "json", "path": "stage.registry_probe"},
+            {"label": "系统检查（只读）", "kind": "row", "panels": [
+                {"label": "缺失维度", "kind": "json", "path": "stage.missing_dimensions"},
+                {"label": "注册库探针", "kind": "json", "path": "stage.registry_probe"},
+            ]},
+            {"label": "是否纳入综述类文献（检索范围）", "kind": "bool", "path": "editable.include_reviews",
+             "editable": True, "revision_key": "include_reviews",
+             "hint": "勾选 = 检索与分析包含 Review / Systematic Review / Meta-Analysis（用于伞评 / 范围综述）；"
+                     "不勾（默认）= 源头排除综述，仅原始研究，节省检索配额。改动后点「批准 / 放行」生效。"},
             {"label": "PICOS 报告（可编辑）", "kind": "textarea", "path": "editable.report",
              "editable": True, "revision_key": "report"},
         ],
@@ -55,9 +63,9 @@ SCHEMA = {
     "A2.literature_search": {
         "title": "检索策略与覆盖确认",
         "gate_type": "soft",
-        "intro": "检索式已做「翻译 + 优化」（中文主题 → 干净英文布尔检索式，核心词同义 OR 扩展），"
-                 "并据此多库检索。核对各数据库条数与检索状态：search_status≠ok 或某库缺位 = 可能沉默漏检"
-                 "（无 token 静默跳库 / skill 缺失）。可修订检索式（重跑于 Phase 2 生效）。",
+        "intro": "检索式已做「翻译 + 优化」（中文主题 → 干净英文布尔检索式，核心词同义 OR 扩展），并据此多库检索。\n"
+                 "核对各数据库条数与检索状态：search_status≠ok 或某库缺位 = 可能沉默漏检（无 token 静默跳库 / skill 缺失）。\n"
+                 "可修订检索式（重跑于 Phase 2 生效）。",
         "panels": [
             {"label": "检索概览", "kind": "object", "path": "nha.coverage", "fields": [
                 {"path": "total", "label": "合并总数"},
@@ -81,12 +89,12 @@ SCHEMA = {
     "A3.screening": {
         "title": "初筛逐条裁决",
         "gate_type": "soft",
-        "intro": "逐条裁决：纳入 / 剔除 / 低置信（低置信 = 需人工定夺，默认随纳入走）。"
+        "intro": "逐条裁决：纳入 / 剔除 / 低置信（低置信 = 需人工定夺，默认随纳入走）。\n"
                  "review-guard：标题/摘要命中综述特征（review / meta-analysis / systematic review 等）的篇目"
-                 "默认剔除（综述无原始 2×2 数据，避免无效抽取），行上打「🔍 疑似综述」徽标，如确需保留可翻为「纳入」。"
+                 "默认剔除（综述无原始 2×2 数据，避免无效抽取），行上打「🔍 疑似综述」徽标，如确需保留可翻为「纳入」。\n"
                  "点标题行可展开刊名、日期、卷期页、作者、摘要等详情；"
-                 "上方筛选按钮可按裁决结果单独查看。"
-                 "也可用「⬇ 下载裁决表」导出 Excel、改完「裁决/理由」两列后「⬆ 上传更新」批量回写。"
+                 "上方筛选按钮可按裁决结果单独查看。\n"
+                 "也可用「⬇ 下载裁决表」导出 Excel、改完「裁决/理由」两列后「⬆ 上传更新」批量回写。\n"
                  "重点复核剔除项以防误剔关键研究。",
         "panels": [
             {"label": "筛选统计", "kind": "object", "path": "nha.summary", "fields": [
@@ -98,6 +106,7 @@ SCHEMA = {
             ]},
             {"label": "逐条决策", "kind": "rowlist", "path": "nha.decisions",
              "editable": True, "revision_key": "screened",
+             "hint": "（单击文章名称可展开详情供裁决参考）",
              # 三态筛选栏（按 decision 字段过滤显示）
              "filter_by": "decision",
              "filter_options": [["", "全部"], ["include", "纳入"],
@@ -119,28 +128,28 @@ SCHEMA = {
                  {"path": "source", "label": "来源库"},
                  {"path": "language", "label": "语言"},
                  {"path": "is_retracted", "label": "已撤稿", "type": "bool"},
-                 {"path": "keywords", "label": "关键词", "type": "list"},
+                 {"path": "keywords", "label": "关键词", "type": "list", "wide": True},
                  {"path": "url", "label": "链接", "type": "link"},
                  {"path": "abstract_snippet", "label": "摘要", "type": "para"},
              ],
              "columns": [
                 {"path": "title", "label": "标题", "type": "text",
-                 "editable": False, "expand": True},
-                {"path": "journal", "label": "刊名", "type": "text", "editable": False},
-                {"path": "year", "label": "年份", "type": "text", "editable": False},
-                {"path": "authors", "label": "作者", "type": "list", "editable": False},
-                {"path": "study_type", "label": "类型", "type": "text", "editable": False},
+                 "editable": False, "expand": True, "width": "auto"},
+                {"path": "journal", "label": "刊名", "type": "text", "editable": False, "width": "90px"},
+                {"path": "year", "label": "年份", "type": "text", "editable": False, "width": "60px"},
+                {"path": "authors", "label": "作者", "type": "list", "editable": False, "width": "100px"},
+                {"path": "study_type", "label": "类型", "type": "text", "editable": False, "width": "70px"},
                 {"path": "decision", "label": "裁决", "type": "select", "editable": True,
                  "options": [["include", "纳入"], ["exclude", "剔除"],
-                             ["uncertain", "低置信"]]},
-                {"path": "reason", "label": "理由", "type": "text", "editable": True},
+                             ["uncertain", "低置信"]], "width": "120px"},
+                {"path": "reason", "label": "理由", "type": "text", "editable": True, "width": "200px"},
             ]},
         ],
     },
     "A4.data_extraction": {
         "title": "数据提取核验（🔴 红线）",
         "gate_type": "redline",
-        "intro": "下载全文 PDF 并抽取 2×2 表（TE/seTE/事件数），须经人工核验放行方可进入 Block B。"
+        "intro": "下载全文 PDF 并抽取 2×2 表（TE/seTE/事件数），须经人工核验放行方可进入 Block B。\n"
                  "点「⬇ 下载全文并抽取数据」开始；逐篇展示提取结果与原文页对应关系，可就地修订。",
         "panels": [
             {"label": "提取概览", "kind": "object", "path": "a4_result", "fields": [
@@ -163,7 +172,7 @@ SCHEMA = {
     "B1.meta": {
         "title": "合并计算（B1 · 自动）",
         "gate_type": "auto",
-        "intro": "R 引擎（coze ct-meta2；5 形状 + NMA 本地镜像已验证）完成合并效应量与异质性估计。"
+        "intro": "R 引擎（coze ct-meta2；5 形状 + NMA 本地镜像已验证）完成合并效应量与异质性估计。\n"
                  "自动节点，无需人工操作，点击查看结果。",
         "panels": [
             {"label": "合并概要（pairwise）", "kind": "object", "path": "stage.pairwise", "fields": [
@@ -272,8 +281,8 @@ def schema_for(stage_id, kind=None):
     return {
         "title": stage_id or "通用确认节点",
         "gate_type": gate_type,
-        "intro": "这是「通用确认节点」：该步骤系统已自动完成、并在此暂停，等你确认后才会继续。"
-                 "下方是此步骤返回的原始数据（只读），请核对关键信息。"
+        "intro": "这是「通用确认节点」：该步骤系统已自动完成、并在此暂停，等你确认后才会继续。\n"
+                 "下方是此步骤返回的原始数据（只读），请核对关键信息。\n"
                  "确认无误 → 点「确认放行」继续；若要回退修改 → 点「打回」。",
         "panels": [
             {"label": "本步骤返回的数据（只读）", "kind": "json", "path": "stage", "editable": False},

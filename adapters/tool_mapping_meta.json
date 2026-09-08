@@ -3,7 +3,7 @@
   "ct-literature": {
     "description": "文献检索（OpenAlex / Europe PMC / MeSH），供 A2 检索委派",
     "cmd": ["C:/Tools/anaconda3/python.exe", "{skill_dir}/scripts/ct_literature.py"],
-    "arg_map": {"topic": "--topic", "max": "--max", "year_from": "--year-from", "out_dir": "--out-dir"},
+    "arg_map": {"topic": "--topic", "max": "--max", "year_from": "--year-from", "out_dir": "--out-dir", "include_reviews": "--include-reviews"},
     "fixed_flags": ["--run"],
     "skill_dir": "~/.workbuddy/skills/ct-literature",
     "output": "ndjson"

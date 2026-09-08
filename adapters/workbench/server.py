@@ -39,6 +39,12 @@ APP_DIR = _HERE
 RUNS_DIR = os.path.join(APP_DIR, "runs")
 os.makedirs(RUNS_DIR, exist_ok=True)
 
+# 启动时清除代理环境变量：防止 uvicorn/子进程把 localhost 流量路由到外部代理
+# （如 WorkBuddy 本机代理 63226），导致 SSE 长连接被重置、PDF 下载超时。
+# 仅影响当前进程及其子进程，不修改系统设置。
+for _v in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+    os.environ.pop(_v, None)
+
 app = FastAPI(title="meta-analysis workbench", version="0.1.0")
 
 
@@ -238,11 +244,14 @@ class StartReq(BaseModel):
     nma: bool = False
     pause_at: Optional[list] = None
     session_dir: str = RUNS_DIR
+    include_reviews: bool = False
 
 
 class DecideReq(BaseModel):
     session_path: str
-    stage_id: str
+    # handoff_confirm 块间交接点 stage_id 为 null（无具体阶段）；普通闸位必填。
+    # 必须 Optional：pydantic 对必填 str 收到 null 会 422，导致交接点 approve 永远失败。
+    stage_id: Optional[str] = None
     action: str
     revision: Optional[dict] = None
     note: Optional[str] = None
@@ -268,6 +277,12 @@ class TopicHelpReq(BaseModel):
     year_from: Optional[int] = None
 
 
+class BatchAddReq(BaseModel):
+    """A4「批量上传并匹配文献」→ 追加为待补篇（status=needs_upload）。"""
+    session_path: str
+    items: Optional[list] = None
+
+
 # ---------------------------------------------------------------------------
 # 路由
 # ---------------------------------------------------------------------------
@@ -282,7 +297,7 @@ def api_start(req: StartReq):
         req.topic, max_results=req.max_results, year_from=req.year_from,
         effect_measure=req.effect_measure, nma=req.nma,
         pause_at=set(req.pause_at) if req.pause_at else None,
-        session_dir=req.session_dir)
+        session_dir=req.session_dir, include_reviews=req.include_reviews)
     ff = out.get("fullflow") or {}
     path = ff.get("session_path")
     if not path:
@@ -303,7 +318,7 @@ async def api_start_stream(req: StartReq):
             effect_measure=req.effect_measure, nma=req.nma,
             pause_at=set(req.pause_at) if req.pause_at else None,
             session_dir=req.session_dir, on_line=on_line,
-            on_a4_event=on_a4_event)
+            on_a4_event=on_a4_event, include_reviews=req.include_reviews)
 
     msg = (f"启动流程 · 主题「{req.topic}」· 检索上限 {req.max_results}"
            + (f" · 起始年 {req.year_from}" if req.year_from else "")
@@ -701,6 +716,151 @@ def api_upload_pdf_auto(session_path: str = Form(...), file: UploadFile = File(.
         raise HTTPException(500, f"上传匹配失败：{type(e).__name__}: {e}")
 
 
+# ============================================================================
+# A4「批量上传并匹配文献」（2026-09-06）
+#   上传 / 粘贴 DOI·PMID·标题 清单 → Europe PMC 逐条解析元数据 → 与 A4 per_doc
+#   比对（in_perdoc）→ 前端勾选 → /api/a4_batch_add 追加为待补篇
+#   （status=needs_upload，复用「补传 PDF → 抽取」现有通路）。纯元数据匹配，
+#   不下载、不抽取。标题行匹配 fuzzy=True，需人工确认。
+# ============================================================================
+_EPMC_SEARCH_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+
+
+def _epmc_lookup(q: str):
+    """Europe PMC core 单次查询（限量 3 条），失败返回 []。"""
+    import urllib.parse as _up
+    import urllib.request as _ur
+    url = "%s?query=%s&format=json&resultType=core&pageSize=3" % (
+        _EPMC_SEARCH_URL, _up.quote(q))
+    try:
+        req = _ur.Request(url, headers={"User-Agent": "meta-analysis-workbench/1.0"})
+        with _ur.urlopen(req, timeout=25) as r:
+            return (json.loads(r.read().decode("utf-8", "replace"))
+                    .get("resultList") or {}).get("result") or []
+    except Exception:
+        return []
+
+
+def _match_one(raw: str) -> dict:
+    """单条输入 → 匹配元数据 dict。raw 可为 DOI / PMID / 标题行。"""
+    import re as _re
+    raw = (raw or "").strip()
+    if not raw:
+        return {"raw": raw, "ok": False, "error": "空行"}
+    m = _re.match(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", raw)
+    if m:
+        recs = _epmc_lookup('DOI:"%s"' % m.group(0).rstrip(".,;)"))
+        fuzzy = False
+    elif _re.fullmatch(r"\d{6,9}", raw):
+        recs = _epmc_lookup("EXT_ID:%s AND SRC:MED" % raw) or _epmc_lookup("EXT_ID:%s" % raw)
+        fuzzy = False
+    else:
+        recs = _epmc_lookup('(TITLE:"%s")' % raw[:200])
+        if not recs:
+            toks = _re.findall(r"[\w-]+", raw)[:5]
+            if len(toks) >= 3:
+                recs = _epmc_lookup("(" + " AND ".join("TITLE:%s" % w for w in toks) + ")")
+        fuzzy = True
+    if not recs:
+        return {"raw": raw, "ok": False, "error": "Europe PMC 未命中"}
+    rec = recs[0]
+    return {"raw": raw, "ok": True, "fuzzy": fuzzy,
+            "doi": (rec.get("doi") or "").strip(),
+            "pmid": str(rec.get("pmid") or ""),
+            "title": (rec.get("title") or "")[:300],
+            "year": str(rec.get("pubYear") or ""),
+            "journal": ((rec.get("journalInfo") or {}).get("journal") or {}).get("title") or ""}
+
+
+@app.post("/api/a4_batch_match")
+def api_a4_batch_match(session_path: str = Form(...),
+                       file: Optional[UploadFile] = None,
+                       text: Optional[str] = Form(None),
+                       max_rows: int = Form(50)):
+    """解析清单并逐条匹配。file：.txt/.csv（逐行或首列）或 .xlsx（首列）；text：粘贴逐行。"""
+    import re as _re
+    import tempfile
+    lines: list = []
+    if text and text.strip():
+        lines += [ln for ln in text.splitlines() if ln.strip()]
+    if file is not None and file.filename:
+        fn = file.filename.lower()
+        raw = file.file.read()
+        if fn.endswith(".xlsx"):
+            tmp = tempfile.mkdtemp(prefix="ma_batch_")
+            p = os.path.join(tmp, "ids.xlsx")
+            with open(p, "wb") as f:
+                f.write(raw)
+            import openpyxl
+            try:
+                wb = openpyxl.load_workbook(p, read_only=True)
+                for row in wb.active.iter_rows(values_only=True):
+                    for cell in row:
+                        if cell is not None and str(cell).strip():
+                            lines.append(str(cell).strip())
+                            break
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(400, f"xlsx 读取失败：{type(e).__name__}: {e}")
+        else:
+            for bl in raw.decode("utf-8", "replace").splitlines():
+                s = bl.strip()
+                if s and not s.startswith(("#", "//")):
+                    lines.append(s)
+    # 去重：DOI 归一键，其余按原文
+    seen, uniq = set(), []
+    for ln in lines:
+        m = _re.match(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", ln)
+        key = m.group(0).rstrip(".,;)").lower() if m else ln.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(ln)
+    uniq = uniq[:max(int(max_rows), 1)]
+    # per_doc 命中比对
+    res = block_a.a4_get_result(session_path) if (session_path and os.path.exists(session_path)) else None
+    pds = (res or {}).get("per_doc") or []
+    pd_dois = {str(d.get("doi") or "").strip().lower() for d in pds}
+    rows = []
+    for ln in uniq:
+        info = _match_one(ln)
+        if info.get("ok") and info.get("doi"):
+            info["in_perdoc"] = info["doi"].lower() in pd_dois
+        rows.append(info)
+    return {"count": len(rows), "skipped_dup": len(lines) - len(uniq), "rows": rows}
+
+
+@app.post("/api/a4_batch_add")
+def api_a4_batch_add(req: BatchAddReq):
+    """把勾选命中的篇目追加为 A4 待补文档；DOI 已存在则跳过（幂等）。"""
+    if not os.path.exists(req.session_path):
+        raise HTTPException(400, f"会话不存在：{req.session_path}")
+    res = block_a.a4_get_result(req.session_path) or {}
+    pds = res.get("per_doc") or []
+    existing = {str(d.get("doi") or "").strip().lower() for d in pds}
+    added = []
+    for it in (req.items or []):
+        if not isinstance(it, dict):
+            continue
+        doi = (it.get("doi") or "").strip()
+        if doi and doi.lower() in existing:
+            continue
+        doc = {"doi": doi or None,
+               "pmid": str(it.get("pmid") or ""),
+               "title": (it.get("title") or "")[:300],
+               "journal": it.get("journal") or "",
+               "year": str(it.get("year") or ""),
+               "status": "needs_upload", "rows": [],
+               "n_rows": 0, "n_tworows": 0, "included": True}
+        pds.append(doc)
+        if doi:
+            existing.add(doi.lower())
+        added.append(doc)
+    res["per_doc"] = pds
+    block_a.a4_persist_result(req.session_path, res)
+    return {"added": len(added),
+            "message": f"已追加 {len(added)} 篇到 A4 待补队列（可补传 PDF 后抽取）"}
+
+
 @app.get("/api/pdf_page")
 def api_pdf_page(session_path: str, doc_index: int = 0, page: int = 1, dpi: int = 110):
     """渲染某篇 PDF 的指定页为 PNG，供工作台「查看原文页」内联展示（fitz）。
@@ -730,6 +890,47 @@ def api_pdf_page(session_path: str, doc_index: int = 0, page: int = 1, dpi: int 
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"渲染失败：{type(e).__name__}: {e}")
+
+
+@app.post("/api/a4_set_doc_included")
+def api_a4_set_doc_included(session_path: str = Form(...), doc_index: int = Form(...),
+                            included: int = Form(...)):
+    """A4 红线核验：把某篇标记为剔除（included=0）或恢复（included=1）。
+
+    被剔除篇的抽取行不再进入 Block B 合并（handoff.studies_for_b 过滤依据）。
+    仅更新 a4_result.per_doc[doc_index].included 并重算提取汇总，不涉及红线 decide。
+    """
+    if not os.path.exists(session_path):
+        raise HTTPException(400, f"会话不存在：{session_path}")
+    try:
+        res = block_a.a4_get_result(session_path) or {}
+        pds = res.get("per_doc") or []
+        if not (0 <= doc_index < len(pds)):
+            raise HTTPException(400, f"doc_index 越界：{doc_index} / {len(pds)}")
+        flag = bool(int(included))
+        doc = dict(pds[doc_index])
+        doc["included"] = flag
+        doc["excluded_reason"] = None if flag else "A4 红线人工剔除（不进 Block B 合并）"
+        pds[doc_index] = doc
+        res["per_doc"] = pds
+        res = _a4_rebuild_totals(res)
+        block_a.a4_persist_result(session_path, res)
+        return {"ok": True, "index": doc_index, "included": flag,
+                "n_extracted": res.get("n_extracted"), "n_docs": len(pds)}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"更新失败：{type(e).__name__}: {e}")
+
+
+def _a4_rebuild_totals(res):
+    """剔除/恢复后重算提取汇总：仅统计 included 篇，供界面计数与进入 B 的依据一致。"""
+    pds = res.get("per_doc") or []
+    inc = [x for x in pds if (x or {}).get("included", True)]
+    res["n_extracted"] = sum((x.get("n_tworows") or 0) for x in inc)
+    res["n_included_docs"] = len(inc)
+    res["n_excluded_docs"] = len(pds) - len(inc)
+    return res
 
 
 @app.post("/api/a4_save_doc_edits")

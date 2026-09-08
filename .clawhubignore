@@ -65,6 +65,10 @@ Thumbs.db
 *.so
 *.egg-info/
 
+# ── 工作台 HTML 整体排除（2026-09-06 新增，§16.7 ③）──
+# 本地 Web 操作界面，暂不发布（内部开发资产，含端点/配置契约等实现细节）
+adapters/workbench/*.html
+
 # ── A2/A4 检索与抽取运行产物（会话期，不进发布包，2026-09-03 补，§16；ClawHub 不读 .gitignore 须自列）──
 adapters/openalex.json
 adapters/europepmc.json
@@ -87,3 +91,11 @@ scripts/smoke_*.py
 scripts/wb_http_probe.py
 *_out.txt
 _dec2.txt
+
+# ── 补齐：与 .gitignore 对齐（F12）──
+adapters/pdf_cache/
+adapters/workbench/workbench_server.log
+# F20 顶层评审/测试缓存（不进发布包）
+RELEASE_REVIEW.md
+pytest_cache/
+.pytest_cache/

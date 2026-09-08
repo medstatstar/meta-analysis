@@ -36,7 +36,7 @@
         │  verdict: recommend / hold / not_recommended
         ▼
 ② 文献检索整理 (委托 ct-literature)
-   ct_literature.py --topic "..." --prisma --run
+   ct_literature.py --topic "..." --online --prisma --run
    → .merged.json（含 prisma 块：identified/excluded/included_records + duplicates_removed）
         │
         ▼
@@ -61,8 +61,12 @@
 
 ## 2. ① 方向判断 → 委托 ct-literature 全面检索
 
-- **本技能侧已有**：`topic-selection.md` 的 4 维评分（临床/可行性/数据/新颖性，任一 ≤2 一票否决）+ R1–R7 交叉检查 + `generate_topic_report.py`。其 Stage 4 用去重探针 `adapters/literature_probe.py`（仅 Europe PMC 的 Cochrane CDSR + PubMed/MEDLINE 两层）。
-- **补一步委托**：当选题报告需要「全面证据基础」时，在 Stage 4 显式调用 ct-literature 做跨库检索，而不是只靠 in-skill 探针：
+- **本技能侧已有**：`topic-selection.md` 的 4 维评分（临床/可行性/数据/新颖性，任一 ≤2 一票否决）+ R1–R7 交叉检查 + `generate_topic_report.py`，以及**选题门控** `scripts/topic_gate.py`（确定性检测 ct-literature 是否安装并路由）。
+- **选题门控（必读）**：进入选题轨第一步先跑 `python scripts/topic_gate.py --topic "<topic>"`：
+  - ct-literature **已安装** → 直接调用它做全面检索（见下方命令），其 `.merged.json` 作为 Stage 4 新颖性证据；
+  - ct-literature **未安装** → AskUserQuestion 询问「安装后继续 / 简单分析」；选简单分析则直接调 **ct-search 远端服务**（`adapters/ctsearch_client.py search --source europepmc ...`），无需安装 ct-literature；
+  - 绝对兜底（ct-search 也不可达）→ 退回 in-skill `adapters/literature_probe.py`（直连 Europe PMC）。
+- **补一步委托**：当选题报告需要「全面证据基础」且 ct-literature 已安装时，在 Stage 4 显式调用 ct-literature 做跨库检索，而不是只靠 in-skill 探针：
 
   ```bash
   python <ct-literature>/scripts/ct_literature.py \

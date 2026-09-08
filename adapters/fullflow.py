@@ -57,7 +57,7 @@ STAGE_TO_GATE = {v: k for k, v in GATE_TO_STAGE.items()}
 
 # 可被 revise 替换的 stage_result 键（spec §5 editable_payload / §6.4 接缝）
 EDITABLE_KEYS = {
-    "A1.topic_selection": ["report"],
+    "A1.topic_selection": ["report", "include_reviews"],
     "A3.screening": ["screened"],
     "A4.data_extraction": ["extracted_rows"],   # 真实接缝：直接作为 Block B studies
     "B4.quality_gate": ["report"],
@@ -150,6 +150,16 @@ class FullflowSession:
                 out[d["stage_id"]] = d["revision"]
         return out
 
+    def latest_revision(self, stage_id):
+        """某阶段最近一次带 revision 的人工决策的 revision dict（不限 action：
+        approved 亦可携带 revision，如 A1 的 include_reviews 开关随批准一并提交）。
+        无则返回 None。"""
+        rev = None
+        for d in self.data["human_decisions"]:
+            if (d.get("stage_id") == stage_id and isinstance(d.get("revision"), dict)):
+                rev = d["revision"]
+        return rev
+
     def record_decision(self, decision):
         rec = {
             "decision_id": decision.get("decision_id") or f"d-{uuid.uuid4().hex[:8]}",
@@ -196,6 +206,12 @@ def _run_block(letter, sess, debug, on_line=None, on_a4_event=None):
         revs = sess.revisions_for_block("A")
         a2_rev = revs.get("A2.literature_search") or {}
         a3_rev = revs.get("A3.screening") or {}
+        # A1 页面「纳入综述」开关随批准提交（action=approved + revision），
+        # 覆盖启动配置的 include_reviews —— A1 是选题闸，此处是检索前最后可改点。
+        a1_rev = sess.latest_revision("A1.topic_selection") or {}
+        include_reviews = a1_rev.get("include_reviews", cfg.get("include_reviews", False))
+        if not isinstance(include_reviews, bool):
+            include_reviews = bool(include_reviews)
         # A3 已批准且无任何 A2/A3 修订 → 仅跑 A4，复用缓存的 A1/A2/A3，避免整块重跑。
         # 普通 approve（非 revise）本就该直接续跑下游，原实现却把整块重算一遍。
         cached_env = sess.data["blocks"]["A"].get("envelope")
@@ -219,7 +235,8 @@ def _run_block(letter, sess, debug, on_line=None, on_a4_event=None):
             override_screened=a3_rev.get("screened"), on_line=on_line,
             on_a4_event=on_a4_event,
             start_stage=start_stage,
-            cached_envelope=(cached_env if start_stage else None))
+            cached_envelope=(cached_env if start_stage else None),
+            include_reviews=include_reviews)
     if letter == "B":
         return block_b.run_block_b(
             sess.data["handoff"].get("studies_for_b") or [],
@@ -232,8 +249,13 @@ def _run_block(letter, sess, debug, on_line=None, on_a4_event=None):
 
 
 def _extraction_input(sess):
-    """A4 extraction_table：优先人工 revision rows（list），否则原始配置值。"""
-    rev = sess.revisions_for_block("A").get("A4.data_extraction") or {}
+    """A4 extraction_table：优先人工 revision rows（list），否则原始配置值。
+
+    A4 红线放行（approved）也携带 revision.extracted_rows（前端把逐篇抽取行 +
+    剔除状态打包提交，见 workbench approveA4），故用 latest_revision（不限 action）
+    而非 revisions_for_block（仅 revised）——否则「放行即重抽」会吞掉人工剔除。
+    """
+    rev = sess.latest_revision("A4.data_extraction") or {}
     rows = rev.get("extracted_rows")
     if isinstance(rows, list) and rows:
         return rows
@@ -354,6 +376,7 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
                  pause_at=None, extraction_table=None,
                  session_dir: str = ".", debug: bool = False,
                  pdf_email: str = None, max_attempts: int = 12,
+                 include_reviews: bool = False,
                  on_line=None, on_a4_event=None) -> dict:
     """启动 fullflow：跑 Block A，遇停靠点即停。返回 = 块信封 + fullflow 视图。
 
@@ -367,7 +390,7 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
            "effect_measure": effect_measure, "nma": nma,
            "pause_at": sorted(pause_at), "extraction_table": extraction_table,
            "session_dir": session_dir, "pdf_email": pdf_email,
-           "max_attempts": max_attempts}
+           "max_attempts": max_attempts, "include_reviews": include_reviews}
     sess = FullflowSession.new(topic, cfg, session_dir)
     return _advance(sess, debug=debug, on_line=on_line, on_a4_event=on_a4_event)
 

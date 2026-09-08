@@ -5,8 +5,8 @@
 
 - **不依赖 coze 部署**：本模块完全本地运行，不调用 run_stage/run_meta，故不触发出站鉴权。
   C1 初稿为**结构化骨架生成器**（本地启发式，数字自动填充 B1-B4 结果）；C2 AI 评审复用
-  block_b.detect_overclaims（B3 单点实现）；C3 参考完整性核验为 🔴 红线（结构/PRISMA 检查，
-  真实 CrossRef/撤稿库核验待 coze 部署后接管）；C4 证据表+投稿前 QA 含 🔴 终闸。
+  block_b.detect_overclaims（B3 单点实现）；C3 参考完整性核验为 🔴 红线（结构/PRISMA 检查 +
+  CrossRef/PubMed 真实 API 核验，防 AI 虚构参考文献）；C4 证据表+投稿前 QA 含 🔴 终闸。
 - 阶段序列（SPEC §9）：
     C1.draft          结构化初稿（Markdown，数字填充 B1-B4）
     C2.ai_review      AI 评审（复用 B3 过度声明检测）
@@ -17,7 +17,7 @@
 - 红线闸名严格复用 coze_client._REDLINE_GATES：C3=reference_verification、C4=manuscript_approval。
 
 依赖：coze_client（CONTRACT_VERSION / STAGE_SCHEMA_ID / _REDLINE_GATES）；block_b（_mk_stage /
-detect_overclaims，信封与 B3 复用）。
+detect_overclaims，信封与 B3 复用）；ref_verify（CrossRef/PubMed 真实参考文献核验，防虚构）。
 """
 
 import re
@@ -25,6 +25,7 @@ import uuid
 
 import coze_client as cc
 from block_b import _mk_stage, detect_overclaims, B1, B2, B3, B4
+from ref_verify import verify_references
 
 # ---- Block C 阶段 ID（SPEC §9，严格匹配 coze 端编排对齐） ----
 C1 = "C1.draft"
@@ -222,16 +223,18 @@ def c2_ai_review(manuscript, b_summary):
 # C3 参考完整性核验（🔴 reference_verification 红线，结构/PRISMA 检查）
 # ---------------------------------------------------------------------------
 def c3_reference_verify(manuscript, sections, references=None):
-    """参考完整性核验（本地结构层）。
+    """参考完整性核验（结构 + 真实 API）。
 
     检查：
       - 初稿必含章节（背景/方法/结果/讨论/结论）齐全；
-      - 若提供参考列表：每条须有 doi 或 pmid，退回/撤稿文献（is_retracted）标 critical；
-      - 若未提供参考（本地-only）：标记 coze_ready=False，提示待 coze 端接 CrossRef/撤稿库。
-    返回 {report, critical, notes, coze_ready}；红线闸由 run_block_c 统一构造。
+      - 若提供参考列表：每条须有 doi 或 pmid → **CrossRef/PubMed 真实 API 核验**存在性与元数据，
+        缺失/虚构标 critical；撤稿文献标 critical；双侧 DOI+PMID 交叉验证防拼接幻觉。
+      - 若未提供参考（本地-only）：标记 coze_ready=False，提示待补充。
+    返回 {report, critical, notes, coze_ready, ref_verifications[]}；红线闸由 run_block_c 统一构造。
     """
     notes = []
     issues = []
+    ref_verifications = []
     critical = False
 
     # 1) 章节结构核验
@@ -244,33 +247,64 @@ def c3_reference_verify(manuscript, sections, references=None):
         critical = True
         notes.append("结构缺陷：缺失 PRISMA 必要章节，须补全后再送审。")
 
-    # 2) 参考文献核验
+    # 2) 参考文献真实核验（CrossRef/PubMed API）
     coze_ready = False
+    n_retracted = 0
+    n_not_found = 0
+    n_mismatch = 0
+
     if references is None:
-        notes.append("未提供参考列表：本地结构核验通过，但 CrossRef/撤稿库真实核验须待 coze 部署后接管（coze_ready=False）。")
+        notes.append("未提供参考列表：本地结构核验通过，但真实参考文献核验须待补充（coze_ready=False）。")
         coze_ready = False
     else:
         n_ref = len(references)
         if n_ref == 0:
             issues.append("参考列表为空但正文引用了研究")
             notes.append("参考列表为空，建议补充至少纳入研究的出处。")
-        for r in references:
-            rid = r.get("doi") or r.get("pmid")
-            if not rid:
-                issues.append(f"参考文献缺少 doi/pmid：{r.get('key', r.get('title', '?'))}")
-            if r.get("is_retracted"):
-                critical = True
-                issues.append(f"撤稿/退回文献：{r.get('key', r.get('title', '?'))}")
+        else:
+            # 真实 API 批量核验（CrossRef/PubMed）
+            ref_verifications = verify_references(references)
+            for rv in ref_verifications:
+                status = rv.get("status")
+                if status == "retracted":
+                    critical = True
+                    n_retracted += 1
+                    issues.append(f"⚠️ 撤稿文献：{rv.get('title') or rv.get('doi') or rv.get('pmid')} — {rv.get('message')}")
+                elif status == "not_found":
+                    critical = True
+                    n_not_found += 1
+                    issues.append(f"⚠️ 未查到（疑似虚构）：DOI={rv.get('doi')} PMID={rv.get('pmid')} — {rv.get('message')}")
+                elif status == "mismatch":
+                    critical = True
+                    n_mismatch += 1
+                    issues.append(f"⚠️ 元数据不一致（疑似拼接）：{rv.get('title') or ''} — {rv.get('message')}")
+                elif status == "error" and not rv.get("doi") and not rv.get("pmid"):
+                    issues.append(f"⚠️ 缺少 doi/pmid：{rv.get('title', '?')}（无法核验）")
+
+            # 撤稿计数传递给下游 B4
+            if n_retracted > 0:
+                notes.append(f"核验发现 {n_retracted} 篇撤稿文献，必须人工处置。")
+            if n_not_found > 0:
+                notes.append(f"核验发现 {n_not_found} 篇未查到（可能虚构），必须人工核查。")
+            if n_mismatch > 0:
+                notes.append(f"核验发现 {n_mismatch} 篇元数据不一致（标题/作者），必须人工核查。")
+
         if issues:
             notes.append(f"参考核验发现 {len(issues)} 处问题。")
+        if not critical and n_ref > 0:
+            coze_ready = True
 
     report = {
         "n_references": len(references) if references is not None else 0,
         "missing_sections": missing,
         "issues": issues,
         "critical": critical,
+        "n_retracted": n_retracted,
+        "n_not_found": n_not_found,
+        "n_mismatch": n_mismatch,
         "coze_ready": coze_ready,
-        "note": "参考完整性核验：本地结构/PRISMA 层；真实 CrossRef/撤稿库核验待 coze 接管。",
+        "ref_verifications": ref_verifications,
+        "note": "参考完整性核验：结构/PRISMA 层 + CrossRef/PubMed 真实 API 存在性/元数据核验；撤稿/虚构/拼接标 critical。",
     }
     return report
 

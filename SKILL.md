@@ -3,10 +3,10 @@ name: meta-analysis
 cn_name: 医学Meta分析
 slug: meta-analysis
 displayName: Meta Analysis / 医学Meta分析
-version: 2.3.1
+version: 2.9.16
 license: MIT
-summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。上游编排：选题方向判断 + 文献检索整理（委托 ct-literature）+ 筛选 + 人工核验数据提取助手，提取结果直连计算轨。
-description: "Comprehensive R-based meta-analysis skill covering RevMan 5.x + Stata equivalents (metareg/mvmeta) + esc + RVE + Bayesian NMA (Stan/JAGS) + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta, for a total of 23 analysis figures. Auto-switches language (defaults to English, switches to Chinese in zh-* environments). All analyses ship reproducible R code. Upstream orchestration: topic-direction judgment + literature retrieval (delegated to ct-literature) + screening + a human-verified data-extraction assistant that feeds directly into the compute track. / 基于 R 的全方位 Meta 分析技能，覆盖 RevMan 全部功能 + Stata 等价（metareg/mvmeta）+ esc + RVE + 贝叶斯 NMA（Stan/JAGS）+ 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。中英双语自动切换（默认英文/中文环境切中文），所有分析提供可复现 R 代码。上游编排：选题方向判断 + 文献检索整理（委托 ct-literature）+ 筛选 + 人工核验数据提取助手，提取结果直连计算轨。"
+summary: 基于 R 的全方位 Meta 分析技能，覆盖 RevMan + Stata 等价 + esc + RVE + 贝叶斯 NMA + 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。所有分析提供可复现 R 代码。还可提供Meta选题方向判断 + 文献检索整理 + 筛选 + 数据提取功能。
+description: "Comprehensive R-based meta-analysis skill covering RevMan + Stata equivalents + esc + RVE + Bayesian NMA + survival meta + TSA + single-group meta + diagnostic meta + systematic review workflow; produces forest plots, funnel plots, heterogeneity (I²), publication bias, subgroup analysis, meta-regression, network meta, for a total of 23 analysis figures. All analyses ship reproducible R code. Can also provide meta topic-direction judgment + literature retrieval and organization + screening + data-extraction functionality. / 基于 R 的全方位 Meta 分析技能，覆盖 RevMan + Stata 等价 + esc + RVE + 贝叶斯 NMA + 生存 Meta + TSA + 单组率 Meta + 诊断 Meta + 系统评价流程；输出森林图、漏斗图、异质性(I²)、发表偏倚、亚组分析、元回归、网络 Meta等共 23 种分析图形。所有分析提供可复现 R 代码。还可提供Meta选题方向判断 + 文献检索整理 + 筛选 + 数据提取功能。"
 
 required_commands: [python]
 invocable: true
@@ -25,24 +25,11 @@ triggers:
   - "效应量转换"
   - "TSA"
   - "诊断meta"
-  - "系统综述全流程"
-  - "从检索到meta分析"
-  - "文献检索后做meta"
-  - "检索→筛选→提取→合并"
-  - "数据提取 meta"
-  - "系统综述全流程模式"
-  - "系统综述流程"
-  - "系统综述一站式"
-  - "meta 全流程"
-  - "全流程meta"
-  - "从选题到meta分析"
-  - "从选题到合并效应量"
-  - "systematic review workflow"
-  - "systematic review full pipeline"
   - "full meta pipeline"
 permissions:
   scope: "user-space-only"
-  network: "required (all computation via coze cloud R engine; params/summary stats sent to coze, no local-R fallback; IPD only if user opts in)"
+  network: required
+  network_note: "All numerical computation runs on the coze cloud R engine; analysis params/summary stats are POSTed to coze. No local-R fallback (paid-only feature); IPD only if the user explicitly opts in."
   filesystem: "writes only to the current working directory (meta_analysis/ and output/ report artifacts: generated .R scripts, .svg/.png figures, .csv tables); otherwise read-only"
 metadata:
   {
@@ -69,7 +56,7 @@ metadata:
 ### Two-track gating (code-driven routing, no LLM decision)
 The first message goes through `python scripts/classify.py` for **deterministic triage** (zero LLM decision):
 - **Compute track (compute)**: clear Simple / Complex → describe and immediately run `run_meta.py --query --data`; three steps to completion, fully bound by this discipline.
-- **Topic track (topic)**: vague / topic selection / feasibility → `literature_probe.py` + `generate_topic_report.py`; code-grounded, zero free-form improvisation.
+- **Topic track (topic)**: vague / topic selection / feasibility → **first run `scripts/topic_gate.py`** to route on ct-literature install status (installed → call ct-literature directly; not installed → AskUserQuestion install-vs-simple, simple = ct-search remote `adapters/ctsearch_client.py search`), then `generate_topic_report.py`; code-grounded, zero free-form improvisation.
 - Both tracks forbid reading source via Read/Grep/Bash to "confirm how to tune / which task to use" — that is `classify.py`'s job.
 
 ### Agent operation card (copy verbatim, no variations)
@@ -112,35 +99,51 @@ Vague → Level 1 menu (7 categories). Select → Level 2 with data-format hints
 Trigger: no topic / feasibility check / "rejected as duplicate" / pre-PROSPERO audit → `references/topic-selection.md`. Two paths:
 - **Quick** (≤30 min): 1-page decision card — 4-dim scores (clinical/feasibility/data/novelty, 0–5, any ≤2 = veto) + screen verdict.
 - **Full** (5 stages + gates): PICO (`pico-guide.md`) → scoring + cross-checks R1–R6 → dedup (`dedup-search.md`) → PRISMA 2020/AMSTAR-2 (`compliance-precheck.md`) → 11-section report via `python scripts/generate_topic_report.py input.json output.md|html` (templates → `topic-report-template.md` / `prospero-mapping.md`).
-- **Dedup self-contained**: Stage 4 runs in-skill Europe PMC probe `adapters/literature_probe.py` (real hit counts + top titles) by default; novelty ranking grounded in actual literature. Comprehensive retrieval → use **ct-literature** skill first.
+- **Dedup source is gate-driven (see Topic Gating in `topic-selection.md`)**: first run `scripts/topic_gate.py`; if **ct-literature** is installed, call it directly for full 6-source retrieval (`.merged.json` as Stage-4 evidence); if not installed, AskUserQuestion → simple-analysis branch calls the **ct-search remote** (`adapters/ctsearch_client.py search --source europepmc`, no install needed); in-skill `adapters/literature_probe.py` (direct Europe PMC) is only the offline ultimate fallback. All paths return real `hit_count` + titles; novelty ranking grounded in actual literature.
   - ⛔ **Topic-track red line**: candidate ranking **must** be based on the probe's real hit counts + 4-dim score card; the LLM only paraphrases, strictly no free-form "which direction is good". Quick is ranked by the probe card; Full is reported by `generate_topic_report.py`, the LLM does not rewrite.
 
-### 2.3 Upstream orchestration (检索 → 筛选 → 提取 → 分析)
+### 2.3 Upstream orchestration (retrieval → screening → extraction → analysis)
 
-> **定位升级（2026-08-30）**：meta-analysis 从「只算合并效应量」扩展为「覆盖 Meta 全链路的编排器」。
-> 上游三段尽量复用现有模块与 `ct-literature`；唯一新增能力是**数据提取助手**（LLM 草稿 + 人工核验闸）。
+> **Repositioning (2026-08-30):** meta-analysis evolved from "pooling effect sizes only" into a "full-chain Meta orchestrator".
+> The upstream three stages reuse existing modules and `ct-literature`; the only new capability is the **data-extraction assistant** (LLM draft + human-verification gate).
 
-全链路编排、命令清单、接缝陷阱（含 `included_records` ≠ `included`）、守卫语义 → `references/upstream_orchestration.md`。
+Full-chain orchestration, command list, seam pitfalls (incl. `included_records` ≠ `included`), and guard semantics → `references/upstream_orchestration.md`.
 
-- **① 方向判断**：本技能 `references/topic-selection.md` + `adapters/literature_probe.py`；需全面证据基础时委托 **ct-literature** 做跨库检索（见 §2.2 与 orchestration 文档 §2）。
-- **② 文献检索整理**：100% 委托 **ct-literature**（`ct_literature.py` + 多源去重），输出 `.merged.json` / Excel / HTML；meta 侧只编排不重复造轮子。
-- **③ 文献清理（初筛）**：ct-literature `screen_prisma.py` 机器初筛 + 本技能 agent 层逐条判定（`review_workflow.md §2`）；PRISMA 图经 `scripts/prisma_bridge.py` 桥接。
-- **④ 数据提取【新增】**：`scripts/extract_assist.py` 生成空白抽取表 → agent/LLM 读全文提草稿 → `validate` → 人工核验 → `stamp --confirm`；`scripts/extraction_guard.py` 在计算轨入口拦截未核验数据。
-- **⑤ Meta 计算**：现有 `scripts/run_meta.py`，抽取 CSV 经守卫核验后直通。
+- **① Direction judgment:** this skill's `references/topic-selection.md` + `adapters/literature_probe.py`; delegate cross-database retrieval to **ct-literature** when a full evidence base is needed (see §2.2 and orchestration doc §2).
+- **② Literature retrieval & curation:** 100% delegated to **ct-literature** (`ct_literature.py` + multi-source dedup), output `.merged.json` / Excel / HTML; meta only orchestrates, no reinvention.
+- **③ Literature cleaning (initial screening):** ct-literature `screen_prisma.py` machine pre-screen + this skill's agent layer per-record judgment (`review_workflow.md §2`); PRISMA diagram bridged via `scripts/prisma_bridge.py`.
+- **④ Data extraction [NEW]:** `scripts/extract_assist.py` generates a blank extraction sheet → agent/LLM reads full text and drafts → `validate` → human verification → `stamp --confirm`; `scripts/extraction_guard.py` blocks unverified data at the compute-track entry.
+- **⑤ Meta computation:** existing `scripts/run_meta.py`; the extracted CSV passes through straight after guard verification.
 
-> ⚠️ **人工核验闸是红线**：④ 的抽取精度属医学关键，且全文获取受限（付费墙），**不可无人值守直灌**。
-> 任何由 `extract_assist.py` 生成、未 `stamp --confirm` 的 CSV，`run_meta.py` 一律拦截（`META_STATUS=unverified_extraction`）。
+> ⚠️ **The human-verification gate is a red line:** extraction accuracy in ④ is medically critical, and full-text access is restricted (paywalls) — **never auto-feed unattended**.
+> Any CSV produced by `extract_assist.py` that is not `stamp --confirm`ed is blocked by `run_meta.py` (`META_STATUS=unverified_extraction`).
 
-### 2.4 系统综述全流程模式（@skill 入口）
+### 2.4 Systematic-review full-flow mode (@skill entry)
 
-> **触发**：用户以「系统综述全流程 / 从检索到meta分析 / systematic review workflow」等意图调用本技能
-> （见 frontmatter `triggers`）→ 进入端到端编排，而非直接跳计算轨。
+> **Trigger:** the user invokes this skill with intents such as "systematic review full flow" / "from retrieval to meta-analysis" / "systematic review workflow"
+> (see frontmatter `triggers`) → enter end-to-end orchestration, not a direct jump to the compute track.
 
-**这是 meta-analysis 作为「编排器」的统一入口**：把 选题判断 → 检索整理 → 初筛+PRISMA → 数据提取 → 合并分析 串成一条**带人工闸**的流水线。agent 完整执行 playbook → `references/systematic_review_fullflow.md`（含 Stage 0 启动确认、5 阶段命令链、两道人工闸、失败/边界处理）。
+**This is meta-analysis's unified entry as an "orchestrator":** it chains direction judgment → retrieval & curation → initial screening + PRISMA → data extraction → pooled analysis into a pipeline **with human gates**. The agent executes the full playbook → `references/systematic_review_fullflow.md` (incl. Stage 0 startup confirmation, 5-stage command chain, two human gates, failure/boundary handling).
 
-- **编排纪律**：上游三段（①②）尽量复用本技能 + **ct-literature**，meta 侧只编排不重复造轮子；唯一新增能力是④「数据提取助手（LLM 草稿 + 人工核验闸）」。
-- **两道不可跳过的人工闸**：Stage 3 的最终纳入数（`included`，≠ 机器初筛的 `included_records`）、Stage 4 的提取草稿核验（`extract_assist.py stamp --confirm`）。任何闸门未过，agent 不得推进到下一阶段。
-- **与 §0 双轨的关系**：full-flow 是显式用户意图触发的端到端编排，内部仍复用 topic track（Stage 1）与 compute track（Stage 5），不新增 classify 任务类。
+- **Orchestration discipline:** the upstream three stages (①②) reuse this skill + **ct-literature**; meta only orchestrates, no reinvention; the only new capability is ④ "data-extraction assistant (LLM draft + human-verification gate)".
+- **Two non-skippable human gates:** Stage 3 final inclusion count (`included`, ≠ machine pre-screen's `included_records`), and Stage 4 extraction-draft verification (`extract_assist.py stamp --confirm`). Until a gate passes, the agent must not advance to the next stage.
+- **Relationship to §0 two-track:** full-flow is end-to-end orchestration triggered by an explicit user intent; internally it still reuses the topic track (Stage 1) and compute track (Stage 5), and adds no new classify task class.
+
+### 2.5 Workbench — the HTML interactive frontend for full-flow
+
+> **Positioning:** `adapters/workbench/` holds the full workbench frontend (`workbench.html`, three-column layout) + backend (`server.py`) + launcher (`launch_workbench.py`).
+> **Trigger:** the user mentions "工作台" / "workbench" / "meta 全流程" etc.
+
+```bash
+# Launch the workbench (default 127.0.0.1:8765, auto-opens the browser)
+python adapters/workbench/launch_workbench.py
+
+# Or start the backend manually
+cd adapters/workbench && coze/.venv/Scripts/python.exe -m uvicorn server:app --host 127.0.0.1 --port 8765
+```
+
+After launch, open the workbench in the preview panel with `present_files(["http://127.0.0.1:8765"])`.
+The workbench backend reuses the fullflow HITL state machine (red-line checks preserved verbatim); the frontend shows real-time progress and human-gate interactions across direction judgment → retrieval → screening → extraction → computation.
 
 ## 3. Initialization & execution backend
 
@@ -205,7 +208,7 @@ echo '{"prev":{"task":"pairwise_meta","data_path":"<csv>","measure":"OR","model"
 - **Attribution is never empty (v2.2.28)**: every outbound call carries `query_origin` (hostname SHA-256) and a `request_id` (UUID) — generated inside `coze_client`, so direct callers (self-test entry, integration test, `deploy_retest --live`) can no longer emit blank-attribution traffic that silently bypasses rate limiting. Debug/smoke calls add a `debug:` prefix plus `_debug: true`, so they are filterable in the log table. Identical requests within `COZE_META_DEDUP_WINDOW` (default 60 s) reuse the previous result instead of calling coze again.
 - **Coze failure needs consent**: on failure/timeout, first ask (bilingual) `The coze cloud service is temporarily unavailable. May I automatically diagnose the issue?`; allowed → diagnose+retry; declined → deliver a textual reply explaining cloud analysis was not performed (a no-computation message — **never** run R/Python locally to substitute).
 
-**Other boundaries**: PDF full-text download ONLY on explicit user instruction (`adapters/pdf_fetch.py`, opt-in). Not clinical judgment. No literature DB search (downloads full text only when user provides DOI/PMID).
+**Other boundaries**: PDF full-text download ONLY on explicit user instruction (`adapters/pdf_fetch.py`, opt-in). Not clinical judgment. No literature DB search (downloads full text only when user provides DOI/PMID). Download-entry classification (Unpaywall/Europe PMC core/OA-repo templates/publisher-page/signed-link/paywall, plus anti-scrape boundaries) → `references/pdf-download-portals.md`.
 - **Data-extraction guard (red line)**: the upstream data-extraction assistant (`scripts/extract_assist.py`) is human-in-the-loop only. Any extraction CSV it produces stays `verified_by_human=NO` until a human runs `extract_assist.py stamp --confirm`; `run_meta.py` (via `scripts/extraction_guard.py`) blocks unverified extraction CSVs with `META_STATUS=unverified_extraction`. Full-text retrieval and extraction accuracy are human responsibilities — never auto-feed extracted numbers into the compute track without verification.
 
 ## 7. User-uploaded files
