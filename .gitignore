@@ -80,9 +80,12 @@ Thumbs.db
 *.so
 *.egg-info/
 
-# ── 工作台 HTML 整体排除（2026-09-06 新增，§16.7 ③）──
-# 本地 Web 操作界面，暂不发布（内部开发资产，含端点/配置契约等实现细节）
-adapters/workbench/*.html
+# ── 工作台整体排除（2026-09-06 新增 §16.7 ③；2026-09-08 升级为整目录排除）──
+# 本地 Web 操作界面，暂不发布（内部开发资产，含端点/配置契约等实现细节）。
+# 整目录排除：server.py / form_schema.py / launch_workbench.py 等后端源码与已排除的
+# workbench.html 前端同为内部开发资产，避免"后端进包、前端缺失"的半成品发布。
+# 注：git archive 不读 .gitignore，已跟踪文件需配合 .gitattributes export-ignore + git rm --cached。
+adapters/workbench/
 
 # ── A2/A4 检索与抽取运行产物（会话期，不进发布包，2026-09-03 补，§16）──
 adapters/openalex.json

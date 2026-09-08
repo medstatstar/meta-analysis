@@ -1,0 +1,4 @@
+# 发布屏蔽：git archive（SkillHub 发布路径）跳过整目录，
+# 即使文件被 git 跟踪也生效（export-ignore 在 archive 阶段生效）。
+# 与 .gitignore / .clawhubignore 的 adapters/workbench/ 整目录排除保持一致。
+adapters/workbench/ export-ignore
