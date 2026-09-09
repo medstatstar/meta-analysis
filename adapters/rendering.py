@@ -612,6 +612,11 @@ def _render_hero(stats, task, T: dict) -> str:
         est, lo, hi = pooled.get("estimate"), pooled.get("ci_low"), pooled.get("ci_high")
     if est is None:
         return ""
+    # 2026-09-08：NMA 的 pooled 是多对比向量（list），无单一"合并效应量"——
+    # 强行 f"{est:.3f}" 会 TypeError（此前 NMA HTML 报告渲染即崩于此）。
+    # 向量型跳过 hero 卡，各对比估计仍由 stats 分组区完整呈现。
+    if isinstance(est, (list, tuple)):
+        return ""
     p = pooled.get("p")
     if p is None:
         p = pooled.get("pval")
@@ -635,6 +640,42 @@ def _render_hero(stats, task, T: dict) -> str:
     )
 
 
+def _render_pooled_card(pooled, T: dict) -> str:
+    """合并效应卡。NMA 的 pooled 是多对比向量（estimate/ci_low/ci_high 为 list），
+    通用 _kv_rows 会平铺成一长串顿号分隔的数字（不可读）→ 渲染为
+    「对比 | 效应量 [95% CI]」小表；标量型（pairwise 等单一合并值）走原 _kv_rows。
+    对比标签取 stats.pooled.comparisons（coze 端 2.9.18 起提供）；旧镜像无该字段时退化为索引。"""
+    est = pooled.get("estimate")
+    if not isinstance(est, (list, tuple)) or len(est) == 0:
+        return _group_card(T.get("group_pooled", "合并效应"), "🎯", _kv_rows(pooled))
+
+    def _num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    lo = pooled.get("ci_low") if isinstance(pooled.get("ci_low"), (list, tuple)) else []
+    hi = pooled.get("ci_high") if isinstance(pooled.get("ci_high"), (list, tuple)) else []
+    comps = pooled.get("comparisons") if isinstance(pooled.get("comparisons"), (list, tuple)) else []
+    unit = str(pooled.get("unit") or "").strip()
+    body = ['<table style="border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums;">',
+            '<tr><th style="text-align:left;padding:4px 10px 4px 0;border-bottom:1px solid var(--border);">对比</th>'
+            '<th style="text-align:right;padding:4px 0;border-bottom:1px solid var(--border);">效应量%s [95%% CI]</th></tr>'
+            % (("（%s）" % _html_escape(unit)) if unit else "")]
+    for i, e in enumerate(est):
+        ev = _num(e)
+        if ev is None:
+            continue  # 矩阵摊平残留（对角/NA），跳过
+        l, h = _num(lo[i]) if i < len(lo) else None, _num(hi[i]) if i < len(hi) else None
+        label = _html_escape(str(comps[i])) if i < len(comps) else ("对比 %d" % (i + 1))
+        ci = ("%.3f [%.3f; %.3f]" % (ev, l, h)) if (l is not None and h is not None) else "%.3f" % ev
+        body.append('<tr><td style="padding:4px 10px 4px 0;border-bottom:1px solid var(--border);">%s</td>'
+                    '<td style="text-align:right;padding:4px 0;border-bottom:1px solid var(--border);">%s</td></tr>' % (label, ci))
+    body.append("</table>")
+    return _group_card(T.get("group_pooled", "合并效应"), "🎯", "".join(body))
+
+
 def _render_stats_groups(stats, T: dict) -> str:
     """统计结果按语义分组渲染（合并效应 / 异质性 / 发表偏倚 / 质量评估 / 分析概要），
     不再压平成单一大表。未知 task 的顶层 dict 也各成一卡，不丢信息。"""
@@ -648,7 +689,10 @@ def _render_stats_groups(stats, T: dict) -> str:
     ]
     for key, label, ico in spec:
         if key in stats and stats[key] is not None:
-            groups.append(_group_card(label, ico, _kv_rows(stats[key])))
+            if key == "pooled":
+                groups.append(_render_pooled_card(stats[key], T))
+            else:
+                groups.append(_group_card(label, ico, _kv_rows(stats[key])))
     qg = stats.get("quality_gate")
     if isinstance(qg, dict):
         groups.append(_quality_gate_card(qg, T) if qg.get("checks") else
@@ -663,7 +707,12 @@ def _render_stats_groups(stats, T: dict) -> str:
         groups.append(_group_card(T["group_summary"], "📋", _kv_rows(rest)))
     for k, v in stats.items():
         if k not in ("pooled", "heterogeneity", "bias", "quality_gate", "subgroup_test") and isinstance(v, dict):
-            groups.append(_group_card(_html_escape(str(k)), "📦", _kv_rows(v)))
+            # 2026-09-08：extra.league_table 已由上方图卡区"网络证据表"（等宽 <pre>）保真呈现，
+            # 此处剔除——否则被 _kv_rows 平铺成无格式单行且与图卡重复。
+            rows = {rk: rv for rk, rv in v.items()
+                    if not (k == "extra" and rk == "league_table")}
+            if rows:
+                groups.append(_group_card(_html_escape(str(k)), "📦", _kv_rows(rows)))
     return "".join(groups)
 
 
@@ -961,6 +1010,21 @@ def render_html_report(out, out_dir: str = ".", titles: list | None = None,
             '这是 2026-08-27 前镜像的已知缺陷（Q_between 静默漏序列化）。'
             '请确认 coze 镜像已重建至含本修复的版本；当前报告的组间差异需以重建后结果为准。'
             '</div>'
+        )
+
+    # 2026-09-08 netleague 渲染兜底：netleague 按设计是表格型输出（stats.extra.league_table，
+    # netmeta 空格对齐文本表）而非 SVG figure；此前呈现层无消费方 → R 端算了表格也静默丢失
+    # （用户视角即 "NMA 没有 league 表"）。此处用等宽 <pre> 保真展示——解析成 HTML 表格
+    # 对空格对齐过于脆弱，不做。
+    _lg = (stats.get("extra") or {}).get("league_table") if isinstance(stats, dict) else None
+    if _lg:
+        figures_html += (
+            '<div class="figure-card"><p class="cap"><span class="ico">📋</span>'
+            + T.get("fig_netleague", "网络证据表")
+            + '</p><div class="svg-wrap"><pre style="font:12px/1.55 Consolas,\'Courier New\',monospace;'
+              'overflow-x:auto;margin:0;white-space:pre;">'
+            + _html.escape(str(_lg))
+            + "</pre></div></div>"
         )
 
     hero_html = _render_hero(stats, out.get("task"), T) if stats else ""

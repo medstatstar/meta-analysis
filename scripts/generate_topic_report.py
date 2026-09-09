@@ -217,8 +217,74 @@ def build_markdown(d):
     return body
 
 
+GAP_ZH = {
+    "real_gap": "真实缺口（该窄方向在大类中仍欠研究）",
+    "saturated": "已饱和（已有大量同类 Meta，须明确增量）",
+    "caution": "需谨慎（方向已有覆盖，须差异化）",
+    "unverified": "未验证",
+}
+
+
+def _gap_label(verdict):
+    return GAP_ZH.get(verdict, verdict or "—")
+
+
+def _ratio_str(r):
+    """Render a narrow/broad hit-count ratio as '1/N' (if <1) or 'Nx' (if ≥1)."""
+    if r is None:
+        return "—"
+    try:
+        r = float(r)
+    except (TypeError, ValueError):
+        return "—"
+    if r <= 0:
+        return "—"
+    if r >= 1:
+        return "%.1fx" % r
+    return "1/%d" % max(1, round(1.0 / r))
+
+
+def _gap_section(gap):
+    """Render the live real-gap evidence block for the Quick card.
+
+    Grounded in `literature_probe.py` output (Cochrane hit_count / PubMed
+    hit_count). The 'broad' topic comparison yields the narrow/broad ratio
+    (e.g. 1/10 → 'real gap'). Degrades to 'unverified' when probe unavailable.
+    """
+    if not gap:
+        return ("\n**真实缺口证据（实时探针）**: 未提供 — Full 评估将运行实时去重探针 "
+                "(Cochrane / PubMed) 补充。")
+    if gap.get("verdict") == "unverified" or gap.get("probe_used") is False:
+        return ("\n**真实缺口证据（实时探针）**: ⚠️ 探针不可用（网络受限），缺口未验证；"
+                "Full 评估将重跑去重检索。")
+    narrow = gap.get("narrow", {}) or {}
+    broad = gap.get("broad", {}) or {}
+    ratio = gap.get("ratio_narrow_over_broad")
+    lines = ["\n## 真实缺口证据（实时探针）",
+             "- **Cochrane (CDSR)**: %s" % narrow.get("cochrane", "—"),
+             "- **PubMed SR/MA（近 5 年）**: %s" % narrow.get("pubmed", "—")]
+    if broad:
+        bt = broad.get("topic", "宽泛方向")
+        bp = broad.get("pubmed", "—")
+        if ratio is not None:
+            lines.append("- **对比 %s**: 约为其（PubMed %s）的 **%s**" % (bt, bp, _ratio_str(ratio)))
+        else:
+            lines.append("- **对比 %s**: PubMed %s" % (bt, bp))
+    label = gap.get("label") or _gap_label(gap.get("verdict"))
+    verdict = gap.get("verdict", "")
+    icon = "✅" if verdict == "real_gap" else ("🔴" if verdict == "saturated" else "⚠️")
+    lines.append("- **缺口判定**: %s %s" % (icon, label))
+    if gap.get("summary"):
+        lines.append("  - %s" % gap["summary"])
+    return "\n".join(lines)
+
+
 def build_quick_card(d):
-    """Quick assessment: 1-page decision card (not a full report)."""
+    """Quick assessment: 1-page decision card (not a full report).
+
+    Fuses the 4-dimension score card with live real-gap evidence so the card
+    carries BOTH the score verdict AND the dedup-probe gap signal (R7 grounding).
+    """
     s = d.get("scores") or {}
     lines = [
         f"# Quick Assessment — {d.get('title', 'Untitled')}",
@@ -234,6 +300,7 @@ def build_quick_card(d):
         f"| **Total** | **{s.get('total', '—')}/20** |",
         "",
         f"**Verdict (screen only)**: {verdict_label(d.get('verdict'))}",
+        _gap_section(d.get("gap")),
         "",
         f"**Key risks**: {_fmt_list(d.get('key_risks')) or '—'}",
         "",

@@ -113,6 +113,7 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 > **候选方向 ① 非糖尿病 CKD 专属 Meta（最推荐）**
 > - 结局：主要心血管事件 / 肾脏复合终点（OR/RR）+ eGFR 斜率
 > - 四维初评：临床 5 / 可行性 4 / 数据 4 / 新颖性 5 → 总分 18（强烈建议）
+> - 真实缺口证据（实时探针）：Cochrane 1 / PubMed（近5年）38；约为宽泛方向「SGLT2i CKD 疗效」(PubMed 412) 的 **1/11** → ✅ 真实缺口
 > - Meta 类型：标准 pairwise（meta / metafor），优先 IPD 或试验层面 subgroup 合并
 > - 依据：DAPA-CKD 非糖尿病亚组仅 ~1/3、单试验把握度不足；现有 Meta 混报，原文献点名"非糖尿病 CKD 证据仍不足、需更多研究"。
 >

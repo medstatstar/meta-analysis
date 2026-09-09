@@ -76,12 +76,16 @@ python scripts/topic_gate.py --topic "<topic>"
 
 | User signal | Path | Output |
 |---|---|---|
-| "5 分钟告诉我能不能做" / "quick feasibility" | **Quick Assessment** | 1-page decision card: rough 4-dim scores + verdict + top risks (≤30 min) |
+| "5 分钟告诉我能不能做" / "quick feasibility" | **Quick Assessment** | 1-page decision card: rough 4-dim scores + verdict + **live real-gap evidence** (Cochrane/PubMed probe + broad-direction ratio) + top risks (≤30 min) |
 | "给我一份选题报告" / "PROSPERO 预审计" | **Full Assessment** | 5-stage workflow → 11-section report (`generate_topic_report.py`) |
 | "被拒为重复了" | **Dedup re-review** | Increment re-review report (subset of Full: Stage 4 only + verdict) |
 
 > Quick Assessment must NOT give a final go/no-go — it is a screen.
 > If Quick returns ⚠️ or ❌ on any dimension → recommend Full Assessment.
+>
+> **Quick 卡必须携带真实缺口证据（2026-09-08 融合）**：仅给四维评分而不给缺口依据，会让"新颖性"变成空中楼阁（旧版曾因缺失此层被质疑）。Quick 路径须**实时跑探针**两次——① 窄方向主题，② 其宽泛父方向（如「PD-1 NSCLC 二线」→「NSCLC 免疫治疗」），用 `literature_probe.py` 取 `cochrane.hit_count` / `pubmed_meta.hit_count`，算 `ratio = 窄.PubMed / 宽.PubMed`，落到 `gap` 字段并渲染进卡片（见 Output contract）。探针不可用时 `verdict="unverified"`，卡片显示"未验证"，**不得**用模板数字硬填。可用 `adapters/build_gap_probe.py` 一键跑窄方向+宽泛父方向双探针并产出 `gap` 字段（`--out gap.json` 单独输出，或 `--merge-into input.json` 合并进选题 input 直接喂给 `generate_topic_report.py`）。
+>
+> **真实缺口判定阈值**：`ratio < 0.3` 且 `Cochrane < 10` → `real_gap`（真实缺口，✅）；`ratio ≥ 0.5` 或 `Cochrane ≥ 20` → `saturated`（已饱和，🔴，须明确增量）；介于之间 → `caution`（⚠️，须差异化）。该 Verdict 与四维"新颖性"互校：新颖性给 4–5 但缺口判定 `saturated` 时，触发 R3 复核。
 
 ## Four-dimension scoring model（四维评估模型）
 
@@ -189,6 +193,7 @@ If PROSPERO registration intended → include `prospero-mapping.md`.
   "scores": {"clinical": 4, "feasibility": 4, "data": 3, "novelty": 4, "total": 15},
   "score_anchors": {"clinical": "…", "feasibility": "…", "data": "…", "novelty": "…"},
   "cross_checks": [{"rule": "R1", "triggered": false, "note": ""}],
+  "gap": {"probe_used": true, "narrow": {"cochrane": 4, "pubmed": 224}, "broad": {"topic": "NSCLC 免疫治疗", "pubmed": 2240}, "ratio_narrow_over_broad": 0.1, "verdict": "real_gap", "label": "真实缺口", "summary": "该窄方向 PubMed 224，约为宽泛方向(2240)的 1/10 → 真实缺口"},
   "dedup": {"prospero": "...", "cochrane": "...", "pubmed": "...", "non_english": "...", "near_duplicate": "no", "increment": "..."},
   "search_strategy": "…", "expected_studies": "…",
   "compliance": {"prisma": [{"item": "1", "status": "ok"}], "amstar2": [...], "overall_risk": "green"},

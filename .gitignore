@@ -120,3 +120,6 @@ _dec2.txt
 RELEASE_REVIEW.md
 pytest_cache/
 .pytest_cache/
+
+# ── 开发期策略残留（DEV_POLICY 停用归档件，仅留本机供回滚，不进 VCS/发布包）──
+adapters/DEV_POLICY.json.disabled-*

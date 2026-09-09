@@ -4,6 +4,47 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.9.19] — 2026-09-09 — 开发期结束，恢复生产态双站点路由
+
+### Changed
+- **开发期策略解除（2026-09-09 用户指令）**：`adapters/DEV_POLICY.json` 停用（改名归档），路由回切生产态——ct-meta 主站 / ct-meta2 回退；`publish_freeze` 解除，技能发布不再被冻结（SKILL.md §8.5 的 publish_guard 前置检查保留，退出码 0=放行）。SKILL.md §3 启动段与 §6 出站披露文案同步更新。ct-meta2 仍为旧引擎（缺 NMA 修复与 engine_version 指纹），待下次部署同步。
+
+## [2.9.18] — Unreleased — NMA 空 plots 默认出图修复
+
+### Added
+- **引擎指纹 `engine_version`（run_task.R）**：响应 JSON 统一注入 `.MA_ENGINE_VERSION`（当前 2.9.18），ok/error 分支均覆盖。部署生效判定从"输出特征考古"变为一次字段比对：本地 HEAD 探针 vs 云端响应 `engine_version` 不一致 = 部署未生效。
+
+### Fixed
+- **`adapters/coze/src/r_engine/run_task.R` NMA 分支**：`figure.plots` 为空时 NMA 静默零图（stats 照常返回、status=ok），呈"分析成功但无图"的隐蔽体验。根因：NMA 分支仅认显式 plots 点名，而 nma_rank 已有空 plots 默认（sucra），设计不对称。修复：netgraph/netleague 渲染条件补 `|| (task == "nma" && length(plots) == 0)`；顺手将 netgraph 裸 `.render_fig` 收敛为 `.safe_fig`（渲染抛错不再中断整次分析）。
+- **`adapters/rendering.py` 呈现层两处 NMA 缺口**：① `render_html_report` 从不消费 `stats.extra.league_table`（netleague 按设计是表格型输出非 SVG figure）→ R 端算了表格也静默丢弃；现补渲染为等宽 `<pre>` 保真卡片（标题复用 `fig_netleague` 中文名"网络证据表"）。② `_render_hero` 对 NMA 的多对比向量型 `pooled.estimate` 强行标量格式化 → TypeError，**此前 NMA 的 HTML 报告渲染即崩**；现向量型跳过 hero 卡（无单一合并效应量，各对比估计由 stats 分组区完整呈现）。
+- **NMA `stats.pooled` 结构修正（R 端 + 呈现层配套）**：R 端原 `as.numeric(TE.random)` 把 n×n 反对称矩阵（含对角 0）摊成 n² 个无标签值（4 臂即 16 个数）；现按上三角展开为真实对比（4 臂 6 个），矩阵方向已实证（`TE.random[i,j]` = 行治疗 vs 列治疗），并新增 `pooled.comparisons` 标签字段。呈现层新增 `_render_pooled_card()`：向量型 pooled 渲染为「对比 | 效应量（unit）[95% CI]」结构化小表（旧镜像无 comparisons 时退化为索引行标），标量型走原通用渲染。
+- **league_table 折行修复（R 端自建文本）**：旧实现 `capture.output(print(netleague(fit)))` 受 print.league 内置分块宽度（`nchar.trts`，默认 66 字符）约束——干预数多时每块仅容纳 2~3 列，第 4+ 个干预被整块折到表外、列头丢失，一个 league 表断成数截；`capture.output(width=)` 与 `nchar.trts=` 均无法从外部解除分块。现弃 print 路径，从 netleague 对象的 data.frame 矩阵（`lg$common`/`lg$random`：下三角 network 估计、上三角直接比较）自建等宽对齐文本（common + random 两块 + 标准方向尾注），单表完整永不折行；对角线渲染为 "."（干预名已在行首与列头，双重冗余）。注意：`formatC` 向量 width 在 R 4.6.1 抛 "condition has length > 1"，pad 已改逐元素实现。
+- **`adapters/rendering.py` extra 卡去重**：`_render_stats_groups` 原把 `stats.extra`（含 league_table 多行文本）经 `_kv_rows` 平铺成无格式单行、且与"网络证据表"图卡重复；现 extra 卡剔除 `league_table` 键（已由图卡区等宽 `<pre>` 保真呈现），extra 其余字段（rank/pscore 等）照常。
+- **league 表列对齐 + 合并效应卡数值右对齐（呈现细节，2.9.18 追加）**：① `.league_block` body 行宽度向量误传 `c(rw, cw)`（n+1 个宽对 n 个元素）→ 矩阵第 1 列错拿行名宽，对角 "." 不被 pad（首行偏短）；改传 `cw`，各数据行宽与列头行严格一致。② `_render_pooled_card` 效应量列改 `text-align:right` + 表级 `font-variant-numeric:tabular-nums`（等宽数字），数值列纵向对齐更易读。
+
+### 验证
+本地镜像三组回归：① nma 空 plots → netgraph SVG（10719 字符）+ `stats.extra.league_table` 有值；② nma 显式 plots → 行为不变；③ nma_rank 空 plots → 仅 sucra+rank，无回归。端到端渲染验证：含 league_table 的 NMA 结果经 `render_html_report` 产出 HTML，netgraph 图卡（1 个 SVG）与"网络证据表"卡片同卡正确。待人工打包部署后做端到端线上回归。
+
+---
+
+## [2.9.17] — Unreleased — 选题 Quick 卡融合"实时真实缺口证据"
+
+> **目标**：修复 Quick 选题卡丢失"真实缺口"依据的回退——新版 Quick 卡仅给四维评分、缺了旧版"Cochrane N / PubMed N + 约宽泛方向 1/N → 真实缺口"的实时证据层。将两套输出融合进同一张卡，让"新颖性"评分始终有实时命中间据支撑（R7 落地）。
+
+### Added
+- **`scripts/generate_topic_report.py` 新增缺口渲染**：`GAP_ZH` 映射 + `_ratio_str()`（窄/宽命中数比 → `1/N` 或 `Nx`）+ `_gap_section()`，并并入 `build_quick_card()`。Quick 卡现在在结论行下渲染"## 真实缺口证据（实时探针）"块：Cochrane(CDSR) N / PubMed SR/MA(近5年) N / 对比宽泛父方向比 / 缺口判定（✅真实缺口 / 🔴已饱和 / ⚠️需谨慎）。
+- **优雅降级**：`gap.verdict="unverified"` 或探针不可用时显示"⚠️ 探针不可用，缺口未验证；Full 评估将重跑"；`gap` 字段缺失时提示 Full 阶段补探针。**禁止用模板数字硬填**（沿用技能 `any_error→unverified` 模式）。
+- **`adapters/build_gap_probe.py` 一键缺口探针**：封装 `literature_probe.py` 的窄方向(Cochrane+PubMed)+宽泛父方向(PubMed)双探针，按上述阈值判定 `real_gap`/`saturated`/`caution`/`unverified`，产出严格对齐报告 `gap` 字段；支持 `--out gap.json` 单独输出或 `--merge-into input.json` 一键合并进选题 input 直接喂给 `generate_topic_report.py`（已真实联网验证：PD-1 NSCLC 二线 vs NSCLC 免疫治疗 → Cochrane 36 / PubMed 6978 vs 15298 → ratio 0.46 → saturated）。
+
+### Changed
+- **`references/topic-selection.md`**：① Quick 双路径入口 Output 列补"live real-gap evidence"；② 新增"Quick 卡必须携带真实缺口证据"硬规则——Quick 路径须实时跑 `literature_probe.py` 两次（窄方向 + 宽泛父方向），取 `cochrane.hit_count`/`pubmed_meta.hit_count`，算 `ratio=窄.PubMed/宽.PubMed` 落到 `gap`；③ Output contract JSON 增 `gap` 字段（narrow/broad/ratio/verdict/label/summary）；④ 新增缺口判定阈值（ratio<0.3 且 Cochrane<10→real_gap；ratio≥0.5 或 Cochrane≥20→saturated；其间→caution），并与四维"新颖性"互校（新颖性 4–5 但缺口 saturated → 触发 R3 复核）。
+- **`references/interactive_menu.md` 示例 6**：候选方向①补一行"真实缺口证据（实时探针）：Cochrane 1 / PubMed 38；约为宽泛方向 1/11 → ✅ 真实缺口"，演示融合卡实际长相。
+
+### 验证
+- 样例 `sample_quick_card.json` 经 `generate_topic_report.py` 渲染 md/html，四维评分 + 缺口块同卡正确输出；`_gap_section` 三分支（real_gap / saturated / unverified / missing）均通过。
+
+---
+
 ## [2.9.16] — Unreleased — pdf_fetch 多通道回退上移 coze + workbench A4 批量匹配
 
 - **workbench「数据提取核验（🔴 红线）」新增「📤 批量上传并匹配文献」**（实测反馈）：A4 面板 actions 首位新增按钮 + 折叠面板——上传 `.txt/.csv/.xlsx` 或粘贴 **DOI / PMID / 标题** 清单 → 新端点 `/api/a4_batch_match`（Europe PMC core 逐条解析；DOI/PMID 精确、标题先短语后 token-AND 近似并标 `fuzzy` 提示人工确认；去重 DOI 归一键；标注是否已在 A4 per_doc）→ 勾选后 `/api/a4_batch_add` 幂等追加为 `status=needs_upload` 待补篇（复用「补传 PDF → 抽取」通路）。纯元数据匹配，不下载正文。前端 `toggleA4Match / a4BatchMatch / a4BatchAdd`；实测 DOI/PMID/标题三类输入均命中。
