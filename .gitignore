@@ -123,3 +123,9 @@ pytest_cache/
 
 # ── 开发期策略残留（DEV_POLICY 停用归档件，仅留本机供回滚，不进 VCS/发布包）──
 adapters/DEV_POLICY.json.disabled-*
+
+# ── 交接 / 临时文档（2026-09-17）──
+# 会话间交接用的临时文档（如 HANDOFF-YYYY-MM-DD.md）：供接手者阅读，
+# 属过程性材料而非技能资产 → 不进版本库、不进发布包。
+# 若某份交接文档需要随 git 传递，请单独 git add -f 或移出本目录。
+.workbuddy/

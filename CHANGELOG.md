@@ -4,6 +4,2054 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **重新发布应用（2026-09-25）+ 线上 3.11 语法回归修复**：首次部署失败——线上 import `block_c.py:882` 抛 `SyntaxError: unterminated string literal`（C1 摘要段的 f-string 把三元条件在 `{ }` 内折行续写，PEP 701 跨行表达式仅 3.12+ 合法；本地 3.13 编译通过故未拦截）。修复：条件表达式提出 f-string 存 `_synth_part` 变量。
+  - **守门盲区补齐**：`check_py311.py` 此前只查「表达式内反斜杠」，漏掉跨行与同引号两类 PEP 701 放宽。已增 `fstring-expr-multiline` / `fstring-expr-same-quote` 规则（三引号外层自动跳过 same-quote，避免合法嵌套单引号误报），并用本次事故代码做复现自测：旧版 0 检出、新版精准命中 1。全树重扫：源码树 0 问题（唯一命中即该未同步的旧载荷副本，重建后清零）。
+  - **发布结果**：重建载荷（33 文件自检全过 + py3.11 守卫通过）→ 本地冒烟（`python main.py` 起服、`/health` ok、首页 200）→ 沿用 appId `wbapp_hNZl928SI6wByvJt2COtcC` 覆盖发布成功，链接不变 `https://meta.app.workbuddy.host/`。线上回归：`/health` ok、`/` 200、`/api/features` 正常下发（a4_extraction=false）、别名域 `meta.app.workbuddy.link` 200。
+
+- **代码完备性检查（2026-09-17，针对原版目录 `meta-analysis`，不含副本）**：系统性核验全链路，结论如下：
+  - **发布载荷同步回归修复（9/17–9/19 白名单模式引入）**：白名单取代整目录同步时漏列发布入口 `main.py` 与 6 个 `adapters/` 依赖（`registry_probe` / `prospero_probe` / `quality_advice` / `interpretation` / `topic_assess` / `session_store`），导致 `build_publish` 自检报「载荷缺少 main.py」、线上 `python main.py` 起不来。已补齐 `main.py`（根级，加 `adapters/`、`adapters/workbench/` 到 `sys.path` 后 `import server` 跑 uvicorn）并加入 `WHITELIST_FILES`；本地模拟线上 `PORT=8899 python main.py` 启动成功、`/health` 返回 `{"ok":true,"version":"0.1.0"}`。
+  - **A/B/C 全节点 schema 字段一致性（#25）**：逐一核对 `form_schema.py` 各节点 `panel.path` 与后端 `_mk_stage` 实际写入字段，全部对得上——A1 读 `stage.picos/missing_dimensions/registry_probe/feasibility` + `editable.report/include_reviews/sources`（EDITABLE_KEYS 含三项）；A2 读 `nha.coverage/summary/decisions`；A3 读 `stage.n_screened/n_downloaded/n_failed/n_needs_upload` + `editable.pdf_dir`；B4 读 `editable.report`；C1 读 `editable.manuscript/sections`；C2/C3/C4 读 `path="stage"`（前端 `workbench.html:1869` 映射 `stage→stage_result`，数据可正常显示，非「读错键」）。
+  - **测试套件可运行性（#26，离线）**：`check_py311`（py3.11 兼容守门）扫描 `adapters/` 124 文件 0 问题；`test_interpretation` 19/19、`test_envelope_guard` 47/47、`test_flow_menu` 198/0、`test_rewind_rollback`（回滚子集 PASS）、`test_pdf_extractor` 16/16 全绿。⚠️ `test_fullflow.py` 当前 6 失败（默认 A4 隐藏）/ 4 失败+1 错误（开 A4）：根因为测试滞后于多次架构变更（`B1.meta→B1.meta_analysis` 改名、A4 默认隐藏、决策端点报错文案变更），其中「`stage_id 不匹配`」是生产端点正确拒绝非法 `stage_id=None`，非代码 bug——该测试需按当前流程刷新（不在本完备性检查范围内，单列待办）。
+  - **残留脏文件（已清理 2026-09-25）**：删除 `adapters/block_a.py.new`（3303 行，较 `block_a.py` 少 123 行，缺 `import prospero_probe`、`_try_coze_topic_assessment` 等，属合并残留）与 `adapters/run_analysis.py.bak`（备份副本）。两者均未被 git 跟踪、不在 `WHITELIST_FILES`，删除后正本 `py_compile` 通过，无功能影响。
+
+- **工作台 ↔ 上下文一致性审计：13 项 + 写日志时顺带发现 1 项，全部处理（2026-09-22）**：
+  对「网页工作台」与「CCM 上下文菜单」两条入口做逐项比对，发现两侧对同一状态机的口径存在
+  13 处不一致（2×P0 / 6×P1 / 5×P2）；另在整理本轮日志时发现第 14 处同类漂移（R 引擎指纹，见下）。
+  裁定原则：**能补入口就补入口，补不了才收配置；不删功能，只求两侧一致。**
+  - **P0 · `B1` stage id 漂移（影响最大）**：真源是 `block_b.B1 = "B1.meta_analysis"`，但
+    `form_schema.STAGE_ORDER` / `TITLE_EN` / `flow_menu._EN_SHORT` 三处写成 `B1.meta`。
+    因 `SCHEMA` 有 `B1.meta` 别名兜底，**页面渲染完全正常、bug 被长期掩盖**，真正崩的是三处次生故障：
+    ① `build_progress` 停在 B1 时取不到 → **整条时间轴没有 current 节点**（「合并计算」反显示 pending）；
+    ② `rewind_candidates` 的索引退化成 `len(order)` → **把 B4/C1/C3/C4 等未到达的下游节点混进「打回」候选**（有真实误操作风险）；
+    ③ EN 模式该节点短名回落中文。修法：以 `BLOCK_*_SEQUENCE` 为唯一真源，三处统一为 `B1.meta_analysis`，
+    保留 `B1.meta` 反向别名供旧会话/旧信封使用。
+    - **能长期潜伏的根本原因**：`tests/test_flow_menu.py` 的 `mk_session` **直接迭代 `STAGE_ORDER` 造会话** ——
+      夹具与实现共用同一个错常量、互相自洽，断言永远通过。已改为从真源取 id。
+    - **新增 9 条回归锁**：STAGE_ORDER ↔ 真实 id 双向包含、`_EN_SHORT` 键集合覆盖、每个真实 id 有专属 schema、
+      停 B1 时时间轴有且仅有一个 current、菜单标题非空无 `None`、EN 短名不含中文。
+  - **P0 · SKILL.md 发布认领地指向已不存在的目录**：`workbench_owner_workspace` 由
+    `2026-09-14-14-30-18`（**该目录已不存在**）改为 `2026-09-17-09-54-01`（`.wbapp_hNZl928SI6wByvJt2COtcC.genie` 实际所在），
+    并注明：从旧路径发布会失败或被迫新建 app → 拿到后缀域名（正是原文自己警告的偏离）。
+  - **P1 · 软停「跳过」三处口径不一**：CLI 有、网页 `SHOW_SKIP=false` 隐藏、`nha.options` 从不含 `skipped`。
+    网页恢复 `SHOW_SKIP = true`，且按钮**由后端 `options` 驱动**（`opts.includes("skipped")`，`opts = STATE.await.options`）
+    → 软停显示、红线自动不显示，与状态机同源，不会再出现「UI 给了按钮但后端拒收」。
+    *（复核更正：`fullflow._view` 其实一直按闸门类型正确计算 options，只是 `nha.options` 这一路不带，原审计措辞过重。）*
+  - **P1 · 网页补 A3 `pdf_dir` / A1 `sources` 入口**（此前仅 CLI 有）：新增 panel kind **`inputs`** ——
+    通用「可编辑键」渲染器，按 `revision_key` + `value_path` 生成文本框，支持 `list: true`（数组 ↔ 逗号分隔）与 `bool`。
+  - **P1 · CLI 补 `revised` 选项**：`flow_menu._fallback_options` 此前注释「revised 不在此生成」，
+    但网页侧 C1/B4 是**可以**字段级修订的 → 反向不对等。改为按 `machine_options` 的 `allowed` 集合生成。
+  - **P1 · B1 修订权两侧都残** + **`EDITABLE_KEYS` 9 个死键**：新增通用**未绑定可编辑键兜底面板**
+    （`renderUnboundEditable`）—— 凡 schema 已声明但面板未绑定的可编辑键，自动列成可编辑 JSON 区；
+    同时把 `EDITABLE_KEYS` 收口到**只声明真被消费的键**（原 B2 五键 + C2/C3/C4 两侧都没有任何入口，
+    且与 `fullflow` 自订的「声明即须被消费」规则冲突）。**理由：留着是死配置，下一个人会以为功能存在。**
+  - **P2 · A2 时间轴标签**「检索」→「文献集」，与 `STAGE_ORDER` / CLI 的「文献集（检索 + 初筛）」一致
+    （该节点已按 2026-09-10 裁定把「检索」+「初筛」合并）。
+  - **P2 · 网页 EN 模式全量本地化（本轮工作量最大）**：语言开关原本只翻顶栏 11 个框架串，
+    EN 下节点标题 / intro / 面板标签 / 提示条**全是中文**（CLI 侧是真双语）→ 两侧严重不对等。
+    复用 `topic_translate.py` 通道，把 schema 界面文案**整会话一次批量**本地化：
+    `title` 走人工维护的 `TITLE_EN`（零延迟、不占额度），`intro` / panel `label`·`hint` / `placeholder` /
+    字段与列标签走自动翻译；`build_state(sess, lang)` 下发本地化副本 + `stage_titles`(zh/en) + `i18n.state`；
+    `/api/session` 加 `lang`、**缓存键按语言分开**（否则切 EN 拿到中文那份）；语言偏好 `localStorage` 持久化
+    且同步顶栏开关高亮；动作端点（decide/rewind/上传）不带 `lang`，回传的中文 schema 会在 EN 下把节点打回中文 →
+    新增 `absorbState(s)`：先按收到的渲染，再后台按当前语言重取覆盖；翻译不完整时**显式提示**
+    （`i18n.state !== "en"`），**绝不静默半翻译**。
+    - **踩坑**：首版 `_UI_MAX_TOKENS=3000` 撑不住 40 条批，返回**残缺 JSON**（`finish_reason=length`）→
+      解析失败 → 旧循环把 7 个候选**逐个试遍**（每个都等到超时）→ 实测一次 EN 切换 **603 秒**且标签全没翻。
+      实测：10 条/3000 → 4.1s ✓；20 条/3000 → 11.8s **length 0/20**；40 条/8000 → 12.0s ✓。
+      **三处修法**：① `_UI_MAX_TOKENS` → 8000，并按**字符预算**分批（长 intro 撑长输出，光限条数不够）；
+      ② 拿到内容但解析失败时**直接二分重试**，不再空转候选；③ 加**整次调用时间预算**（90s），
+      无论怎么失败都不会卡住语言开关。结果：首切 **603s → 24.9s（159/159 全翻）**，二次走磁盘缓存 0.01s，
+      `build_state('en')` 0.14s，zh 路径 0.00s 零行为变化。
+  - **P2 · 发布载荷白名单漏模块（静默丢功能的隐患）**：`publish-kit/build_publish.py` 的 `WHITELIST_FILES`
+    **缺** `topic_translate.py` 与 `evidence_upload.py`。危险在于两者都是**函数内惰性 import** →
+    漏了不会让服务起不来，而是**静默丢功能**（中文主题检索不到文献、C1 上传端点直接 500、EN 界面全回落中文）。
+    两个模块补入白名单，**同时**加入 `REQUIRED_IN_PAYLOAD`（构建后自检，缺了就报错 ——
+    宁可构建失败也不发一个「看起来正常但少了能力」的载荷）。随后重建 `publish/` 快照（208 files，自检 7/7 ✓，py3.11 守卫 ✓）。
+  - **P2 · B1 解读卡只在 coze 分支有数据**：`_interpretation` / `_quality_advice` 此前只在 coze 成功分支产出，
+    local / 演示 / `auth_blocked` 路径恒空 → 面板永远显示「（解读引擎未生成内容）」。新增
+    `_stats_from_pairwise(pw, effect_measure)`，把本地产出的 pairwise 结果（log 尺度 TE/CI，**含 exp 还原**）
+    桥接成 `interpretation.interpret_result` 期望的 stats 形状，local 与 demo 两条路径都接上 → 三条路径口径一致。
+  - **P2 · R 引擎指纹滞后于 SKILL.md 版本（写本轮 CHANGELOG 时顺带发现）**：`run_task.R` 的
+    `.MA_ENGINE_VERSION` 停在 `2.15.0`，而 SKILL.md frontmatter 已是 `2.16.0` —— 按该字段自己的既定口径
+    （**与 SKILL.md 版本对齐**）应立即跟平，否则又回到「按指纹查 CHANGELOG 却对不上」的老问题。
+    代码注释里「仅 R 引擎变更时才前进」与「与 SKILL.md 对齐」两句本身会打架（就是这次偏离的成因），
+    已改为**对齐优先**并注明：bump SKILL.md 版本号时本值必须同一次改动一起改。该字段无程序化消费方，改动零风险。
+  - **P2-12 收尾：历史快照已删除（2026-09-22，用户裁定「清理掉」）**：删掉 `publish/`（11 MB）、
+    `publish-backup/`（3.2 MB）、`publish-backup.rar`（3.1 MB）、`publish-preclean-20260917/`（58 MB），
+    合计 **≈75 MB**。四者均为 git 未跟踪、**零代码引用**（全树 grep 验证），且落后于主线
+    （缺 `topic_translate.py` / `evidence_upload.py` / `reasons_en`）——留着只会被误当成可发布的包。
+    - **`publish-backup.rar` 是这次排查才发现第 5 个成员**（此前只登记了三套目录），顺手一起清掉。
+    - **更正一处我自己的误记**：原打算把 `publish-kit/` 也当快照删掉，**这是错的** ——
+      `build_publish.py`（重建载荷，全仓唯一副本）、`install_genie.py`（写 `.wbapp_<appId>.genie`
+      + `applications.yaml`，是**复用同一 appId / 保持分享链接不变**的前提）、`check_py311.py`、
+      `smoke_e2e.py` 都在这里，还有 appId 标记的权威副本。删了会丢掉整条发布工具链。
+      `publish-kit/` 的定位见其 docstring：「publish infrastructure folder，结构上被排除在所有对外产物之外，
+      所以标记跟着技能走」。**已保留**，并把误挂在它上面的 `DO_NOT_DEPLOY.md` 改名为 `README.md` 重写
+      （原文把它描述成「整树历史快照」，与事实不符）。SKILL.md 的 ⛔ NOT deployable 行同步更正为
+      「工具链（保留）」+「已删除的四个快照」两行。
+    - 保留的仅有的不可再生元数据：appId 标记、`MANIFEST.sha256`、`publish-backup` 的旧
+      `app.config.json` → 备份在 `2026-09-20-10-18-57/_deleted_snapshots_meta_20260922/`（7 KB）。
+    - **踩坑（值得记）**：删除失败两次都不是权限问题 —— ① `rm -rf` 被 safe-delete 垫片接管并
+      fail-closed；② 直接调 `genie-trash` 仍报 `0x80070002 系统找不到指定的文件`。根因是
+      **`~/.workbuddy/skills/meta-analysis` 是指向网络共享 `//filesrv/c$/...` 的符号链接**，
+      而 **Windows 回收站对网络路径不存在**，故该盘符下任何 trash 调用必然失败。
+      绕法：先 `mv` 到本地 workspace（`C:\Users\Wintone\WorkBuddy\...`，本地盘，回收站可用）再 trash。
+      另注：`genie-trash` 只接受**反斜杠 Windows 绝对路径**，传 POSIX `/c/...` 会静默失败。
+  - **回归**：`tests/test_flow_menu.py` **186 PASS/3 FAIL → 198 PASS/0 FAIL**（顺带补上 `_STAGE_RESULTS` 缺失的
+    `A3.pdf_download` 夹具条目，修掉 2 项长期红灯）；`adapters/tests` 核心 5 套 **124 passed / 2 skipped**；
+    `tests/`（interpretation / envelope_guard）**66 passed**。
+    默认配置下尚存的 20 failed + 1 error 已逐项定性为**既有漂移、非本轮引入**：
+    A4 闸门/开关漂移 15（`features.a4_extraction=False` 是默认值；置 `CT_FEATURE_A4_EXTRACTION=1` 重跑失败集立刻变成另一组 21→9）、
+    coze 契约漂移 5（`test_pipeline_client` 只 import `coze_client`）、环境噪音 1（`test_pdf_extractor` 清理临时文件时网络盘 safe-delete 失败）。
+    反证：这 4 个失败文件对 `EDITABLE_KEYS` / `STAGE_ORDER` / `form_schema` 的引用次数**均为 0**。
+
+### Added
+
+- **C1 英文初稿接地真实文献 + 消除中文残留 + 扩写正文（2026-09-22）**：
+  演示/快速通道跑出的初稿此前是**中英混杂的骨架**：正文 648 词、Methods 与 References
+  大量 `(to be added)`、标题直接把中文主题塞进英文句子。本轮三件事一起做（**648 → 1980 词**）。
+  - **真实文献接地（核心）**：复用 skill 内已有的 `literature_probe.py`（零依赖 Europe PMC），
+    新增 `search_evidence()` / `to_search_query()` / `_extract_rich()` / `_rank()` / `_dedup()`。
+    draft 路径无 A2 文献集时按主题**真实检索**，两层：primary（RCT）+ synthesis（综述），
+    喂给 C1 填充 Background 引用、Methods 检索式/数据库/日期/命中数、Results 特征表、References。
+    - 只落地**书目事实**（作者/年份/刊名/设计/DOI/PMID/被引数）；**绝不臆造样本量与结局数字**，
+      特征表缺该列就不列该列。检索失败静默降级，不是硬闸门。
+    - 踩过的坑（已修）：`PUBLICATION_TYPE:"..."` 无效（命中 0）→ 正确字段是 `PUB_TYPE:"..."`；
+      `PUB_TYPE:"Meta-Analysis"` 也不是合法值（API 报错）→ synthesis 层改用 `"Systematic Review"`；
+      **`sort=CITED desc` 会压过相关性**，返回"心脏病统计年报"这类高被引噪声 → 禁用，用默认相关序；
+      两次查询间隔 <1s 会被限流（第二次返回无 hitCount 的响应）→ 间隔 1s + 静默失败重试一次；
+      完整题名当查询会把命中从 138 压到 6 → `to_search_query()` 只取主标题并去停用词/括号。
+    - primary 层先按 `study_type` 严格过滤出真 RCT **再**做相关性排序（顺序反了会把 10 条砍成 3 条）；
+      跨层按 DOI/标题去重（Cochrane 综述此前在两层各出现一次）。
+  - **消除中文残留**：新增 `topic_en` 入参（前端「英文题名」输入框 + `run_fastpath` + `run_block_c`
+    + `c1_draft`）；演示路径内置 `block_b.DEMO_TOPIC_EN`。无英文题名时**不臆造翻译** —— 标题保留
+    原题、正文指代用 "the research question"，并给一行英文提示。中文串改为英文：`b2_grade` 新增
+    `reasons_en`（与中文 reasons 同步 append，一一对应）、`_OVERCLAIM_LABEL_EN`（12 类模式英文
+    标签，随 hit 以 `label_en` 下发）、demo 的 NMA note。OC 的 `evidence` 是被扫描的**原文证据**
+    （源文本为中文时保留中文），加 "(verbatim excerpt…)" 标注。
+  - **扩写**：Background 四段式（重要性 / Existing syntheses 真实引用 / Recent primary evidence
+    真实引用 / 目的）；Methods 补 Eligibility criteria、Search yield、亚组与敏感性分析、Software、
+    Data availability；Results 加纳入研究特征表；Discussion 加 Comparison with existing syntheses、
+    Future research；References 15 条真实条目（作者带 initials）。
+  - **顺带修的数据不自洽**：`n_stud` 曾取 studies_list 长度 → "检索到 15 篇"被写成"纳入 15 项研究"，
+    与 B1 的 k=6 矛盾。现以 k 为准；检索条数只用于描述"证据集"，且不再挂在 "Included studies" 后。
+    `_plur` 修 "meta-analysis" → "meta-analyses"（此前按"以 s 结尾"被跳过，输出 "3 meta-analysis"）。
+  - 回归：`test_block_b` 20 OK(sk2)、`test_block_c` 26 OK、`test_writing_advisor` 52 OK、
+    `test_interpretation` 19 OK、`test_envelope_guard` 47 OK、`test_flow_menu` 186P/3F（基线一致）。
+    端到端：中文主题 + 不传信封 → C1.draft，1980 词、15 条真实参考文献、中文残留 0 处（除原文引文）。
+
+- **「自备 B 信封 → 跳至 C」未给信封时改用内置演示信封（2026-09-22）**：
+  此前该入口上传/粘贴都为空会直接 400，用户想先看看 Block C 长什么样只能先跑完 A+B。
+  现在与「自备原始数据」一致：未提供信封 → 用内置示例继续流程，把 C 全流程跑完看效果。
+  - `block_b.py`：新增 `DEMO_B_STUDIES`（6 项 2×2 RCT）、`DEMO_B_CLAIMS_TEXT`、`demo_b_env()`。
+    **数值不硬编码**：B1 走 `b1_pairwise_python`、B2 走 `b2_grade`、B3 走 `detect_overclaims`、
+    B4 走 `b4_quality_gate` 现算 → 合并效应量 / GRADE / 过度声明 / 质量门四者恒自洽
+    （改了示例研究，下游摘要跟着变）。产出信封与 `run_block_b` 同构
+    （`stages` B1-B4 全 completed、`done=True`、`_demo` 标记）。
+    演示值：k=6、OR=0.68（95% CI 0.50–0.92, p=0.013）、I²=34.5%、GRADE=Moderate、
+    B3 命中 1 条（medium）→ **B4 `critical=False`，不阻断 C 流程**。
+  - `workbench/server.py`：`/api/start_data` 的 `draft` 分支改为「粘贴 → 上传 → 内置演示」
+    三级兜底，并透传 `demo=True`；`fullflow.run_fastpath` 的 draft 分支据此把 A 信封
+    A4 的 note 标为「内置示例 B 信封（演示），跳至 Block C 撰稿」。
+  - `workbench/workbench.html`：B 信封区块补 🟡 演示模式说明（与「原始数据」区块同款）。
+  - 验证：26 项结构/自洽/幂等断言全 PASS；线上 HTTP 实跑新建会话 →
+    C1 初稿 4621 字 → C2（hits 1）→ C3 → C4 → done，**Block C 四步全部走通**。
+
+- **C 流程启动「没检索到文献」显式提示（2026-09-22，用户要求）**：
+  此前 C1 在 Europe PMC 检索失败 / 0 命中 / 中文主题没填英文题名时是**静默降级**——
+  稿子照出，背景/讨论用通用表述、参考文献是 `(to be added)` 占位符，用户却以为
+  正文已经引了真文献。这在此场景是危险误导，故不再静默，一律显式回传状态 + 提示条。
+  - `block_c.evidence_status(evidence, topic_en, topic, error, has_studies, n_upstream)`：
+    唯一真源，判据分三层——**「有没有可引用的真文献」才是用户真正关心的结论**。
+    完整 A 流程稿子拿的是 A2 文献集（`has_studies=True`），此时补检索失败/没跑都不报
+    warn（否则每次正常流程都误报）；只有「上游无文献 **且** 补检索也没拿到」才是真的没接地。
+    产出 `reason`（`ok|upstream_only|no_topic|no_topic_en|error|no_hit|not_searched`）、
+    `level`（`ok|info` 蓝 / `warn` 红）、`notice`（中文提示文案，含影响与处理路径）。
+  - `fullflow.run_fastpath`：检索失败把 `_ev_err` 透传 `evidence_error`；`run_block_c` /
+    `c1_draft` 接 `evidence_error` 落到 `stage_result.evidence_status`。
+  - `workbench/server.py`：`_session_notices()` 从 `await.stage_result.evidence_status`
+    （回退读 C 信封 `C1.draft` 阶段）取结论，仅在停驻 C 块时下发 `STATE.notices`；
+    `level=="ok"` 映射成 `info`（成功不显红）。
+  - `workbench/workbench.html`：`renderNode` 顶部按 `STATE.notices` 渲染 `.notice`
+    红/蓝提示条（标题 + 正文，保留 `\n` 折行），并往底部信息栏补一行（去重防刷屏）。
+  - 验证（纯模板路径，无 LLM/浏览器）：5 分支全对——
+    中文主题无英文题名→`no_topic_en`/warn；有英文题名未检索→`not_searched`/warn；
+    检索失败→`error`/warn；0 命中→`no_hit`/warn；命中→`ok`/info。三模块导入全绿。
+
+- **UI 文案 + 选题探针降级态修复（2026-09-22）**：
+  - 开始页单选项 `已备好原始数据 → 跳至 B 合并` → **`已备好原始数据 → 跳至 B 合并计算`**（workbench.html:1378）。
+  - 选题按钮 `🧭 帮助选题` → **`🧭 先帮我选题`**（按钮文本 + `data-label` + 空主题 flash 提示）；
+    CLI 菜单 `opt_probe` 中文 `帮助选题（可行性速览）` → `先帮我选题（可行性速览）`（scripts/flow_menu.py:148）。
+  - **选题探针「探针不可用 篇」误导修复**：用户反馈「PubMed 系统评价 / Meta（近 5 年）探针不可用 篇，
+    选题时检索不到结果？」。实测探针本身正常（线上 `/api/topic_help` 实测 Cochrane 120 / PubMed 2787 命中）；
+    「不可用」只在 Europe PMC 调用失败时出现，但旧 UI 只印**不透明的「探针不可用」**且无任何原因、
+    无重试入口，看起来像「选题检索不到结果」的死功能。修复（`renderTopicHelp`）：
+    - `hit_count=None` 且有 `error` → 显示「暂不可达」并把真实错误写进 `title` 悬停提示；
+    - 任一探针出错 → 在结果面板下补一行 warn 说明（原因 + 「点↻ 重试选题速览可重查；选题可行性只是
+      参考，不影响后续流程，也可直接启动」）；
+    - 新增「↻ 重试选题速览」按钮（`topicHelp(LAST_TOPIC)` 复用已填主题重查，不需回到首页）。
+  - 验证：`node --check` 整段 app 脚本通过；线上 `/api/topic_help` 实跑命中正常；
+    单测模拟 BASE 指向不可达地址 → payload 正确带回 `error`（"Europe PMC request failed after 3 retries: …"），
+    UI 据此走「暂不可达 + 原因 + 重试」分支。
+
+- **选题探针「中文主题 0 命中」根因修复：缺中→英检索词这一环（2026-09-22，用户反馈）**：
+  用户反馈「选题可行性速览：SGLT2 抑制剂在慢性肾脏病（CKD）中的肾保护与心血管获益
+  该选题没有命中任何文献，是否因为需要先做中英文自动翻译而缺失了这一环？」**确认 Root Cause 正是它**。
+  实测（2026-09-22）：中文主题直送 Europe PMC → Cochrane **0 篇**、PubMed 无可用计数；
+  换英文检索词 `SGLT2 inhibitors chronic kidney disease renal protection cardiovascular outcomes`
+  → Cochrane **6**、PubMed **1904**。`literature_probe.py` 此前**无任何翻译步骤**，
+  `dedup_probe → probe → _build_query` 把原始 `topic` 直接当查询串；Europe PMC 索引的是英文摘要，
+  中文串几乎必然 0 命中——而这会被误读为「该选题无人做过（新颖）」，是**危险的假信号**
+  （与 C 流程那个「静默降级」同类）。修复：
+  - `literature_probe._has_cjk(text)`：CJK 字符检测（U+3400–9FFF / F900–FAFF / FF00–FFEF / 3040–30FF）。
+  - `probe(..., topic_en=None)`：**英文检索词优先**（`q_topic = topic_en or topic`）；`ct_handoff` 同步用英文串。
+  - `dedup_probe(..., topic_en=None)`：中文主题 **且** 未给英文检索词 → **直接跳过网络请求**，
+    两层 `hit_count=None` + `untranslated=True`，附 `notice`（说清「不是没文献，是没翻译」+ 处理路径），
+    避免跑出误导性的「Cochrane 0 篇 = 新颖」；给英文检索词则正常直连 Europe PMC。
+  - `workbench/server.py`：`TopicHelpReq.topic_en`（可选）；`api_topic_help` 透传。
+  - `workbench/workbench.html`：开始页「英文题名」框（`#topic_en`）纳入选题速览请求；
+    速览页新增「未命中文献的原因」警示卡（含内联英文检索词输入 + 「用英文重查 →」）；
+    命中列在未翻译时显示「需英文检索词」而非「探针不可用」；空标题文献面板在未翻译时隐藏；
+    `renderStart(prefill, prefillEn)` / `startWithTopic` / `返回修改` 保留英文检索词。
+  - 验证：`node --check` 通过；单元直调（中文→拦下 untranslated/notice；中文+英文→Cochrane 6 /
+    PubMed 1904）；`TopicHelpReq` 直调 + 线上 `POST /api/topic_help` A/B 两组端到端一致。
+  - **附带发现（非本次引入）**：`tests/test_block_a.py::TestA4RedLineGate` 4 项 +
+    `tests/test_fullflow.py::TestBackwardCompat::test_block_a_no_pause_at` 1 项失败——A4 闸门
+    实际返回 `done=True` 而测试仍期望 `extraction_review` 阻断。`block_a.py` 仅 import
+    `coze_client`/`features`，**不依赖 literature_probe/server**，故与本修复无关，属既有漂移，待单独排查。
+
+- **改为「自动翻译关键词」：网页端补齐与技能上下文同等的 LLM 能力（2026-09-22，用户纠正上一条）**：
+  用户指出上一条的处置**逻辑不对**——「技能上下文方式的时候是可以做自动翻译的，网页端也应该一样，
+  对关键词做自动翻译」。确认：技能（Agent）上下文里 LLM 就在回路中，翻译是天然能力；而网页端
+  FastAPI 服务是**独立进程**、Agent 不在回路里，此前只能让用户手填英文题名，等于把机器该干的活
+  推给用户。故新增服务端翻译通道，**「英文检索词 + 警示」降级为上一条的兜底而非首选**：
+  - **`adapters/topic_translate.py`（新增，零第三方依赖）**：复用 WorkBuddy 本机
+    **OpenAI 兼容模型端点**（`~/.workbuddy/models.json`，或 `LLM_BASE_URL`/`OPENAI_BASE_URL` 等
+    环境变量）做一次极小翻译调用。`translate_to_english(text) -> str|None`。
+    - 候选梯队 `deepseek-v4-flash`→`qwen3.8-max`→`LongCat-2.0`→其余有 url 的模型；
+      逐个降级，任何异常都吞掉返回 None（绝不中断流程）。环境变量指定的端点最高优先。
+    - **实测（2026-09-22）**：三者对同一中文主题给出**完全一致**的英文检索式；
+      `deepseek-v4-flash` 最快（约 1.3s）。
+    - **坑（必须记住）**：`max_tokens=80` 会让 reasoning 模型把预算耗在思考上、`content` 返回空串 →
+      定 `_MAX_TOKENS=512`；输出须过 `_looks_english()`（非空 / 有拉丁字母 / **无 CJK** / 非拒答 /
+      长度 2–300），并 `_strip_noise()` 去引号与 `English:` 前缀。
+    - **缓存**：进程内 + 磁盘（`%LOCALAPPDATA%\meta-analysis-wb\translate_cache.json`），
+      同一主题只翻一次，省 token 且避开限流。
+  - `literature_probe.dedup_probe(..., topic_en=None)`：中文且无英文 → **先自动翻译**；成功则以英文
+    检索（`auto_translated=True`、`topic_en_source="auto"`、命中真实命中数 + info 提示）；
+    **只有自动翻译也不可用**时才拦下并索要英文（保留上一条的降级路径）。
+  - `fullflow.run_fastpath` draft 分支：`topic_en` 缺失且主题为中文时同样自动翻译并落库
+    （`sess.data["topic_en_source"]="auto"`），使 **C 流程**也从同一能力受益。
+  - `workbench/workbench.html`：速览页在 `auto_translated` 时显示「🌐 关键词已自动翻译」卡片
+    （展示英文检索式 + 可修订输入 + 「用此英文重查 →」）；`renderTopicHelp` 把 `r.topic_en`
+    回写 `LAST_TOPIC_EN`，使「用此选题启动流程」把英文题名带进开始页（避免 C 流程重复翻译）。
+  - **验证**：新增 `tests/test_topic_translate.py`（12 项离线断言：CJK 检测 / 清洗 / 合规校验 /
+    无端点降级 / 候选解析 / 缓存 / 探针「翻译不可用时**不触网**即拦下」/ 「翻译可用时两层都用英文」）
+    → **12 passed**。线上 `POST /api/topic_help`：中文无英文→`auto_translated=True`/source=auto/
+    Cochrane 5+PubMed 1712；手填英文→source=user。C 流程 `run_fastpath(draft, demo=False)` →
+    `topic_en_source=auto`、检索 ok（primary 135 / synthesis 157 命中，实取 10/5）。
+  - 回归：`test_block_b`(20) + `test_block_c`(26) 全绿；`test_fullflow` 6 项失败**均为既有 A4
+    `extraction_review` 闸门漂移**（`await.gate` 为 None，与翻译改动无关），与遗留清单一致。
+
+- **C1 支持上传作者自备文献（Excel 清单 / PDF 打包）作为初稿证据（2026-09-22，用户要求）**：
+  用户提出「C1 这里应该提供一个功能，允许用户上传自己收集和修改过的 Excel 文件列表或者 PDF 打包」。
+  此前 C1 的证据只有两个来源——上游 A2 文献集、Europe PMC 自动检索；而真实写稿时作者手上**往往
+  已有自己筛过/改过的清单**（裁决表 Excel、Zotero/EndNote 导出的 RIS、下载好的 PDF 全文），
+  那是最权威的证据集却没有任何入口，用户只能眼看着初稿引用检索来的（可能不相关的）文献。
+  - **`adapters/evidence_upload.py`（新增，无新增第三方依赖）**：把上传文件解析成与
+    `literature_probe.search_evidence()` **同构**的 evidence dict（`primary`/`synthesis` 两层），
+    `block_c` 无需区分来源即可消费。支持：
+    - 表格清单 `.xlsx/.xls/.csv/.tsv`（**中英文列名**均可，含表头自动识别 + 「包含匹配」容错）；
+    - 文献管理器导出 `.ris` / `.bib`（BibTeX 的 `author={Family, Given and ...}` 单独解析，
+      否则会被逗号切成 4 个假作者）；
+    - 纯文本清单（一行一篇）；PDF 打包 `.zip`（内含 PDF / RIS / 表格，递归展开）或直接多个 `.pdf`
+      （复用 `block_a._extract_pdf_title/_extract_pdf_doi` 同一套口径，不另写第二套标题识别）。
+    - 设计类型归一（`随机对照试验`/`Meta分析`/`RCT` → 英文短标签），据此切 primary/synthesis 两层。
+    - 只取文件里真实写着的书目事实；**缺字段绝不臆造**（缺作者 → 正文按 `Anonymous`，缺年份 → `n.d.`）。
+    - 安全上限（文件数 500 / PDF 数 300 / 解压总量 400MB / 单文本 8MB）防 zip 炸弹。
+  - **证据优先级（`fullflow._run_block` C 分支）：作者自备 > A2 文献集 > Europe PMC 自动检索**。
+    有自备文献时**不再联网检索**（既不浪费一次查询，也避免检索结果盖掉用户的清单）；
+    并清掉历史那次检索失败记录——否则稿子明明引的是用户清单、提示条却在报「Europe PMC 检索失败」。
+  - `block_c.c1_draft`：`source=="user_upload"` 时以**用户清单为参考文献基准**，A2 中不重复的条目
+    `_merge_studies` 追加在后（DOI/标题去重）；出处说明写清「作者上传的清单」+ 上传日期；
+    方法学**不再谎称**「检索了某库/检索期」→ `Databases searched: author-supplied reference list
+    (uploaded by the author)` / `search period: not applicable`。
+  - `block_c.evidence_status`：新增 `user_files` / `level="info"` 分支 + `title` 按来源变化
+    （「作者自备文献」vs「检索状态」）+ `preview`（前 20 条已识别条目，供上传后核对）；
+    缺作者/年份的条数会明说（否则参考文献里冒出 `Anonymous` 会被当成程序 bug）。
+  - `workbench/server.py`：`POST /api/c1_upload_evidence`（多文件 multipart）+ `POST /api/c1_clear_evidence`；
+    **停驻 C 块才自动 `rewind` 重跑 C1**（其余时刻只落库）——贸然回退会绕过 B 的人工闸，破坏
+    「红线闸必须人工放行」；`_session_notices` 标题改为取 `evidence_status.title`。
+  - `workbench/workbench.html` + `form_schema.py`：C1 节点新增「初稿证据来源」面板
+    （两个上传入口 + 当前证据来源状态 + 已识别条目预览 + 「撤销上传，改回自动检索」）。
+  - **踩到的坑（已修）**：① 上传暂存加序号前缀 → UI 显示成 `0_清单.xlsx`，改为每文件独立子目录；
+    ② `evidence.query` 与参考文献出处里带中文文件名 → **中文渗进英文稿件正文**，改为英文标签、
+    出处只留上传日期；③ pandas `dtype=str` 读表时空单元格仍是 NaN，`str(NaN)=="nan"` →
+    参考文献里出现一条标题叫 `nan` 的条目（**单测实测踩到**），`_clean_cell` 统一把
+    None/NaN/NaT/`<NA>` 归空串。
+  - **验证**：新增 `tests/test_evidence_upload.py`（13 项离线断言：中英文列名/中文类型归一/空标题行
+    跳过/缺标题列报错/DOI 大小写去重/RIS/BibTeX 作者/纯文本 DOI 里的数字不得当年份/两层切分/
+    evidence 字段同构与 `evidence_status` 结论/zip 递归与体积守卫/作者形态/合并去重）→ **13 passed**。
+    线上 HTTP 端到端（`launch_workbench.py` 重启后实跑）：draft 会话 → 上传 `mylist.xlsx`+`myrefs.ris`
+    → `reran=True`、参考文献 3 条全部来自上传清单、`reason=user_files`、提示条标题为「作者自备文献」；
+    上传 `bundle.zip`（RIS+PDF+不支持的 docx）→ 识别 2 篇、PDF 正确抽出标题/作者/年份/DOI、docx 计入
+    errors；`/api/c1_clear_evidence` → 回到 `reason=ok / source=auto_search`；停在 B1 时上传 →
+    `reran=False` 且仍停 B1（不绕闸）。回归 `test_block_b`(20)+`test_block_c`(26)+`test_topic_translate`(12)
+    +`test_evidence_upload`(13) = **69 passed / 2 skipped**。
+  - **勘误（2026-09-22 复核）**：此处原记「demo 下稿件标题仍是用户自己的中文选题」——**实测为误**。
+    `c1_draft` 的 `_title = topic_en or topic`，demo 下 `topic_en` 已被置为 `DEMO_TOPIC_EN`，
+    故标题**就是** omega-3 示例题名，整份稿（标题/统计量/参考文献）自洽。真正的缺口是：页面
+    没有任何标记说明「这是演示数据」，用户会把示例稿当成自己的分析结果 —— 已修，见下条。
+
+- **演示会话显式标记：页面明说「本次用的是内置示例信封」（2026-09-22，用户要求）**：
+  「已备好 B 信封 → 跳至 C 撰稿」不传信封时会用内置示例信封兜底跑完 Block C —— 但页面
+  此前**没有任何标记**，用户会把自己看到/编辑的初稿当成真实分析结果（而它的标题、效应量、
+  GRADE、参考文献全是 omega-3 示例主题的，与用户输入的主题无关）。
+  - `run_fastpath(demo=True)` → 落库 `sess.data["demo"]=True`（**落库而非只放内存**：重载会话
+    后标记仍在）；`build_state` 下发 `session.demo`；`_session_notices` 新增 demo 提示条。
+  - **演示提示不受 C 块门控** —— 「这是演示数据」对每个节点都成立，用户在任何节点翻看都该看到。
+  - 前端：标题栏常驻「⚠ 演示数据」角标（提示条会被面板滚出视野，角标不会）+ 节点顶部
+    红色提示条（含用户自己的主题名，点明「与你输入的主题无关」）+ 开始页演示说明补一句
+    「标题/统计量/参考文献都取自示例主题」。
+  - 验证（线上 HTTP + 重载）：不传信封 → `session.demo=True`+demo 提示条；上传信封 →
+    `demo=False`、无 demo 提示；`/api/session` 重载后标记与提示条**仍在**。
+
+### Changed
+
+- **性能专项：把「每一步都慢」从管道层根治（2026-09-20，用户裁定「12345都做」）**：
+  前一轮已定位「慢的是管道不是计算」——skill 目录挂在 **SMB 网络盘**（软链接 →
+  `\\filesrv\c$\...`），后端 venv 也在网络盘，会话文件含 50% 纯冗余副本，且单进程 GIL
+  让并发请求串行放大。本轮按①~⑤全部落地。**实测：冷启动 60–90 s → 7.3–8.3 s；单次
+  `save()` 258.9 ms → 13.5 ms（19×）；会话 2382 KB → 715 KB（-70%）；A2 节点 `#center`
+  340 KB → 110 KB、DOM 节点 6550 → 2392；`/api/session` ver 命中 1 MB → **56 B**；
+  并发 10 中位延迟 1552 ms → 407 ms；步骤切换 144 ms → 70 ms。** 语义零变化。
+
+  - **① 运行环境挪本地（`workbench/launch_workbench.py` 重写）**：新增
+    `%LOCALAPPDATA%\meta-analysis-wb\venv` 本地副本，`pick_python()` **优先本地**、缺失才回退
+    网络盘 `.venv`；新增 `--sync-venv`（`robocopy /E /MT:32 /R:1 /W:1`）一次性从网络盘复制。
+    量化：`import server` 从 **44.2 s → 7.6 s（5.8×）**。同时**删掉**启动前那次多余的
+    `import fastapi, uvicorn` 健康检查（网络盘上白花约 30 s），改为
+    `_open_browser_when_ready()` 轮询端口 **LISTENING**（0.3 s 一次，上限 180 s）后再开浏览器，
+    取代原来的固定 2 s sleep ——既不再空等、也不会在服务未就绪时打开白页。
+  - **② 消除会话文件冗余（`adapters/fullflow.py`）**：实测 2382 KB 会话里 **50.3% 是纯副本**
+    ——`envelope.final` ≡ `stages[-1]`（前端从不消费）、`last_view.await.{stage_result,nha,
+    editable_payload}` ≡ 该块 `envelope.final` 三字段。新增 `_dehydrate()`（落盘前摘副本，
+    仅保留 `_final_idx` / `_derive_from` 派生标记）与 `_rehydrate()`（加载时原样补回，内存语义
+    完全不变）；`_same()` 采用「身份 → `==` → 逐字节」三级短路。**对外只改了磁盘格式**：
+    新增公共读入口 `load_session_data(path)`，外部读会话必须走它或 `FullflowSession.load`。
+    结果：2382 KB → **735 KB（-69%）**，全部 **34 个真实会话** 往返（dehydrate→rehydrate）
+    逐字节无损。
+    - ⚠️ **兼容性约定（写进模块 docstring 与 CHANGELOG）**：任何直接 `json.load()` 读会话文件
+      的代码都可能拿到缺字段的中间态。已核查生产路径 —— `export_screening_xlsx` 走
+      `FullflowSession.load`，`deploy_retest.py` 只读仍未删的 `envelope.stages`，均安全。
+    - 顺带修掉一处性能陷阱：旧格式文件首存时 `_dehydrate` 要硬做 `_canon_json()` 对比
+      （35 ms，占单次 save 的 87%）。`_rehydrate` 增加**引用归一化**（加载后令
+      `env["final"] is stages[k]`），使后续所有 `save()` 走身份短路 → 稳定在 ~13.5 ms。
+  - **③ `save()` 本地落地 + 后台回写（新增 `adapters/session_store.py`，约 370 行）**：单写者
+    后台线程模型。`write_text()` **首次写同步落网络盘**（文件须先存在），其后写入仅进本地镜像
+    + 队列（主流程零等待）；后台线程按序合并（`_QUEUE[cp] = (net, text, seq)`）回写，失败指数
+    退避重试。`read_text()` 命中进程内存副本或本地镜像；若发现**他进程**改过文件则主动弃用内存
+    副本（避免多进程读到陈旧态）。另含 `flush(timeout)`、`atexit` 兜底、原子写
+    （`_atomic_write_bytes`）、`rev()`（revision+size 供 ver 计算）。崩溃后可从镜像续跑。
+    结果：后续 `save()` **8–21 ms（均 13.5 ms）** vs 旧同步写 258.9 ms。
+  - **④ 详情行懒渲染 + 局部更新（`workbench/workbench.html`）**：`renderRowlist` 不再无条件为
+    每行渲染 `tr.rl-detail`（旧实现 104 行 → 104 个隐藏详情行全渲染，12 字段 ×104）；改为
+    `A3_EXPANDED.has(i) ? buildDetailRow(...) : ""` 按需现场构建。`a3ToggleExpand(i)` 改为
+    **只动被点的那一行**——展开时 `insertAdjacentHTML("afterend", html)` 插入，收起时
+    `det.remove()` 真正摘除节点；不再 `reRenderRowlist` 整表 `outerHTML` 重建。
+    结果：`#center` 340 KB → 110 KB、DOM 节点 6550 → 2392、静态详情行 213 → 0；
+    展开响应 40–60 ms → ~2 ms。
+  - **⑤ 前端合并请求、消除并发放大（`workbench/workbench.html` + `workbench/server.py`）**：
+    后端 `/api/session` 增加 `ver` 提示——客户端版本串与当前一致即返回
+    `{"unchanged": true}`（**56 B**，不再下发 1 MB）；`_session_ver()` 用 revision+mtime+size
+    替代原 mtime-only 缓存键。前端新增 `_SESSION_INFLIGHT`（in-flight 去重，并发调用复用同一
+    Promise）与 `_SSE_ACTIVE` 计数（`fetchSession()` 先等 SSE 流排空再拉取）；原 `reloadSession()`
+    拆为 `fetchSession()` + `applySession(s)`，`applySession` 遇 `unchanged` 直接跳过整轮重渲染。
+    `build_state` 另对「当前 await 节点」跳过重复下发 `stage_result`（省约 334 KB）。
+    结果：并发 10 中位延迟 **1552 ms → 407 ms**；ver 命中响应 56 B；步骤切换 144 → 70 ms。
+
+  - 验证与回归：`py_compile` ×3 + 内联 JS `node --check` 通过；CDP 驱动真实 Chrome 实测
+    前端指标；真实网络盘实测写盘耗时。回归 `test_block_b` 20 OK、`test_block_c` 26 OK、
+    `test_writing_advisor` 52 OK、`test_rewind_rollback` PASS、`test_flow_menu` 186P/3F（与
+    基线一致）、`test_interpretation` 19 OK、`test_envelope_guard` 47 OK。
+    `test_fullflow`(6F) / `test_block_a`(3F/1E) 为**既有基线失败**（源自 09-19 语义变更），
+    与本轮无关。
+  - 环境坑（留存备查，脚本在 `2026-09-20-10-18-57/_tmpio/`）：`robocopy` 经 `cmd //c` 会因引号
+    吞掉 UNC 路径 → 改由 Python `subprocess.run([...])` 直调；`netstat` 输出是 GBK → 需
+    `.decode("latin-1")`；Win11 26xxx 已移除 `wmic` → `pids_by_cmd` 降级为 no-op、只按监听端口
+    PID 杀进程；`DETACHED_PROCESS` 子进程会被回收（后台起后端会 8 s 后死掉）→ 最终以后台任务
+    托管方式启动 `launch_workbench.py --no-browser` 才稳定。
+
+- **B3「过度声明检测」页补齐用途 / 原理说明，并修好「已过节点点不开」（2026-09-20）**：
+  用户反馈「这一页是否对用途和原理做更清楚地说明」。原页面只有一句
+  「基于统计量的过度声明模式扫描（被 B4/C2 复用）」+ 两个数字面板，看不出**查什么、怎么判、
+  扫的是哪段文本、0 命中算不算数**。同时核查发现两处硬伤（后者为既有 bug）。
+  - `block_b.py`：抽出 `_overclaim_context()` —— 把 B1 的 pooled 统计量（效应量 / CI / p / k / I²）
+    归一为「模式辅助判定」上下文，**单点实现**，供判定与页面展示共用，杜绝判据与说明两处各写一套。
+    `detect_overclaims()` 改为消费该上下文（改造前后 144 组「16 种文本 × 9 种 stats 形状」对拍
+    输出**逐字节一致**，含缺 CI / 缺 p / 非数值 / 向量型 CI 等异常）。新增
+    `overclaim_pattern_legend()`（12 类模式图例，含分级与「计入前提」）与
+    `overclaim_stats_digest()`（本次实际可用的统计条件 + 四条辅助判定的满足情况）。
+  - `block_b.py`：B3 `stage_result` 新增 `by_severity` / `n_high|n_medium|n_low`（同一个
+    `_by_sev` 派生，嵌套与平铺两套读法不漂移）、`patterns`、`scan`（文本来源 / 比对范围 /
+    字符数 / 篇数 / 状态提示 / 前 600 字预览）、`stats_used`、`downstream`。
+    `run_block_b(..., claims_meta=None)` 新增可选入参（缺省不影响旧调用）。
+    **原字段 `n_patterns` / `n_hits` / `hits` 原样保留** → B4、C2 及历史会话零影响。
+  - `fullflow.py`：`_build_claims_text(sess, with_meta=False)` 新增 `with_meta`，同时回收
+    「这段被扫文本从哪来」的事实（选题 / A2 前 20 篇标题摘要 / 各计数）；默认仍返回纯字符串，
+    向后兼容。**关键诚实性修正**：文本为空时明确写出「0 命中 ≠ 无风险（上游没产出可比对文本）」，
+    否则「扫了没发现」与「压根没扫」在页面上长得一模一样。
+  - `workbench/form_schema.py`：B3 面板由 2 个扩为 8 个——「用途 / 原理（30 秒读完）」notice、
+    检测概览（3 列）、**本次扫描的文本**、文本预览、本次可用的统计判定条件（含四条辅助判据）、
+    命中项（空态文案改为「0 命中 ≠ 无风险」的解释）、**12 类检测模式图例（到底查了什么）**、
+    命中后的去向；intro 重写并纠正原「自动节点，无需人工操作」与实际会软停复核的矛盾。
+  - `workbench/workbench.html`：`renderRowlist` 支持 schema 的 `empty_text`（「0 命中」是有效
+    结果，不该显示成取不到数据的「（无数据）」）；`.notice .d` 加 `white-space:pre-line`
+    以支持多行说明（既有单行调用不受影响）。
+  - **既有 bug 修复（`workbench/server.py::build_state`）**：阶段状态的**真源**是
+    `st["stage"]["status"]`（B/C 块 `_mk_stage` 只写这一处，A 块另在顶层写一份），旧实现只读
+    顶层 `st.get("status")` → B/C 各阶段恒为 `None`，两处后果：① 前端左栏按
+    `status==="completed"` 才允许点开，于是**任何已过阶段（含 B3）都点不开、无法回看**；
+    ② `stage_results` 恒为空 → 即便打开也是「全 —」空面板。改为「先内层后顶层」合并读，
+    兼容两种写法。实测同一会话：修复前 `stage_results` 仅 `A4`、`progress.status` 全 None；
+    修复后 5 个阶段状态齐备、`B1/B2/B3/B4` 结果全部可回看。
+  - 验证：`detect_overclaims` 对拍 144 组全一致；离线端到端（coze 打桩）跑通 `run_block_b`，
+    信封内 B3 带齐 11 个键、分级计数嵌套/平铺一致、空文本路径给出「0 命中 ≠ 无风险」警示；
+    B3 schema 全部面板字段在真实 payload 上均可解析出值；前端内联脚本 `node --check` 通过。
+    回归：`adapters/tests/test_block_b.py` 20 OK、`test_block_c.py` 26 OK、`test_fullflow.py`
+    6 FAIL（**既有**，见下）、`tests/test_flow_menu.py` 186 PASS/3 FAIL（与改前基线一致）、
+    `test_interpretation.py` 19 OK、`test_envelope_guard.py` 47 OK、`test_phase2_rewind_revise.py` OK。
+    ⚠️ `test_fullflow.py` 那 6 条失败**与本次改动无关**：失败签名都是「A 块跑完直接停在
+    `B1.meta_analysis`（`await_data=True`）」而非期望的 `extraction_review` 红线闸 ——
+    源于 2026-09-19「A4 默认隐藏 + A3 之后强制进 B1」的语义变更，测试未同步更新，待补。
+
+- **打回/回退提速 ③：回退进 A 块按「检索指纹」复用上次检索结果 + 强制刷新开关（2026-09-20）**：
+  用户裁定：「指纹复用+强制刷新开关（推荐）」。此前回退进 A 块**必跑真实全库检索**——
+  `rewind()` 把 envelope 清成 None 使 `cached_env` 恒失效，`invalidate_decisions` 又清掉
+  A2 的 approved 使 `start_stage="A3"` 条件不成立，于是即使检索式一字未改也要重跑
+  A1 的 ct-registry 查重探针（timeout 180s）+ A2 的 ct-literature 多库检索（约 2 分钟）。
+  - `block_a.py`：新增 `a2_search_fingerprint()`——对**全部会改变检索结果的输入**
+    （优化翻译后检索式 / max_results / year_from / include_reviews / 数据源子集）
+    取 sha256 前 16 位；写入 A2 `stage_result.search_fingerprint` 与 `_search_reused`（审计：
+    可回溯这次结果是复用还是重跑）。`run_block_a` 在 `start_stage is None` 且带
+    `cached_envelope` 时比对指纹：一致 → 复用 studies / A1 探针 / coverage 审计字段，
+    只重跑规则初筛并在 A2 闸重新停下；不一致 → 照旧真实联网检索（绝不静默给旧结果）。
+    A1 闸停靠时把缓存的 A2 阶段以 `status="pending"` 一并带进信封，使「打回 A1 → 未改就批准」
+    之后 A2 仍能复用（否则得再等 2 分钟）；pending 状态保证它不会被当成已完成结果展示。
+  - `fullflow.py`：`FullflowSession.rewind()` 对 **A 块**改为「保留信封、状态置 pending」
+    （B/C 仍原样清空）；新增 `rewind_fullflow(..., force_refresh=False)`，置 True 时清空该信封。
+    `_run_block` 的 A 分支改为**始终**透传 `cached_envelope`（原先仅在 `start_stage` 为真时传），
+    顺带修好另一条白等路径——只回传裁决（screened）的 A2 修订此前也会整块重跑检索。
+  - `workbench/server.py`：`RewindReq.force_refresh: bool = False`，`/api/rewind` 与
+    `/api/rewind_stream` 均透传；流式提示语改为说明复用/强制刷新两种行为。
+  - `workbench/workbench.html`：回退确认框新增「强制重新联网检索（忽略上次检索结果）」勾选，
+    随 `force_refresh` 提交；提示语与日志同步说明何时复用、何时重跑。
+  - 验证（联网函数全部打桩为 `AssertionError`，证明复用路径确实零联网）：
+    ① 回退 A2 默认 → `_search_reused=True`、104 篇复用、停在 A2，日志两条「复用…（跳过联网）」；
+    ② 回退 A2 + `force_refresh=True` → 打到联网桩并被捕获为 error，日志「丢弃上次检索结果」；
+    ③ 回退 A1 默认 → A1 探针复用、停在 A1，信封内 A2 为 `pending` 且 `stage_results` 不含它；
+    批准 A1 后 `_search_reused=True`、A2 仅出现一次（无重复 stage id）。
+    API 管线：`RewindReq` 默认 False / 显式 True 均正确，两个端点 kwargs 透传核验通过。
+
+- **打回/回退提速 ①②（2026-09-20）**：
+  用户反馈「打回/回退 时的速度非常慢，似乎可以优化？」。实测剖析后确认，**慢的不是计算本身**，
+  而是两处纯浪费；与回退目标无关的固定开销约占 8~13 s，回退到 B/C 另加 ~1~2.5 min 重复劳动。
+  - **① `FullflowSession.save()` token 级写出（6x）**：`json.dump(obj, f, indent=2)` 是 token 级
+    写出——一份 2.3 MB 会话（A2 含 104 篇 studies + abstracts）触发 **110,356 次 `write()`**。
+    本机 skill 目录经 UNC 挂载（`\\filesrv\c$\...\.workbuddy\skills\`），存在 I/O 拦截：
+    单次写 1 MB ≈ 200 ms（系统 temp 仅 1.1 ms），故 `save()` 实测 **2,394 ms/次**；
+    而一次打回需落盘 **3~5 次**（`rewind` → `invalidate_decisions` → 各阶段推进 → 审计留痕），
+    纯 I/O 就吃掉 8~13 s。改为 `json.dumps` 后单次 `f.write`：实测 **382 ms/次（6.3x）**，
+    **产出字节与优化前逐字节一致（md5 相同）**，`indent=2` / `ensure_ascii=False` 语义不变，
+    会话文件仍可人工阅读比对。
+  - **② 回退到 B/C 时误清 `handoff`（功能缺陷 + 白重算）**：`rewind()` 原先无条件
+    `self.data["handoff"] = {}`，但 `handoff` 的**全部键都由 A 块产出**
+    （`studies_for_b`：A3 上传 / A4 抽取；`ref_sections`：已落盘 PDF 的章节切片；
+    `merged_json`：A2 检索产物），对 B/C 而言它是**上游**产物而非待作废的下游结果。后果：
+    - **丢数据**：`_run_block("B")` 读 `handoff.studies_for_b` 得 0 行 → B1 停在
+      「待补数据」，用户必须重新上传 —— 回退等于白退（本地 75 个会话中 7 个命中该路径）；
+    - **白重算**：Block C 的 `_extract_c_grounding` 见 `ref_sections` 为空 → 重抽全部已缓存
+      PDF 章节，实测 **~2.7 s/篇**（59 篇 ≈ 2.5 min，84 篇缓存 ≈ 223 s）。
+    修复：`handoff` 只在回退进 **A 块**时清空（A 会重跑并重新产出这些键）。
+  - 验证：`test_flow_menu.py` 186 PASS / 3 FAIL（与改动前基线一致，3 条失败为既有：
+    2 条菜单文案含 `None` 字面量、1 条 rewind 非法目标 rc 断言）；`test_envelope_guard.py`
+    47 OK；`test_interpretation.py` 19 OK；`test_a4_b1_handoff.py` 的 handoff 机制段 [3] 全 PASS
+    （其 [2]/[4] 失败为环境缺本地 R 引擎，既有限制）。新旧 `save` 在同一 data 对象上
+    输出 md5 相同。回退 B1/C1 后 `studies_for_b` 2→2 保留、回退 A2 后 handoff 仍清空。
+
+- **A3 成果导出：把「文件名」直接做成可点链接（2026-09-20）**：
+  用户要求：「📥 PDF 全文下载进度 / ⬇ 下载确认清单（Excel）这里需要给出链接方便操作，
+  可以直接将文件名做成链接」——即导出出口不该只有动词按钮，文件名本身要是那个链接。
+  - `workbench.html`：新增 `a3ExportLinks(nDl)`，锚文本由动词短语
+    （「⬇ 下载全部 PDF（zip）/ ⬇ 下载确认清单（Excel）」）改为**实际落盘文件名**
+    （`📦 A3_PDF全文_3篇.zip` / `📊 A3_PDF下载清单.xlsx`），点击即下载；
+    三处出口（A3 节点「成果导出」面板、done 页成功分支、done 页查询失败重试分支）
+    统一复用该函数，杜绝三份文案漂移。
+  - `dlA3(kind, name)` 新增文件名参数：`a.download` 取界面显示名，
+    **所见即所得**（此前 `a.download` 恒为 `A3_PDF全文.zip`，会覆盖后端
+    `Content-Disposition` 的 `A3_PDF全文_{n}篇.zip`，用户点「3 篇」却存成无名 zip）；
+    仍走 fetch+blob，保留非 2xx 时 flash 友好提示（不跳裸 JSON 错误页）。
+  - 顺手删除 A3 节点内已失效的 `_sp` 死变量（此前改走 `dlA3` 后已无人引用）。
+  - `block_a.py`：`export_a3_download_list_xlsx` 把清单内两列写成**可点超链接**——
+    「PDF 文件」→ 本地 `file:///` URI（点文件名直接打开 PDF）、
+    「DOI」→ `https://doi.org/`（蓝字下划线）；新增 `_file_uri()`：
+    盘符冒号保字面量（编成 `%3A` Excel 打不开）、中文/空格百分号编码；
+    DOI 前缀归一（剥掉来源自带的 `https://doi.org/`，否则拼成 `https://doi.org/https://...`）。
+  - 验证：`_file_uri` 单测（中文/空格 → `file:///C:/Users/.../%E4%B8%AD%E6%96%87%E5%90%8D.pdf`）；
+    导出实测两个真实会话——`ff-364dd78250eb`（3 篇，无 DOI）得 3 个 G 列链接；
+    `ff-0558b5da7736`（2 篇 + 完整 URL 形式 DOI）得 4 个链接且 DOI 已归一为单层；
+    `ff-65e2e0076337`（59 篇）得 61 个链接无异常；
+    内联脚本 `node --check` 通过、`a3ExportLinks(3)` / `a3ExportLinks(null)` 渲染输出人工核对。
+
+- **A3 之后强制进入 B1（无论是否提取数据）（2026-09-19）**：
+  用户要求：A 流程「PDF 下载（A3）」节点完成后，不再停在「下载完成即终点」页，而是**强制进入 Block B（B1 合并计算）**，无论 A4 是否提取 / 是否上传过数据。
+  - `fullflow.py`：移除两处「无数据 → done」终止——① `_advance` 中 `letter=="B"` 且无 `studies_for_b` 时直接置 done 的守卫；② A 块完成且无数据时返回 done 的分支。改为 A 完成后一律 `cursor→B` 并续跑。
+  - `block_b.py`：`run_block_b` 在 `studies` 为空时返回 B1 以 `await_data` 停靠（不调 coze、不级联到 C），提示在 B1 内上传 / 录入 2×2 数据。
+  - `server.py`：新增 `POST /api/b_upload_data`（复用 `block_a.parse_raw_csv` 解析 CSV/Excel/粘贴文本）→ 写 `handoff.studies_for_b` → cursor 复位到 B → 重算 B1。
+  - `workbench.html`：`renderNode` 在 `aw.nha.await_data` 时改走 `renderB1UploadPanel()`（取代默认审批动作），新增 `b1UploadData()` 调 `/api/b_upload_data` 并刷新。
+  - 验证：模块级 + 线上 HTTP 双验证——无数据→B1 `pause`/`await_data=True`；上传 2×2→B1 重算（k=2）并续跑至 B2。
+
+### Fixed
+
+- **英文稿件里的中文渗漏 + 一处「假引文」（2026-09-22，用户反复反馈「里面还有中文」）**：
+  C1 初稿是英文稿件，但多处把**用户提供的中文值**直接拼进英文句子，且有一处把中文
+  **模式名**冒充成引文。逐条修，规则统一为「不臆造翻译、不静默丢弃、显式标记源语言」：
+  1. **过度声明段（假引文 + 中文）**：`block_b.detect_overclaims` 的 `hits[].evidence`
+     存的是**12 类模式的中文简称**（如「亚组结论外推总体」），**不是**被扫描到的原文片段。
+     旧实现把它当引文引用、还标注 `(verbatim excerpt from the scanned source text)` ——
+     引文是假的，中文是真的漏进正文。现改为：用 `label_en`；`evidence` 仅在其本身为
+     ASCII 时才作括注，否则指向 B3 的 `scan` 记录（那里才是原文落点）。旧信封无
+     `label_en` 时退到语言中立的模式编号（`pattern OC1`），不再回落中文。
+  2. **GRADE 降级理由**：旧信封只有中文 `reasons`（无 `reasons_en`）时，中文直接进 Methods。
+     现过滤中文项并补一句「N further rationale(s) omitted here (recorded in the source
+     language in the GRADE assessment)」——不静默丢信息。
+  3. **PICOS / 检索期 / 数据库**：中文值拼进英文句子会产生「慢性肾脏病患者 is a question
+     with an uncertain aggregate effect」这类**不合语法**的中英混杂。现分两路：
+     字段**列示**处（PICOS / Eligibility / Search strategy）原样保留 + 标 `[source language]`；
+     英文**叙述句**里（摘要背景、讨论）不内联，改用通用表述。Methods 末尾统一加
+     `Note on field language` 列出哪些字段是源语言、投稿前需补英文。
+  4. 顺带删掉 `c1_draft` 内**遮蔽模块级 `_has_cjk` 的同名本地定义** —— 它会让本行之前
+     定义/调用的嵌套函数引用到「尚未绑定的局部变量」而 `NameError`（改 oc 渲染时踩到）。
+  - 逐输入组合扫描（全英文 / 旧信封 / 中文 PICOS / 中文 studies / 中文 search_info）：
+    除**设计如此**的中文标题外，英文叙述句已零中文；剩余中文只出现在带 `[source language]`
+    标记的字段列示与脚注里。
+  - 新增 3 条断言锁住该不变量（`test_block_c.py`）：英文 label 生效且无 CJK、旧信封退到
+    模式编号且无 CJK、ASCII evidence 仍作括注不丢信息。
+  - **未改（如实记录）**：参考文献里中文论文的**原始中文标题 / 中文作者名**保留不动 ——
+    那是被引文献的原始著录，翻译/罗马化会变成臆造。投稿前需作者自行补英文题名。
+
+- **「跳至 C 撰稿」不传信封时仍被前端拦下，演示兜底根本走不到（2026-09-22）**：
+  后端已实现三级兜底（粘贴 `b_env_text` → 上传 `.json` → 内置示例信封），但
+  `workbench.html` 的 `doStartData()` draft 分支在提交前强校验
+  `if (!files.length) { flash("请先选择 B 信封 JSON 文件", "err"); return; }`，
+  把后两条路**全挡在浏览器里**，用户点「启动流程」只看到一句红字。
+  - 修法：与 `raw_csv` 分支对齐 —— 优先读粘贴框、其次上传文件，**两者都空则放行**，
+    由后端兜底取内置示例信封，并给一行「未提供 B 信封，将用内置示例信封演示 Block C
+    全流程」的提示（不再 return 中断）。
+  - 顺手补齐粘贴框：draft 区块原先**只有文件选择**，但提示文案已写着「未上传
+    **也未粘贴**」——文案是空头承诺，且后端的 `b_env_text` 入参（2026-09-22 新增）
+    没有对应 UI 可填。现新增 `data_benv_text` textarea（与 raw_csv 粘贴框同款样式），
+    提示改写为「粘贴与上传二选一，两者都留空则走下方演示信封」。
+  - 验证（三条路径 + 真实浏览器）：
+    | 路径 | 结果 |
+    |---|---|
+    | 不传任何东西 | 200，落在 `C1.draft`/pause，稿件 4620 字 |
+    | 粘贴 `b_env_text`（真实会话 envelope，2716 B） | 200，`C1.draft`/pause，4229 字 |
+    | 上传 `.json` 文件 | 200，`C1.draft`/pause，4229 字 |
+    | 真实 Chrome 点「启动流程」（文件空 + 粘贴空） | **`C1.draft`/pause，4656 字，未拦截** |
+  - 浏览器验证脚本 `_tmpio/cdp_draft.py`（CDP：填主题 → 选 draft → 不传 → 点击 → 断言落点），
+    可复用为快速通道的前端回归。
+
+- **稿件把 I² = 34.5% 渲染成「I² = 3453%」：消费端二次 ×100（2026-09-22）**：
+  在 coze 代码镜像 `adapters/coze` 内核对后确认——**`pairwise.I2` 在所有进入生产计算的
+  引擎下统一为百分数（0–100）**，不是比例：
+  - `coze_contract.md` §4 明写 `stats.heterogeneity.I2` **恒为百分数**，「netmeta/netcomb
+    原生返回比例（0–1），引擎侧已 ×100 换算，**消费端不要二次换算**」；
+  - `run_task.R:511`（NMA）/ `:1256`（CNMA）确有 `I2 * 100`；pairwise 直接取 `fit$I2`
+    （meta/metafor 原生即百分数）；
+  - `_coze_stats_to_pairwise`（`block_b.py:374`）原样透传 → `pairwise.I2` = 百分数。
+  但 `block_c.py` 三处又乘了一次 100：`i2_line`（**被摘要/方法/结论/局限性四处复用**）、
+  局限性句 `i2 * 100`、给 LLM 的 `stats_line` 内 `I2=`——实测把 34.5% 印成 **3453%**，
+  且局限性阈值写成 `i2 > 0.25`（百分数口径下几乎恒真，等于永不区分异质性高低）。
+  修法：三处去掉 `* 100`，阈值改 `i2 > 25`。
+  连带统一本地 oracle：`b1_pairwise_python` 原产出**比例**（`(Q-df)/Q`），与
+  `_coze_stats_to_pairwise` 明文声明的「同构」不符，导致 `b2_grade` 的
+  `I2 >= 75/50/25` 判据在 oracle 数据下**全部假阴性**（不一致性降级永不触发），
+  理由文案还会印成「I²=0%」。已在 oracle 侧归一为百分数（与契约同构），
+  并同步更新 `test_block_b.py` 断言（`0..1` → `0..100`）。
+  - 验证：端到端重跑演示信封 → 稿件 `I² = 35%`、GRADE 理由「不一致性中等（I²=35% → -0.5）」
+    （**修复前该降级是假阴性**）、给 LLM 统计行 `I2=35%`；反向断言稿件中 4 位百分数为 0 条。
+  - 回归：`test_block_b` 20 OK(skipped 2)、`test_block_c` 26 OK、`test_writing_advisor` 52 OK、
+    `test_interpretation` 19 OK、`test_envelope_guard` 47 OK。
+  - 全局扫描已确认：`block_b` 判据（75/50/25）、R 引擎侧（`run_task.R:925`、`meta_analysis_core.R:167-169`）
+    与契约 warnings 全部同为百分数口径，无残留 `* 100`。
+
+- **C1 初稿把 log OR 当成 OR 写进稿件（2026-09-22）**：
+  效应量的**分析尺度 / 报告尺度**混用：pairwise 的 `TE_random` / `ci_random` 在比值类
+  （OR/RR/HR…）上是**对数尺度**（存的是 log OR），稿件里必须取 exp 才能印。旧代码直接
+  把 `-0.38` 印成「OR = -0.38（95% CI -0.69–-0.08）」，并拿 log OR 去比无效线 1.0，
+  导致方向判定与「CI 是否跨无效线」同时出错。
+  - `block_c.py::c1_draft`：新增尺度归一层（比值类集合与 `interpretation._RATIO_SM`
+    同一约定）。`eff_line` 改用报告尺度；`direction` / `_ci_cross` 改在**分析尺度**上
+    与无效线 `0` 比较（log(1)=0、差值类 0 → 恒为 0）；`_wa_stats.pooled` 按
+    `writing_advisor` 既有约定修正为 `estimate_exp`/`ci_lower`/`ci_upper` 报告尺度、
+    `estimate` 分析尺度。缺 CI 时降级为 `95% CI n/a`，不再抛 `TypeError`。
+  - `block_c.py::build_narrative_prompt`：交给 LLM 的统计行同步换算到报告尺度
+    （含 I² 转百分比），否则 LLM 会照着 log OR 写正文。
+  - 验证：演示信封实跑 → 稿件由 `OR = -0.38 (95% CI -0.69–-0.08)` 变为
+    `OR = 0.68 (95% CI 0.50–0.92, p = 0.013)`，方向 `decreased` 正确。
+  - `tests/test_block_c.py::test_sections_and_numbers` 同步更新：该断言原先锁定的正是
+    bug 行为（`assertIn("OR = 0.48")`），现改为断言报告尺度 `OR = 1.62` / CI `1.23–2.12`
+    并反向断言不再出现 `OR = 0.48`。`test_block_c` 26 OK、`test_block_b` 20 OK。
+
+- **清掉两处「声明与实现不一致」的陷阱：死修订键 + 修订模式覆盖只读声明（2026-09-20）**：
+  两处已存在但本轮才被发现的问题，均为「写了 A、实际做 B」，比直接不提供该能力更容易误判。
+  - **① `fullflow.EDITABLE_KEYS` 移除 `"B3.overclaim": ["claims_text"]`（死配置）**：
+    `claims_text` 是 B3 的**输入**（由 `_build_claims_text` 从选题 + A2 文献标题/摘要派生），
+    **不在** B3 的 `stage_result` 里 → 两处消费点
+    （`fullflow.py` 构建 `editable_payload` 的 `{k: sr[k] for k in EDITABLE_KEYS.get(sid,[])}`）
+    取不到该键，`editable_payload` 恒为 `{}`；且 `_run_block` 的 B 分支每次都重拼文本、
+    从不读 `latest_revision("B3.overclaim")` → **即便收录，用户改完提交也传不到下游**。
+    已核实无第三方依赖：`scripts/flow_menu.py` 只在标签表里出现 `B3`，没有以 `claims_text`
+    为 `key` 的 revise 菜单项（`_filter_options` 只**过滤**已声明选项，不会从字典自动生成）。
+    B3 按裁定保持 `gate_type="auto"`（不可修订），故该键本就不该存在。
+    另在 `EDITABLE_KEYS` 上方写明收录规则（**既要在 `stage_result` 里真实存在，又要在
+    `_run_block` 里被 `latest_revision()` 真正消费**）与将来若要开放「人工补充待扫描文本」
+    需同时做的三件事，避免再次出现同类陷阱。
+  - **② `workbench/workbench.html` 修订模式不再覆盖 schema 的 `editable: false`**：
+    `viewStage(sid, true)` 原先无条件 `Object.assign({}, p, {editable: true})`，把「打开可编辑
+    修订」当成「所有面板都可编辑」，**覆盖了 schema 里明确声明的只读** → B3 的「命中项」/
+    「12 类检测模式图例」rowlist、C2「命中项」、「通用确认节点」的原始数据 json 会变成输入框，
+    并往 `DRAFT` 灌进一批没有对应 `revision_key` 的无意义键。
+    改为**只尊重显式 `false`**（`p.editable === false ? false : true`）：显式只读的一律只读；
+    未声明的仍放开 —— 这一点是必须的，**B1 正是靠它获得修订能力**（`EDITABLE_KEYS` 收录了
+    `pairwise`/`nma`，但 B1 的面板都没有写死 `editable`/`revision_key`），若改成「只有显式
+    `true` 才可编辑」会**打断 B1/B2 的修订**。
+    - 已知副作用（**有意接受**）：C3「核验结果」/C4「QA 结果」两个面板本就显式声明
+      `editable: false`，修复后其修订模式变为纯只读 —— 即「✎ 继续 / 修订」进去只能
+      「提交修订」（空 revision）触发重算，不能再手改原始校验 JSON。作者原意即只读
+      （面板文案写着「核验结果」，且通用兜底节点明写「只读」），故按声明执行。
+      另注：C3/C4 的 `EDITABLE_KEYS`（`references`/`manuscript`）**在同名 schema 里没有绑定面板**，
+      属另一处「声明与实现不一致」，本轮未动，已记录待定。
+  - 验证（规则级，纯函数、不依赖数据）：遍历 11 个节点全部 44 个 panel，按新规则计算
+    「修订模式有效 editable」→ 显式 `false` 的 6 个面板（B3×2 / C2×1 / C3 / C4 / 通用兜底）
+    **全部保住只读，被误覆盖数 = 0**；A2「逐条裁决」显式 `true` 仍为可编辑。
+  - 验证（渲染级，真实 Chrome + CDP，`_tmpio/cdp_revise.py`）：注入 `form_schema` 的**真实
+    schema** 后逐个跑 `viewStage(sid, true)`，统计产出的 `[data-rk]` 可编辑键 →
+    B3 = `['preview','downstream']`（`hits`/`patterns` 已剔除）、C2 = `[]`、C3 = `[]`、C4 = `[]`、
+    **B1 = `['pairwise','nma']`（未回归）**、A1 = `['include_reviews','report']`、
+    B4 ⊇ `report`、C1 ⊇ `manuscript`，8/9 断言 PASS。
+    （唯一未过的 A2 断言是**测试数据造成的假阴性**：A2「逐条裁决」面板 `path="nha.decisions"`，
+    而 `viewStage` 的 ctx 里 `nha` 恒为 `{}` → `renderRowlist` 对空数组提前 return、不产出
+    任何 `[data-rk]`；规则级校验已确认其声明为 `True` → 有效值仍为 `True`。）
+  - 回归：`tests/test_flow_menu.py` **186 PASS / 3 FAIL（与基线逐条一致）**、
+    `adapters/tests/test_block_b.py` 20 OK、`tests/test_envelope_guard.py` 47 OK、
+    `adapters/tests/test_fullflow.py` 6 FAIL（**既有基线**，源自 09-19 语义变更）、
+    `tests/test_a4_b1_handoff.py` 本地 R 引擎缺失导致的既有失败。`py_compile` + 内联 JS
+    `node --check` 通过。HTML 仍由 `index()` 每请求现读，**无需重启后端**。
+
+- **工作台：等待中的红线闸标题错标成「🟡 软停」（2026-09-20）**：
+  `workbench/workbench.html` 的 `renderNode()` 判的是 `sc.gate_type === "red"`，而
+  `form_schema.py` 只会产出 `"redline"` / `"soft"` / `"auto"` 三个值 —— **该红色分支是死代码**，
+  于是三选一永远落到 else。后果：**当前正在等待用户放行的红线闸（B4 质量门 / C3 参考核验 /
+  C4 投稿前终闸）标题 pill 显示成「🟡 软停」**，把「必须人工显式放行」的终闸渲染成普通软停，
+  是最不该出错的时刻出错。铁证：同一文件 `viewStage()` 的同类判据用的是正确的 `"redline"`，
+  说明这是笔误而非设计。修复：`"red"` → `"redline"`，并把三值含义写进注释。
+  注：`auto` 与 `soft` 在此处（停靠点视图）都落「🟡 软停」是**正确**的——二者此刻确实都在
+  等人确认；`auto` 的语义按本轮裁定统一为「自动计算 + 软停复核」（见 Changed 段），
+  故 B1/B2/B3 维持 `auto` 不动，仅修此笔误。
+  验证：真实 Chrome（CDP）驱动，给 `renderNode()` 分别喂 `redline` / `soft` / `auto` / 未知值，
+  断言标题 pill 文本 → `redline` 得到「🔴 红线闸」、`soft`/`auto` 得「🟡 软停」、未知值安全
+  回退「🟡 软停」，**ALL PASS**（修复前 `redline` 会输出「🟡 软停」）。内联 JS `node --check`
+  通过。HTML 由 `index()` 每请求现读且 `Cache-Control: no-store` → **无需重启后端**即生效。
+
+- **线上服务起不来：`block_c.py` 用了 Python 3.12+ 才允许的 f-string 反斜杠（2026-09-19）**：
+  现象：本地全链路全绿，重新发布后线上 60s 内不可达，日志报
+  `block_c.py:324 SyntaxError: f-string expression part cannot include a backslash`。
+  根因：线上运行时是 **Python 3.11**，本地开发是 **3.13** —— `manuscript` 的 f-string 在
+  **表达式部分**用了 `\n` 与行尾续行 `\`（PEP 701 自 3.12 才放开），3.11 在 import 阶段即
+  SyntaxError，而本地 `py_compile` 永远发现不了（本地能编译 ≠ 线上能运行）。
+  修复：
+  - `block_c.py`：三段「写作辅助」段落（本研究优势 / 局限性 / 讨论要点）预拼为 `wa_block`
+    移到 f-string **外部**，模板内只留 `{wa_block}`；
+  - 同处顺手修掉文案重复：`eff_line` 原为「`OR 合并效应 = 0.57 (...)`」，而调用方模板已带
+    「主要合并效应」前缀 → 输出成「主要合并效应 OR 合并效应 = ...」；现改为 `OR = 0.57 (...)`。
+  防复发（新增工具链守卫）：
+  - 新增 `adapters/workbench/publish-kit/check_py311.py`：tokenize 级扫描 f-string **表达式区间**
+    内的反斜杠（注：`ast.parse(feature_version=...)` 不可用——它不回溯 f-string 的 tokenizer
+    限制、会给出假阴性）+ PEP 695 泛型语法粗筛；
+  - `build_publish.py` 构建末尾调用该守卫，发现问题即 `sys.exit` **阻断发布**。
+  验证：守卫自检（坏样本 2 处 → 退出 1；好样本 → 0）；本地 + 线上端到端各 7/7；
+  Playwright 真实 UI 链路（演示启动 → B1→B2→B3→B4 → C1）确认初稿正文 1061 字符可编辑呈现。
+
+- **done 页两个成果导出按钮「点了没反应 / 跳裸 JSON」（2026-09-19）**：
+  根因两层：① `renderDone()` 在 done 态下无条件渲染「⬇ 下载全部 PDF（zip）/ ⬇ 下载确认清单（Excel）」
+  两个 `<a href>` 按钮，但 done 态 `stage_results` 不含 A3 `per_doc`，前端无法判断后端是否真有可导出
+  成果；无成果的会话（如 `ff-1e6bf5d7fb76`：A2 skipped、A3 空过）后端正确返回 400，按钮却依然显示。
+  ② `<a href>` 直跳下载端点，出错时浏览器导航到裸 JSON 错误页（`{"detail":...}`），用户看起来就是
+  「按钮不起作用」。
+  修复（server.py + workbench.html，需重启服务）：
+  - server.py 新增 `GET /api/a3_export_status`：复用 `block_a._a3_result_of` + `_downloadable_docs`
+    返回 `{n_docs, n_downloaded}`（done 态前端本地判断不了，直接问后端事实）；
+  - workbench.html 新增 `dlA3(kind)`：fetch + blob 下载，`Content-Disposition` 失败时回退固定文件名
+    （A3_PDF全文.zip / A3_PDF下载清单.xlsx），非 2xx 时解析 `detail` 弹友好 flash + 底部日志；
+  - `renderDone()` 改为先渲染骨架，异步查 `/api/a3_export_status`：有成果（n_docs>0）才渲染两个
+    按钮（并显示真实篇数），无成果渲染中性解释（原因 + 如何重跑下载），查询失败也保留可重试按钮；
+  - A3 流程内「成果导出」面板的两按钮同步改为 `dlA3`（原来同样存在裸 JSON 问题）。
+  验证：`/api/a3_export_status` 对 `ff-1e6bf5d7fb76` 返回 {0,0}（会话确实无可导出——A2 被跳过、
+  A3 无下载明细，runs 根目录 doc1-10.pdf 为 9 月 3 日其他会话产物，与本会话无关）；对含下载结果的
+  `ff-364dd78250eb` 返回 {3,3}，zip 实测 HTTP 200 / 5.5MB（3 篇 PDF + 下载清单.csv），xlsx HTTP 200。
+
+- **流程 done 态误报「Block C 终闸已放行」（2026-09-19）**：
+  `renderDone()`（workbench.html）原先用 `docs.length > 0 && /PDF 全文下载已完成|不提供数据提取/.test(prompt)`
+  区分「下载-only 终点」与「全链路完成」。但 done 态下 A3/A4 的 `per_doc` 根本没进
+  `stage_results`（信封 `stages` 只列 A1/A2，A3.pdf_download 永远不在其中），
+  导致 `docs` 恒为空 → `docs.length>0` 恒为 false → **下载-only 终点（仅 A 块跑过、
+  B/C 从未运行）被误判成「Block C 终闸已放行 / C1→C3→C4 全部通过」**，与事实相悖。
+  修复：改用事实信号 `STATE.progress` 里 B/C 块是否实际出现过（A-only → 下载终点；
+  B/C 跑过 → 真实全链路完成），不再依赖脆弱的 `docs.length` / 提示文案猜测；
+  并对「0 篇可打包」情况给中性说明。仅改 workbench.html，刷新即生效，未重启。
+  验证：用户 done 会话 `ff-1e6bf5d7fb76`（progress 仅 A）→ 现正确显示「PDF 全文下载已完成」；
+  真实跑到 C 的会话 `ff-413a0335d09a`（progress 含 A/B）→ 仍正确显示 C 终闸放行。
+
+- **A4「下载 PDF」界面部分文章状态显示英文 `deferred`（2026-09-19）**：
+  `renderA4Downloads()`（数据提取关闭时的持久化下载清单视图）的 `stMap` 漏列
+  `deferred` 状态，导致该状态走兜底分支、直接把后端原值 `deferred` 当文案显示成
+  英文。这些文章**并非失败**，而是因本轮回填的实际下载上限（`max_attempts`）已耗尽、
+  留待下一轮自动获取。修复：① `stMap` 补 `deferred: ["#6b7785", "未下载·达上限"]`；
+  ② 统一另三处状态映射（实时下载日志 `addRow` MAP、`renderA4LiveDoc` MAP×2、
+  `A4DOC_STATUS`）的 `"延后(配额)"` → `"未下载·达上限"`，消除歧义、四视图术语一致；
+  ③ 该视图对 deferred 篇目追加说明条，解释原因并指引「下一轮 A4 下载阶段自动获取」或
+  「待上传 / 补抽取 PDF」手动上传两条路径。仅改 workbench.html，刷新即生效。
+
+- **A2「文献集」单击标题展开的摘要被截断为一行带省略号（2026-09-19）**：
+  详情行 `abstract_snippet`（标签「摘要」）原本按普通 `.rl-df` 渲染，
+  受 `white-space:nowrap; overflow:hidden; text-overflow:ellipsis` 影响被截成
+  单行省略号。新增 `para` 字段型：标签独占一行、正文整段显示在下方
+  （`form_schema.py` 给该字段加 `"type":"para"`；`workbench.html` 的
+  `renderRowlist` 与 CSS `.rl-df.para` 配套实现），其余字段（刊名/年份等）
+  维持内联不变。
+
+### Changed
+
+- **左侧「流程进度」字号放大（2026-09-19）**：
+  用户反馈左栏时间轴的 `A1 / A2 …` 阶段代号过小。统一放大三处
+  （workbench.html，仅 CSS，刷新即生效）：
+  `.tl li .seq`（A1/A2 代号）`10.5px → 13px`、`min-width 22px → 27px`；
+  `.tl li .lbl`（阶段名，选题/检索/合并计算…）`13px → 15px`；
+  `.tl li .tag`（状态签）`11px → 12.5px`；左栏卡片标题
+  `#wb-pane-left > h3` `12px → 13.5px`（**仅左栏**，中/右栏卡片标题不变）。
+  行高变大后同步微调状态点/连接线位置：`.tl li .dot` `top:14px → 15px`、
+  `.tl li::after` `top:27px → 29px`，保持圆点与连接线对齐。
+
+- **隐藏「⏭ 跳过」决策按钮 + 取消/返回按钮改中性样式（2026-09-19）**：
+  用户反馈「跳过按钮」功能不清晰，两类来源：
+  ① 软停节点的 `⏭ 跳过` 决策按钮（引擎 `skipped` 动作，语义≈「本会话不再在此停靠」，
+  与「批准」重叠）→ 在 `renderActions` 内用 `const SHOW_SKIP = false` 守卫隐藏，
+  **后端 `skipped` 动作保留**，改 `true` 即恢复；软停节点始终有 `✓ 批准` 可走，流程不被阻断。
+  ② 四处取消/返回按钮（打回选择器取消、只读/修订视图「← 返回」「取消」）原套用橙色
+  `.btn-skip` 样式、与跳过按钮视觉混淆 → 全部改为中性 `.btn-ghost`。`.btn-skip` CSS 规则
+  保留备用（skip 恢复时自动生效）。仅改 workbench.html，无需重启。
+
+- **步骤切换 / 刷新提速：`/api/session` 按文件 mtime 加状态缓存（2026-09-19）**：
+  工作台会话文件已达 ~2.4MB（A2 文献集 104 篇 studies + abstracts），原先每次
+  `/api/session` 都要「读盘 2.4MB → 解析 → 重建 stage_schema/stage_results →
+  再序列化 2.4MB 下发」，实测 ~0.88s/次；任何一次**刷新页面 / reloadSession**
+  都白吃这一轮。改为按 `(path, mtime_ns)` 记忆 `build_state` 结果：文件未变即命中
+  缓存跳过整段重活。实测重复调用 **0.88s → 0.05s（约 17×）**。
+  用纳秒 mtime（NTFS 100ns 分辨率）防「同秒写盘」误命中；`mutating` 端点另可
+  `_invalidate_session` 双保险（本次仅依赖 mtime，未显式调用）。
+  > 纯后端改动，需重启 uvicorn 生效（约 85s 慢导入期）。
+
+- **慢操作明确「请耐心等待几分钟」提示（2026-09-19）**：
+  真正耗时的操作（多库检索、PDF 全文下载）是网络 / R 计算受限，无法提速，但原先
+  前端提示语（「约 15–60 秒」「耗时较长」）严重低估，易误判为卡死。按用户要求，
+  在三个 SSE 流式端点的 `stage_hint` 加显式长等待提示：
+  - `/api/start_stream`：检索「单库超时上限 5 分钟，整体通常需要几分钟，请耐心等待，不要关闭或刷新页面」
+  - `/api/rewind_stream`：回退重算「可能联网重新检索 / 下载全文，需几分钟，请耐心等待，不要关闭或刷新页面」
+  - `/api/decide_stream`：上下文感知——含修订 → 重算下游可能数分钟；
+    批准 A1/A2 → 后续可能联网检索或逐篇下载 PDF，达数分钟；
+    其余 → 部分步骤可能耗时数分钟；均提示「不要关闭或刷新页面」。
+
+### Changed (prior)
+
+- **长标签不再折行：`.kv` 标签列由死宽 140px 改为自适应（2026-09-18 第六次修订）**：
+  用户反馈 A2「未翻译残留」面板的标签「需自行翻译为英文的片段（非空 = 境外库会漏检）」
+  **仍然折行**（24 字塞进 140px 标签列 → 折成 3 行）。改为
+  `grid-template-columns:minmax(140px, max-content) minmax(0, 1fr)` + `.kv .k{white-space:nowrap}`：
+  标签 nowrap 后其 min-content 即全文宽度，轨道自动取该面板**最长标签**的宽度
+  （实测 Microsoft YaHei 13px 下该标签 **291px**），同面板内所有值仍左对齐同一列。
+  短的标签面板不受影响（「待下载（初筛通过）」117px < 140px 下限，仍走 140px）。
+  ≤560px 极窄屏降级回 `minmax(120px,40%)` + 允许折行，避免 nowrap 把网格撑出面板。
+  > 本次只动 `workbench.html`（CSS），**刷新即生效，无需重启**。
+
+- **A2「文献集」概览面板改 3 列网格（2026-09-18 第五次修订）**：`kind:"object"` 原先固定
+  `grid-template-columns:140px 1fr` —— 每个字段独占一整行，检索概览 6 项 = 6 行、初筛统计 5 项 = 5 行。
+  改为**由 schema 的 `cols:3` 触发** 3 列网格（新增 `.kv3` / `.kv3-cell`）：
+  1. **检索概览**（`cols:3`，6 项）→ **3 × 2 两行**；
+  2. **初筛统计**（`cols:3`，5 项）→ **3 + 2 两行**；
+  3. **单项单行不折行** —— `.kv3-cell` 用 `grid-template-columns:max-content minmax(0,1fr)`，
+     标签列 `max-content + white-space:nowrap`，值列同样 nowrap（超长才 `ellipsis` 兜底）；
+  4. **默认形态不动** —— 仅 `cols:3` 的面板走新网格；未标 `cols` 的（如「未翻译残留」，
+     标签是「需自行翻译为英文的片段（非空 = 境外库会漏检）」24 字）继续用 140px 标签列的纵排，
+     避免被 nowrap 截断。
+  5. 响应式：≤900px 降 2 列、≤560px 降 1 列。
+  > 注意：`form_schema.py` **不像** `workbench.html` 那样每次请求重读，改完**必须重启 uvicorn**
+  > （见 `workbench_server.log` 的 restart 标记）。
+
+- **「数据准备状态」选项改单行并排（2026-09-18 第四次修订）**：原先 `#datamode-seg` 是
+  `grid-template-columns:1fr 1fr`（2×2），当前特性开关下实际只有 3 个选项
+  （`/api/features` → `a4_extraction:false`、`fastpath_pdf:false`，故「已备好全文 PDF」不渲染），
+  于是第三项单独占半行、卡片被无谓拉高约 34px。改为
+  `display:flex; flex-wrap:nowrap` + `.seg-opt{flex:1 1 0; min-width:0}`：
+  **任意选项数（3 项或特性全开 4 项）都均分同一行**，不再依赖写死的列数；
+  容器 `align-items:stretch` 让各选项等高对齐。≤560px 断点回归纵向堆叠
+  （`flex-wrap:wrap` + `flex-basis:100%`），避免窄屏挤成文字墙。
+  实测 `.start` 卡片 920px 宽下每项约 288px，三行文案均单行不折行。
+
+- **左栏加阶段顺序标签 + 右栏审计日志默认收起（2026-09-18 第三次修订）**：
+  1. **时间轴顺序标签**：`renderTimeline()` 在行首增加 `<span class="seq">`，取自 `stage_id` 前缀
+     （`String(sid).split(".")[0]` → `A1 / A2 / A3 / B1 … C4`）；等宽字体 +`min-width:22px` 保证标签左对齐，
+     颜色随状态走（future `--wb-muted`、done `--wb-sub`、await `--wb-warn`、gate `--wb-err`）。
+     好处是截图/口头沟通可以直接引用「A3」「B4」而不必描述中文名。
+  2. **审计日志默认收起**：`<body class="… wb-audit-off">`，右侧 `<aside id="wb-pane-right">` 默认
+     `display:none`；`.layout` 第三轨由 `340px` 改为 `auto`，配合 `#wb-pane-right{width:340px}`
+     （仅在 `min-width:1081px` 内声明，避免破坏 ≤1080px 的两栏断点），收起时整轨塌缩为 0。
+     实测中央工作区宽度 **718px → 1074px（+356px）**。
+  3. **顶栏新增「审计」开关**（`#wb-audit` + `wbToggleAudit()`，文案入 I18N `auditBtn`）：
+     面板收起时一键唤回，偏好记忆在 `localStorage.wb_audit`；面板可见时按钮点亮（`.wb-btn.on`）。
+     业务 JS 全部保持写入 `#audit`，DOM 与 `STATE.audit` 不变，**审计数据不丢**。
+  4. **A3/A4 裁决表兼容**：既有 `body.a3-active .layout{280px … 0px}` 规则与新规则特异度相同且位置更靠前，
+     故新规则用 `:not(.a3-active)` 让位，保持裁决表原有宽度；同时 `body.a3-active #wb-audit{display:none}`
+     避免「按钮点亮但面板被强制收起」的错位。
+  5. **表单可用宽度提升**：`.start` 上限 680 → **920px**（原先受 340px 右栏挤压，现真正吃得下）。
+- **开始页整页缩短约三分之一（2026-09-18 二次修订）**：原分区化后表单区约 1180px、需滚动才看全；
+  本轮做**纵向压缩**，改后 `.start` 实测 **671px**、整页 `doc_h` **904px**（1440×1000 窗口一屏放得下）。
+  具体做法：
+  1. **省掉一张分区卡** ——「合并效应量尺度」并入底部 `.actions-bar` 操作条
+     （`[效应量] [select] ……… [启动流程] [帮助选题]`），单行 61px；
+  2. **选项改双列** —— `#datamode-seg` 由 4 行纵排改为 **2×2 网格**（`.seg-opt` 在网格内
+     `margin:0 !important` 归零、改由容器 `gap` 控距，因基类带 `!important` 故须同权覆盖），
+     选项文案同步收短（「标准全流程（含 PDF 下载）」等，保证单行不折行）；
+     原始数据录入方式行改用 `.fs-radio-row`，与网格同款紧凑规则；
+  3. **复选框双列** —— NMA / 包含综述两行改用 `.fs-chk2`，两行的长说明压成一句
+     （「3 种及以上干预同台比较时勾选。」/「伞评 / 范围综述才需要。」），省约 100px；
+  4. **文案瘦身** —— 8 处 2 行说明改 1 行；字段标签去掉括号内的长解释
+     （「检索上限（最多拉取多少篇文献记录用于初筛）」→「检索上限」）；
+     B 信封 / 全文 PDF 两处冗余的「上传 XXX」标签行删除（按钮文字已表达）；
+  5. **间距压缩** —— `.fs` 内边距 15/16→12/14、下间距 14→9；`.fs-hd` 13/10→8/7、字号 13→12.5；
+     `.hint` 11.5px/1.45；`.actions-bar` 内边距 11/13；`.start` 宽度 620→680（一行装更多字，行数更少）。
+  元素 id 与 `updateDataMode()` / `updateRawInput()` / `updateDemoByEM()` 契约**全部保持**，
+  `#em` 仅按 id 取用故可安全移位（已 grep 确认）。
+- **开始页「选单框架」分区化（2026-09-18）**：原先是一条平铺到底的长表单，现按语义切成
+  **分区卡** `<section class="fs">`（品牌色条 + 分区标题 + 右侧副标签 + 分隔线）：
+  研究主题 / 数据准备状态 / 检索与筛选设置 / 原始数据 / B 信封 / 全文 PDF / 合并效应量尺度。
+  「检索上限 + 起始年」改双列网格 `.fs-grid2`（窄屏 ≤560px 回落单列）；操作区独立为
+  `.actions-bar` 浅底条。所有元素 id 与 `updateDataMode()` / `updateRawInput()` /
+  `updateDemoByEM()` 的挂载契约保持不变。
+- **工作台前端视觉精修（2026-09-18）**：在 ct-base/workbench_ui.md 规范内提升界面层次与精致度 ——
+  页面底色叠加极淡品牌光晕、卡片层叠阴影 + 悬停轻抬 + 顶部品牌高光、时间轴升级为带连接线的步进器、
+  卡片标题 / 节点标题加圆角品牌色块标记、按钮悬停轻抬、空态改为图标居中提示、通用面板左侧 4px 品牌色条、
+  统一键盘焦点描边。全程仅用既有 `--wb-*` 令牌与 `color-mix(令牌)` 派生，不新造别名 / 不写裸色 / 不用 emoji，
+  标准 Chrome 与四区结构不变（`adapters/workbench/workbench.html`）。
+- **表单控件精修（2026-09-18）**：`input[type=radio|checkbox]` 统一 `accent-color:var(--wb-brand)`；
+  `.seg-opt` 单选行升级为「整行可点卡片」（hover 高亮、选中态品牌软底 + 左侧色条、`:has(input:focus-visible)` 焦点环）；
+  `label.chk` 复选行同款；`select` 去原生外观 + 内联 SVG 下拉箭头；输入框聚焦环改用
+  `color-mix(--wb-brand 16%, transparent)` 派生（替换裸 `rgba`），并补齐 hover / placeholder 态。
+  同批把增强层内所有裸 `rgba(...)` 投影改为 `color-mix(var(--wb-ink)…, transparent)`，
+  顶栏抗色改用 `--wb-on-topbar` 派生，满足 §4.1「不裸写色值」。
+
+### Fixed
+
+- **「打回 / 回退」按钮无效 —— 停在原地不动（2026-09-18 · 用户报告「仍然不起作用，一直停在这里」）**：
+
+  **症状**：在 A2 点「✕ 打回 / 回退」→ 选 `A1.topic_selection` → 信息栏只多一行
+  `✕ 打回到 A1.topic_selection（下游块将重算）`，然后界面长时间无反馈，最后仍然停在 A2，
+  看上去「按钮没反应 / 卡死」。
+
+  **根因（凭据重放）**：`FullflowSession.rewind()` 刻意**保留 `human_decisions`**（审计不丢），
+  而 `decisions_for_block()` 会把历史 `approved` 当凭据重放给块层 → `block_a._soft_stop()` 判定
+  「`sid ∈ pause_at` 且 `_any_approve(decisions, sid)`」为真 → **回退点那道闸被自己的旧批准直接放行**。
+  于是「打回到 A1」静默跳过 A1、整块 Block A 真实检索重跑（约 2 分钟），又停在 A2 —— 与回退前
+  完全同一屏，用户看到的自然是「打回无效」。会话文件里也留着痕迹：`cursor` 停在
+  `A2.literature_search`，而 `human_decisions` 里 A1 仍是 `approved`。
+
+  **修复（`adapters/fullflow.py`）**：
+  1. 新增 `_stage_order_key(stage_id)` → `(块序, 阶段序号)` 可比较键（`A2.…`→`(0,2)`；块字母 `A`→`(0,0)`，
+     表示整块起点）。
+  2. 新增 `FullflowSession.invalidate_decisions(from_stage_id)`：把「该阶段及其之后」的人工凭据
+     打上 `invalidated = {by:"rewind", to:<目标>, at:<时间>}` 标记。**只打标、不删记录** ——
+     审计仍能看出「谁在何时批准过、被哪次回退作废」。
+  3. `decisions_for_block()` / `revisions_for_block()` / `latest_revision()` 一致忽略已作废项，
+     避免旧 revision（人工 Excel 裁决、手改检索式）在回退后被重新注入覆盖新决策。
+  4. `rewind_fullflow()` 在 `rewind()` 之后调用 `invalidate_decisions(target_stage_id)`；
+     失败回滚快照机制不变（重跑崩了仍整体还原，含作废标记）。
+
+  **实测（会话副本 dry-run）**：`rewind_fullflow(path, "A1.topic_selection")` →
+  `cursor = {block:"A", stage_id:"A1.topic_selection", await_kind:"pause"}`，
+  A1 的旧 `approved` 被标注作废，流程真正停在 A1 等人工确认（49.5s，为 A1 的 ct-registry 查重探针）。
+
+- **回退期间界面「假死」（2026-09-18）**：`/api/rewind` 是阻塞式端点，回退会整块重跑
+  （打回到 A1 实测约 2 分钟），期间前端只能转圈、日志停在「打回到 X」那一行，无法区分
+  「在跑」和「卡死」。新增 **`POST /api/rewind_stream`**（语义与 `/api/rewind` 完全一致，
+  复用既有 `_stream_blocking` —— SSE 阶段提示 + 每 2s 心跳 + 子进程实时行），前端
+  `rejectAndRewind()` 改走该端点，信息栏持续可见进度；审计留痕逻辑同步搬进 `_call`
+  （与重跑结果同一原子过程内）。
+
+- **打回审计备注丢失回退目标（2026-09-18）**：原 `api_rewind` 的备注拼接为
+  `(note or "") + (f" 打回并回退到 {target}" if not note else "")` —— **只要用户填了备注，
+  「回退到哪个阶段」这个关键信息就完全不落审计**（还会残留前导空格）。抽出 `_rewind_note()`：
+  `用户备注 · 打回并回退到 <目标>`，目标恒在；`/api/rewind` 与 `/api/rewind_stream` 共用。
+
+- **文件选择按钮「绿底灰字」不可读（2026-09-18 · 用户报告）**：
+  `.start label{display:block;font-size:12px;color:var(--wb-sub);margin:12px 0 4px;}` 是
+  **类+元素**选择器（特异度 0,1,1），会**盖过** `.btn-mini{color:#fff}`（0,1,0）——
+  于是 `📄 选择数据文件` / `📄 选择 B 信封 JSON` / `📄 选择 PDF 文件` 等文件选择按钮被染成
+  **灰字压在实心绿底上**，几乎不可读。修复：把该规则收窄为
+  `.start label:not(.btn-mini):not(.seg-opt):not(.chk)`（只管纯文本 label），
+  按钮型 / 单选行 / 复选行 label 各自持色；同时把 `.btn-mini.file` 底衬加深一档
+  `color-mix(in srgb, var(--wb-ok) 88%, var(--wb-ink))` 提升白字对比度。
+  （踩坑与修法已回写 ct-base §4.4.1。）
+- **左栏「流程进度」空白（2026-09-18）**：开始页 `STATE` 为 `null` 时
+  `renderTimeline()` 内 `STATE.stage_schema` 直接解引用抛 `TypeError`，导致时间轴渲染中断、左栏卡片全空。
+  已加 `((STATE && STATE.stage_schema) || {})` 容错；并把初始化 / 「新建」入口由 `renderStart()`
+  改为统一入口 `render()`，使时间轴／审计日志在开始页也一次画全（现显示 12 阶段步进器全貌）。
+- **SKILL.md 新增铁律 #6「No duplicate fire」+ anti-pattern 显式禁令（2026-09-17 飞书 searchlog 实证）**：
+  飞书 CTDB searchlog 显示单次用户请求被 agent 重复 fire 多达 12 次（Cluster 1: 12 次相同 querystr，
+  Cluster 2: 8 次），间隔 5~7s（Bash 未返回即重发）或 1~2min（焦虑重试）。所有 26 次调用均 status=ok，
+  问题不在 Python 代码（coze_client.py 零 retry），而是 LLM agent 等待焦虑绕过了 §0.5 call-count invariant。
+  修复：Five iron rules → Six iron rules，#6 明确「once run_meta.py is in-flight, wait for the result」；
+  anti-patterns 段新增 ❌ Impatient duplicate fire 禁令，标注 2026-09-17 field incident。
+
+- **ABC 审查修复 3 高 + 5 中风险（2026-09-17）**：
+  🔴 `fullflow._run_block` 漏传 `claims_text` → B3 过度声明文本模式全部失效 → 修复透传；
+  🔴 `fullflow._extract_c_grounding` 虚报 `rob_summary = None`（从未赋值）→ 从 B2 节点正确抽取；
+  🔴 `flow_menu.A_STAGES` 缺 `A3.pdf_download` → A3 菜单无摘要/无选项 → 补入 `_a3_summary`/`_a3_options`；
+  🟡 `EDITABLE_KEYS` 仅覆盖 A1/A2/A4/B4/C1 → B1/B2/B3/C2/C3/C4 修订被误标 blocked → 补全 12 节点；
+  🟡 `DEFAULT_PAUSE_AT` 缺 `B2.grade`/`B3.overclaim` → GRADE/过度声明无复核入口 → 补入；
+  🟡 `block_c.c3_reference_verify` 中 `references=[]` 与 `None` 语义不一致 → 合并处理；
+  🟡 `block_c.py:469-501` 缩进错误（`verify_references` 调用行意外缩进 8 空格）→ 修复；
+  🟡 `block_c.c1_draft`/`build_narrative_prompt`/`run_block_c` 签名新增 `ref_sections` → 章节切片透传。
+
+### Added
+
+- **C 档新增 `ref_sections` 参数：参考已纳入文献 PDF 写作风格（2026-09-17）**：
+  全链路透传已纳入 meta 分析的 PDF 的章节切片，供写稿时参考同类文献的讨论段/方法段写法。
+  仅处理英文 PDF（中文分节锚点不保证稳定）。具体改动：
+  1. `pdf_extractor.extract_sections(pdf_path, max_chars_per_section=6000)` — 新增函数，按章节切片 PDF 全文
+     （abstract / introduction / methods / results / discussion / conclusion）；CLI `--sections` 冒烟入口。
+  2. `block_a._a4_extract_section_texts(studies, pdf_dir, max_per_pdf=6000)` — 对已落盘 PDF 批量抽取章节切片，
+     返回 `{study_key: {title, doi, sections}}`，PDF 下载位置记录在 `pdf_cache/` 目录。
+  3. `fullflow._extract_c_grounding` — 透传 `ref_sections` 字段给 `run_block_c`。
+  4. `block_c.c1_draft` / `build_narrative_prompt` / `run_block_c` — 均新增 `ref_sections` 参数；
+     C1 输出附带 `_ref_sections` 元数据；LLM 扩写叙述时附带参考段落。
+  5. `writing_advisor.advise_publication` / `_discussion_template` / `_reviewer_questions` — 均新增
+     `ref_sections` 参数；讨论段模板在末尾追加「同类文献讨论段参考」块（标注「仅作写作风格/结构借鉴，
+     不可直接复制，也不可将其数据视为你的研究结果」）；审稿人问题追加一条参考同类文献的追问。
+  6. `run_analysis.run_analysis` — 函数签名新增 `ref_sections` 参数，透传给 `advise_publication`；
+     CLI 新增 `--ref-sections <json_path>` 参数。
+  截断上限：单节 ≤ 6000 字符；LLM prompt 中每篇截 ≤ 1500 字符，最多取 3 篇，总计 ≤ 4000 字符。
+  新增 CLI 冒烟入口：`python pdf_extractor.py --sections <pdf>`。
+  验证：12 项导入链检查 + py_compile 6/6 全部通过。
+
+- **Block C 初稿升级为「可直接投稿的完整初稿」（C 档，2026-09-17 用户要求）**：
+  原 C1 `c1_draft` 仅产出 ~872 字符骨架（背景/讨论/结论为「（待撰写）」空占位），与
+  「直接投稿完整初稿」预期差距大。本次：① 扩展 `c1_draft` 入参接收上游真实素材
+  （studies_list / prisma_flow / picos / search_info / rob_summary / merged_json），方法段填真实
+  数据库+日期+检索式+PICOS+RoB 工具、结果段填 PRISMA 筛选数与研究特征、参考文献由 A2 DOI 直接落表交 C3 核验；
+  ② 接通此前孤立的 `writing_advisor` 引擎（strengths/limitations/discussion_template/reviewer_questions/journal_fit 注入讨论段与投稿建议）；
+  ③ 新增 `build_narrative_prompt` + `c1_expand_narrative` 接口，由编排层注入 LLM 写出背景/讨论/结论/摘要叙述（本地单测不注入 llm，保持确定性）；
+  ④ `fullflow` 新增 `_extract_c_grounding` 把 Block A 信封的文献集/PICOS/PRISMA 流/检索源透传给 `run_block_c`（draft 快进模式无 A 时优雅降级）；
+  ⑤ `SKILL.md` 注册 `writing_advisor` 触发器与能力说明（解 D-DEP-1）。
+  实测：3 项研究 + 真实素材下 char_count 872 → 1873；接 LLM 扩写后产出完整初稿。
+  `test_block_c` + `test_writing_advisor` 78/78 通过；`fullflow` 导入正常。
+  注：`tests/test_flow_menu.py` 的 A4 节点 harness 因 9/17 A3/A4 重构后 `form_schema.STAGE_ORDER`
+  与测试预期漂移（pre-existing，与本改动无关），须另行修复。
+
+- **首页粘贴示例随「合并效应量尺度」联动（2026-09-17 用户要求）**：
+  用户指出「根据要分析的效应量不同，数据格式 demo 应该有不同变化」—— 此前 5 个效应量共用一套
+  2×2 示例，选 MD/SMD/HR 时示例文不对题。现按效应量分套，且**后端解析器一并扩展**
+  （否则示例只是摆设，点了会解析失败）：
+  1. **示例分套**（`block_a.DEMO_RAW_CSV_BY_EM` 与 `workbench.html` 的 `DEMO_BY_EM`，两处需同步）：
+     · OR/RR（二分类）→ `study,ai,bi,ci,di` 四格计数；
+     · MD/SMD（连续）→ `study,mean_exp,sd_exp,n_exp,mean_ctrl,sd_ctrl,n_ctrl`；
+     · HR（生存）→ `study,hr,ci_low,ci_high`。
+     前端在 `#em` 变化时同步更新粘贴框 placeholder 与「列名规则」说明
+     （`updateDemoByEM()`，`renderStart` 末尾初始化）；`/api/start_data` 的演示路径按
+     `effect_measure` 取对应示例。
+  2. **解析器扩展**（`block_a.parse_raw_csv`）新增两条识别路径：
+     · **连续结局**：识别 `mean_exp/sd_exp/n_exp/mean_ctrl/sd_ctrl/n_ctrl`（含 `mean1/sd1/n1`、
+       中文「试验组均值 / 标准差 / 样本量」等别名），按契约默认列名原样产出
+       （`block_b._norm_b1_rows` 对未知列原样透传，直达 R 引擎 `escalc` / `metacont`）；
+     · **生存结局**：识别 `hr` +（`se` 或 `ci_low/ci_high`）→ 换算为对数尺度
+       `te = ln(HR)`、`sete = (ln UL − ln LL) / 2·1.96`；亦支持直接给 `loghr + se`。
+  **验证**：五套示例全部解析成功（HR 得 `te = ln(0.72) = -0.3285`、`sete = 0.1092` 由 CI 正确反推）。
+  前端真渲染 **8/8**：5 个效应量均有示例、三类格式正确、MD 与 SMD 数值不同、列名说明随动、
+  0 JS 错误。
+
+- **首页「自备原始数据 → 直接进 B」支持演示模式：未提供数据时用内置示例跑通（2026-09-17 用户要求）**：
+  用户在首页选该通道但既未上传文件也未粘贴数据时，原先被 400 拦截；现改为**用内置示例数据
+  继续流程**，便于先看合并计算结果。
+  1. `adapters/block_a.py`：新增 `DEMO_RAW_CSV` + `demo_raw_rows()` —— 内容与首页粘贴框
+     placeholder 展示的示例**逐字一致**（`study,ai,bi,ci,di` / Study A / Study B），两处需同步修改。
+  2. `adapters/fullflow.py`：`run_fastpath()` 新增 `demo: bool = False`；为真时把 A 块
+     stage_result 的说明改为「内置示例数据（演示），跳至 Block B 分析」，便于事后区分演示与真实数据。
+  3. `workbench/server.py`（`/api/start_data`）：raw_csv 分支在既无 `raw_text` 也无数据文件时
+     改用 `demo_raw_rows()` 并传 `demo=True`，不再返回 400。
+  4. `workbench.html`：`doStartData("raw_csv")` 未提供数据时不再拦截（提示「将用示例数据演示」
+     并继续提交）；数据准备区新增醒目说明「🟡 **演示模式**：既未上传文件也未粘贴数据时，将用
+     上方示例（Study A / Study B）继续流程，跑通『合并计算 → GRADE → 质量门』以便先看效果」。
+  **验证**：`py_compile` + 内联 JS `node --check` 通过；`demo_raw_rows()` 解析出 2 行。
+  **本地与线上端到端实测均 PASS**：`POST /api/start_data`（`raw_csv`、不带任何数据）→ HTTP 200、
+  A 块 note =「内置示例数据（演示）」、进度 `A4 → B1.meta_analysis → B2.grade → B3.overclaim →
+  B4.quality_gate` 并停在 B4 质量门（`kind=gate`）—— 即示例数据**完整跑通了 Block B（合并计算
+  与 GRADE）**，这同时实证了 B 部分 R 引擎在当前部署下可用。首页演示提示渲染正确、0 JS 错误。
+
+- **A3 成果导出：PDF 打包下载 + Excel 确认清单（2026-09-17 用户要求）**：
+  用户反馈「下载完却没有任何 PDF 与确认文档的出口」。现补齐成果出口（批准 / 确认后即可取走）：
+  1. **后端**（`adapters/block_a.py`）：新增 `_a3_result_of()`（取 A3 结果，兼容旧会话把下载结果
+     挂在 A4 的历史落点）、`_downloadable_docs()`（过滤 skip、校正已失效的 PDF 路径）、
+     `_safe_filename()`、`export_a3_download_list_xlsx()`（openpyxl 生成确认清单，列为 序号 /
+     标题 / DOI / 年 / 刊名 / 状态 / PDF 文件名 / 说明；表头写作「#（篇目序号）」以解释
+     因排除篇目导致的跳号）、`a3_pdf_zip()`（按 `NN_标题.pdf` 归档、同名自动加序号，
+     并附「下载清单.csv」，带 BOM 便于 Excel 直开）。
+  2. **接口**（`server.py`）：`GET /api/a3_export_list`（xlsx）、`GET /api/a3_download_pdfs`
+     （zip，文件名含篇数）；无数据时返回 400 + 明确中文提示。
+  3. **前端**（`workbench.html`）：A3 节点新增「⬇ 成果导出」面板（显示「已下载 N / M 篇」+
+     两个下载入口）；**并修掉完成页的误导文案** —— A3 下载完成即终点时原先仍显示
+     「流程已完成（Block C 终闸已放行）· 稿件经 C1→C3→C4 全部通过」（实际并未跑 C），
+     现按 `await.prompt` 区分两种完成态：下载路径改为「PDF 全文下载已完成 —— 流程到此结束」
+     + 同一套成果导出 + 通往 B 的指引；Block C 路径保留原提示。
+  **验证**：`py_compile` + 内联 JS `node --check` 通过。端点实测（构造 2 个真 PDF 文件）：
+  xlsx 5666 字节、表头与状态/说明列正确、5 行（skip 已剔除）；zip 含 2 个 PDF + 清单 csv。
+  前端真渲染 **9/9**：A3 导出面板与两条下载链接在位、保留跳 B 面板、完成页不再误报 Block C
+  且含两个下载入口、0 JS 错误。线上：首页 5 个标记命中、两个端点均返回 400 + 明确提示。
+
+- **A2「未完整翻译 → 请自行翻译为英文检索词」的醒目提示（2026-09-17，用户要求）**：
+  背景：翻译模块在沙箱内不可用时，上一轮已改为如实标 `fully_translated=false`，但页面只有一行
+  `false`、没有可操作指引，用户看到后不知道下一步该做什么。本次补齐「提示 + 出口」：
+  1. `adapters/workbench/form_schema.py`：A2 新增条件面板
+     `{kind:"notice", level:"warn", when:{path:"nha.coverage.fully_translated", equals:false}}`
+     —— 标题「⚠️ 检索式未完整翻译为英文 —— 请自行填写英文检索词后重跑」，正文点明
+     「中文检索词直接送 OpenAlex / Europe PMC 会明显漏检」并给出示例
+     （`SGLT2 inhibitors chronic kidney disease`）+ 明确指出操作位置。
+  2. 同文件：`fully_translated` 字段加 `alert_if_not: true`（为 false 时标红）；「未翻译残留」
+     字段改名「需自行翻译为英文的片段（非空 = 境外库会漏检）」；「优化翻译后检索式」textarea
+     增加 `hint` 操作指引。
+  3. `adapters/workbench/workbench.html`：`renderPanel` 新增 `kind:"notice"` 分支（支持 `when`
+     条件渲染，不成立时整块不输出）+ `.notice.warn/.info` 样式；`hint` 支持范围从 rowlist 扩展到
+     textarea。
+  4. `adapters/block_a.py`：`translation_hits`（模块不可用 / 翻译后仍残留 两条路径）与 A2
+     `prompt` 文案统一改为明确指令「请自行翻译为英文检索词，填入『优化翻译后检索式』后重跑」。
+  **验证**：`py_compile` + 内联 JS `node --check` 通过；构造 `fully_translated=false/true` 两个
+  会话做**真渲染对比**：false 用例出现红色提示块（含「请自行填写英文检索词」）、字段标红、
+  textarea 指引齐备；true 用例提示块与标红**均不出现**（条件渲染生效）；两例均 0 JS 错误。
+  载荷版（发布对象）复测 9/9 断言全过；线上 `/api/session` 实时返回 `panels[0].kind=notice`，
+  前端 4 个源码标记全部命中，无头 Chromium 0 JS 错误、后端 pill「就绪」。
+
+### Changed
+
+- **质量门内容可解释化 + 删除 B→C 的「通用确认节点」（2026-09-17 用户要求）**：
+  用户反馈「质量门：GRADE + 过度声明这一步显示的内容最好加以解释；之后的通用确认节点没有必要，
+  直接进入 C 即可」。
+  1. **质量门可解释化**：
+     · `block_b.b4_quality_gate()` 的 report 增补**顶层标量**明细 —— `grade_downgrades`（累计
+       降级档数）、`grade_reasons_text`（降级理由，分号连接）、五个维度各自的评级
+       （`domain_risk_of_bias` / `domain_inconsistency` / `domain_indirectness` /
+       `domain_imprecision` / `domain_publication_bias`）、`overclaim_hits`。全部展开为顶层字段，
+       前端 object 面板直接可读，不依赖嵌套 path 支持。
+     · `form_schema` 的 B4 重写：intro 改为**逐条解释**（最终放行闸 / GRADE 五维度降级逻辑 /
+       过度声明检测 / critical 判定规则）；面板由「一坨 JSON」拆为 6 块 —— GRADE 证据质量、
+       GRADE 五个维度评级、过度声明检测、闸门判定、过度声明明细、完整报告（仍可编辑兜底）。
+       ⚠️ intro 按**纯文本**渲染（前端不解析 Markdown）→ 已去掉星号，并在文案里注明该约定。
+  2. **B→C 直通**：`_advance()` 中当 **Block B 完成**时不再插入 `handoff_confirm`
+     （其 `stage_id=None` → 前端显示「通用确认节点」），直接推进 Block C。
+  **验证**：`py_compile` 通过；端到端（本地 + 线上各一轮）**ALL PASS**：
+  演示启动 → `B1.meta_analysis (pause)` → 批准 → `B4.quality_gate (gate)`（report 含
+  `grade=Low / 降级 1.5 档 / 理由=「样本研究少（k=2 → -1）；偏倚风险中等（→ -0.5）」/
+  五维度 some·not serious·none·serious·none`）→ 批准 → **`C1.draft (pause)`**
+  （提示「请人工审阅初稿结构与事实准确性」），全程无「通用确认节点」。
+  前端真渲染 **10/10**：解释性引言齐备、6 个面板齐全、证据等级 / 降级理由 / 五维度 / critical
+  均正确显示、0 JS 错误。
+  **遗留**：其它节点的 `intro` 仍含 Markdown 星号（同样不会被渲染），待统一清理。
+
+- **下载完成后不再插入「通用确认节点」，直接收尾或进 B（2026-09-17 用户反馈）**：
+  用户反馈「下载 PDF 之后那个『通用确认节点 🟡 软停』没有意义了，应该直接跳到 B 节点」。
+  根因：Block A 完成时 `_view()` 统一返回 `handoff_confirm`（其 `stage_id=None`），前端因无对应
+  schema 而走通用兜底 → 渲染成「通用确认节点 🟡 软停」。在「检索 + 下载」这条链路上，它只是
+  一次多余的确认点击。
+  修改（`adapters/fullflow.py`）：`_advance()` 中当 **Block A 已完成且 `features.a4_extraction`
+  关闭**时不再走 `handoff_confirm`：
+  ① 若已有可算数据（A3「上传数据」接缝写入 `studies_for_b`）→ **直接递归推进 Block B**；
+  ② 无可算数据 → 直接返回 done 视图（含「可在该节点取走成果 / 上传数据跳 B」的指引）。
+  A4（数据提取）启用时行为不变，仍保留交接确认，不误伤原 B/C 流程。
+  同时把 `_apply_a3_upload()` 从「仅 `letter=="B"` 时调用」改为**无条件先试**（无 A3 revision 时
+  no-op）—— 否则用户点「上传并跳到 B」时 cursor 仍在 A 块，会出现「上传了数据却被判为无数据」。
+  **验证**：`py_compile` 通过；三场景行为单测 **ALL PASS**：① A3 完成未上传 → `await.kind = done`
+  （非 handoff_confirm）且 cursor 落 done；② A3 上传数据 → `studies_for_b` 接上且不再插入交接确认
+  （直进 B）；③ 开启 `a4_extraction` → 仍保留交接确认。线上 smoke：health / features / session /
+  index 均 200。
+
+- **A3 恢复为独立节点（PDF 下载）；A4 数据提取转为隐藏备用；B/C 开放首页与 A3 直达（2026-09-17 用户裁定）**：
+  承接上一轮「只提供检索 + PDF 下载」，本轮按用户要求改结构：**A3 真正独立成阶段**（不再是 A4 的
+  展示别名），A4 退为隐藏备用，B/C 从「保留但不可达」改为**多入口可达**。
+  1. **阶段拆分**（`adapters/block_a.py`）：新增 `A3 = "A3.pdf_download"` 与独立阶段函数
+     `a3_pdf_download()`（复用 `a4_auto_fetch_and_extract`，只下载不抽取）；`BLOCK_A_SEQUENCE`
+     变为 `[A1, A2, A3, A4]`。原 `A3` 常量更名 `A3_LEGACY = "A3.screening"` 并同步 3 处旧会话
+     兼容引用（导出裁决表 / `_a3_legacy_guard` / Excel 回写）。`run_block_a`：A2 软停后插入 A3
+     软停段（**置于 `a4_only` 之外** —— 复用缓存时同样要执行下载；已批准则跳过，避免重下）；
+     A4 段整体以 `features.a4_extraction_enabled()` 包裹。
+  2. **编排与推进**（`adapters/fullflow.py`）：`DEFAULT_PAUSE_AT` 增 `A3.pdf_download`；
+     `EDITABLE_KEYS` 增 `A3.pdf_download: [pdf_dir, extracted_rows]`；`start_stage` 续跑条件改为
+     `∈ {A3, A4}`；新增 `_apply_a3_upload()`（把人工上传的 `extracted_rows` 接成 `studies_for_b`，
+     **刻意排在「无数据则终止」判断之前**）；`_view` 的 A 块数据收集扩展到 A3 与 revision 接缝。
+  3. **schema 与开关**（`form_schema.py` / `features.py`）：`STAGE_ORDER` 改为动态构造（A3 恒在、
+     A4 仅开关打开时出现）；`SCHEMA` 增 `"A3.pdf_download"`（下载版）、`"A4.data_extraction"`
+     恢复提取版；`schema_for()` 增旧会话兼容（A4 关闭期间，历史停在 A4 的会话按下载版渲染）。
+     开关变为 `fastpath_raw_csv=True`、新增 `fastpath_draft=True`（`fastpath_pdf` 仍 False）。
+  4. **接口与前端**：新增 `POST /api/a3_jump_to_b`（解析上传/粘贴的 CSV/Excel → 写 revision →
+     推进 Block B）；`workbench.html` 时间轴按开关构造、A3 节点新增「上传数据 → 跳到 B」面板
+     （`a3JumpToB`）、决策按钮改「✓ 完成下载」、首页新增「自备 B 信封 JSON → 直达 C」入口与
+     `draft-only` 上传区（`doStartData("draft")`）。
+  **验证**：`py_compile` + 内联 JS `node --check` 通过。真渲染（本地 A3 态用例）**10/10**：
+  首页 3 条通道、A3 标题「PDF 全文下载 🟡 软停」、下载清单 4 卡、跳 B 面板在位、按钮
+  「✓ 完成下载」、时间轴含 PDF 下载且无「数据提取」、0 JS 错误。接缝单测：`parse_raw_csv`
+  解析 2 行 → `_apply_a3_upload` 接上 `studies_for_b`（2 行）且终止条件不再命中；未上传时仍按
+  「下载完成即终点」终止 —— ALL PASS。线上：`/health` 200、`/api/features` 四键正确、
+  首页 7 个源码标记命中且旧 A4 标签已移除、时间轴「选题 / 检索 / PDF 下载 / 合并计算 …」、
+  0 JS 错误。
+
+- **网页功能调整：只提供「A2 检索 + PDF 下载」，A4 数据提取暂时隐藏（2026-09-17 用户裁定）**：
+  新增集中功能开关 `adapters/features.py`（单一真源，前后端共用；支持环境变量临时覆盖；
+  **隐藏 ≠ 删除** —— 相关代码全部保留，改回 True 即恢复）：
+  `a4_extraction=False` / `fastpath_pdf=False` / `fastpath_raw_csv=False`。
+  1. **A4 节点降级**（`form_schema.py`）：A4 由「数据提取核验（🔴 红线）」变为「PDF 全文下载」
+     （`gate_type` redline→soft），面板换成「下载概览 + 逐篇下载清单」（新 kind `a4downloads`）；
+     原 schema 原样保留为 `_A4_EXTRACTION_SCHEMA`，开关打开即自动切回。
+  2. **不再抽取**（`block_a.py`）：`_a4_extract_pdf` 在开关关闭时直接走既有「未抽取」降级路径 ——
+     PDF 照常落盘，`extracted_rows` 恒空；`a4_stream` 结果新增 `n_failed` / `n_needs_upload` 计数
+     供「下载概览」直接展示。
+  3. **流程终点**（`fullflow.py`）：A4 批准后若确无可算数据（无 `studies_for_b`）→ 置 done、
+     不进 Block B（B/C 节点定义保留）；`run_fastpath` 对两条快速通道在接口层直接拒绝，
+     避免绕过 UI 生成「走了半截又无法继续」的会话。
+  4. **前端**（`workbench.html`）：启动时经 `GET /api/features`（新端点）取开关；开始页只剩
+     「标准全流程（检索 → 初筛 → PDF 下载）」；时间轴去掉已并入 A2 的旧 A3 条目、A4 标签改
+     「PDF 下载」；新增 `renderA4Downloads()`（只呈现下载状态，无抽取行 / 原文对照 / 剔除 /
+     上传 / 批量匹配）；A4 决策按钮改「✓ 完成下载」并走普通 decide；A4 实时预览面板按开关隐藏
+     （原渲染函数保留未删）。
+  **验证**：`py_compile` + 内联 JS `node --check` 通过。真渲染（本地构造 A4 下载态会话）：
+  开始页 1 个选项、A4 标题「PDF 全文下载 🟡 软停」、下载清单 4 卡（5 条 per_doc 去掉 1 条 skip）、
+  状态 pill 正确、**无任何提取 UI**、按钮「✓ 完成下载」、时间轴含「PDF 下载」、0 JS 错误
+  —— 10/10 断言通过。行为单测：无提取数据 → 终止于 done（含提示文案）；有自备数据 → 不拦截；
+  开启开关 → 恢复提取语义；两条快速通道接口拒绝 —— 全 PASS。线上回归：`/health` 200、
+  `/api/features` 三项 false、首页 7 个源码标记命中且旧 A3 已移除、线上会话时间轴显示
+  「选题 / 检索 / PDF 下载 / 合并计算 …」、0 JS 错误。
+
+- **飞书版本字段落点统一：一律写 `resultstr`，`querystr` 不再存版本信息（2026-09-17，对齐 ct-base `coze_io_contract.md` §2.1/§2.2）**：
+  此前本技能把 `skill_version` 写进 `querystr`（客户端入参侧），与 ct-advisor 的落点不一致、无法统一检索。
+  coze 端改动（**需重新上传部署包才生效**）：
+  1. `src/graphs/nodes/feishu_write_node.py`：`build_querystr()` **移除** `skill_version` 参数
+     （querystr 只留 `task`/`data`/`params`/`figure`）；`build_resultstr()` 新增可选参数
+     `runtime_sec` / `skill_version` / `coze_version`，仅非空时并入 result dict **顶层**
+     （为空 → 不写键，与历史格式逐字节一致）。
+  2. 新增 `src/graphs/nodes/_version.py::COZE_VERSION`（单一真源，现 `5.3.9`）：飞书
+     `coze_version` 列与响应信封标记 `_coze_version` 共用，杜绝两处漂移。
+  3. `src/graphs/nodes/feishu_save_node.py`：按 `state.received_at` 计算 `runtime_sec`
+     （`round(t,3)`，缺失则不写），并把 `skill_version` + `coze_version` 一并写入 resultstr。
+  4. `src/graphs/state.py`：`GlobalState`/`GraphInput`/`FeishuSaveNodeInput` 新增可选
+     `received_at` 字段（秒级 float），`skill_version` 描述改指 `resultstr`。
+  5. `src/main.py`：`/run` / `/async_run` / `/stream_run` 入口在 `request.json()` 后即刻注入
+     `payload["received_at"] = time.time()`（§2.2 取值起点；只进飞书、不出参）。
+  6. `src/graphs/nodes/meta_analysis.py`：`_COZE_ENVELOPE_VERSION` 改为引用 `_version.COZE_VERSION`。
+  7. 契约同步：`adapters/coze/coze_contract.md`（§2 契约合规字段 + 飞书写入段落新增「版本字段落点」表）。
+  **验收**：`py_compile` 五个文件通过；`build_querystr` 输出断言无版本键、`build_resultstr`
+  全空元信息与历史格式逐字节一致、全字段时 `runtime_sec=1.235`/`skill_version`/`coze_version` 均在顶层。
+
+### Fixed
+
+- **C1 初稿节点「看不到论文初稿」（2026-09-17 用户反馈）**：
+  根因：`form_schema` 的 `C1.draft` 只有一个面板读 `editable.sections`（**章节名列表**），
+  而真正存放正文的 `editable.manuscript` **从未被展示** —— 后端一直在产出它
+  （`block_c.c1_draft()` 返回 `{manuscript, sections, char_count}`，`EDITABLE_KEYS["C1.draft"]`
+  也含 `manuscript`），只是前端没读，所以用户只看到一串章节名。
+  修复：C1 面板改为 ——「**论文初稿正文（可直接编辑）**」用 `kind: "textarea"`
+  绑定 `editable.manuscript`（`revision_key: "manuscript"`，改动随「批准 / 放行」作为 revision
+  提交，可直接在框内补写讨论与结论）；原「章节清单」降为辅助面板（`kind: "json"`，供 C3
+  结构核验对照）；intro 补说明（摘要 / 背景 / 方法 / 结果已填真实数字，讨论与结论为待撰写占位）。
+  **验证**：`py_compile` 通过。本地 + 线上各跑一轮完整链路（演示 → B1 → 批准 → B4 → 批准 → C1）
+  并渲染，**各 7/7**：标题「初稿撰写」、出现「论文初稿正文（可直接编辑）」面板、textarea
+  **771 字符**且含真实统计数字（`OR = 0.57 (95% CI -0.05–1.19, p = 0.074); I² = 38%;
+  τ² = 0.08; GRADE = Low`）、章节清单 `["摘要","1. 背景","2. 方法","3. 结果","4. 讨论","5. 结论","参考文献"]`、
+  按钮含「批准 / 放行」、0 JS 错误。
+
+- **进 B 停在「合并计算」而非直冲质量门 +「质量报告 null」（2026-09-17 用户反馈，两处修复）**：
+  用户反馈「现在选择 B 以后不是跳到合并计算，而是后面的质量门，这个不对；B4 质量门的产出也修一下」。
+  1. **B1 成为停靠点**：`DEFAULT_PAUSE_AT` 增 `"B1.meta_analysis"` —— 进 B 后先停在**合并结果**
+     让人核对（B2 GRADE / B3 过度声明仍为自动分析，不停）；`block_b` 为 B1 补上 `nha.prompt`
+     （此前为 `None` → 停靠时提示语为空）。同时 `form_schema` 注册 `"B1.meta_analysis"` 别名
+     （历史键名写作 `"B1.meta"`，而前端按 stage_id 取 schema → 两个 id 复用同一份定义，
+     避免漂移），前端时间轴 id 同步为 `B1.meta_analysis`（此前与后端不一致）。
+  2. **修「质量报告 null」**：根因是 `b4_quality_gate()` 返回**平铺** dict
+     （`grade` / `n_overclaim` / …），而前端 B4 面板读 `editable.report`
+     （`EDITABLE_KEYS["B4.quality_gate"]=["report"]`，`_view` 从 stage_result 同名键取）→ 取不到。
+     修复：`_mk_stage(B4, 3, "await_human", {**b4_rep, "report": dict(b4_rep)}, nha4)`
+     —— 同时提供平铺键与嵌套 `report`，两种读法都兼容。
+  **验证**：`py_compile` 通过；端到端（本地 + 线上各一轮）**ALL PASS**：
+  · 演示启动 → `await = B1.meta_analysis (pause)`，提示语完整，`pairwise` 含
+    `k=2, OR, TE=0.569, CI=[-0.0549, 1.1929], I²=0.378, τ²=0.0766, Q=1.6078`；
+  · 批准 B1 → `await = B4.quality_gate (gate)`，`stage_result.report` 与 `editable_payload.report`
+    均为完整 dict（`grade=Low / n_overclaim=0 / critical=false`）。
+  前端真渲染 **9/9**：B1 展示合并效应量 / 95% CI / I² / τ²、按钮含「批准 / 放行」、
+  时间轴「合并计算 ⏸ 待确认」；B4 质量报告显示完整 JSON（**不再 null**）并显示 GRADE 分级、
+  0 JS 错误。
+  **遗留（纯显示细节，未定位来源）**：B4 节点标题后缀仍显示「🟡 软停」，而它实际是 🔴 红线闸。
+
+- **B1 合并计算的 `data` 格式错误 —— 出站校验拦截，合并计算从未真正发出（2026-09-17 排查发现）**：
+  在验证「演示模式」端到端时发现 `B1.pairwise` 恒为
+  `{"k": 0, "error": "coze_error: 出站信封校验未通过：[E03_DATA_NOT_OBJECT] data 必须是对象
+  （{rows:[...]}），当前为 list"}` —— 即 `block_b._build_b1_coze_env()` 把 `data` 直接传了裸 list，
+  被出站契约校验拦下，**R 引擎从未收到数据、合并计算静默落空**（B 块容错继续推进，表面看流程
+  照常走到 B4，故长期未被发现）。
+  修复：`"data": {"rows": _norm_b1_rows(studies)}`。
+  **验证**（本地 + 线上各跑一次 `raw_csv` 演示）：
+  · **SMD**（连续）：`k=2, engine=coze, TE=0.1326, se=0.5930, CI=[-1.0298, 1.2949], p=0.8231,
+    tau²=0.663, I²=0.9425, Q=17.3889`；
+  · **HR**（生存）：`k=2, TE=-0.2664（≈ HR 0.766）, se=0.0751, CI=[-0.4136, -0.1192], p=0.0004`；
+  · B2 GRADE 随之产出：`grade=Low, downgrades=1.5, reasons=["样本研究少（k=2 → -1）",
+    "偏倚风险中等（→ -0.5）"]`。
+
+- **【已解决】B4 质量门页面「质量报告 null」**（2026-09-17 发现 → 同日修复，保留排查记录）：
+  线上演示会话停在 `B4.quality_gate` 时，质量报告面板渲染为 `null`。当时已确认 `form_schema` 的
+  B4 面板读 `editable.report`（由 `_view()` 从停靠阶段 `stage_result` 同名键取），而
+  `block_b.b4_quality_gate()` 确实产出 `report` 字典 —— 根因即二者**层级不匹配**（后端平铺
+  返回 `grade`/`n_overclaim`/…，前端读嵌套 `editable.report`）。
+  **修复见上方「进 B 停在『合并计算』而非直冲质量门 +『质量报告 null』」条目**
+  （`_mk_stage(B4, …)` 处同时提供平铺键与嵌套 `report`）。
+
+- **裁决表「剔除」与「低置信」配色区分（2026-09-17 用户反馈：建议剔除用红）**：
+  用户反馈两者颜色应不同。根因有两层：
+  ① **底色本身太接近** —— 原用全局 `--wb-warn-bg:#fffbeb`（浅黄）与 `--wb-err-bg:#fef2f2`（浅红），
+     都是近白色，浅色主题下几乎无法分辨；
+  ② **三态底色实际根本没生效** —— 通用斑马纹 `table.grid tbody tr:nth-child(even)`（特异性 0-2-2）
+     高于 `.rl-row.dec-*`（0-2-0），把所有裁决行统一刷成了 `--wb-row-alt`（#f6f9fd），即「三行同色」。
+  修复（`workbench.html`）：① 为裁决表另立专用变量 `--wb-dec-{include,exclude,uncertain}-bg`
+  （浅色 `#e8f8ef` / `#fdd8d8` / `#fdf0c9`，暗色主题同步一套），不复用被各类提示块共享的全局底色；
+  ② 选择器提升为 `table.rl tbody tr.rl-row.dec-*`（0-3-3）压过斑马纹；
+  ③ 三态行各加 3px 左侧色条（绿 / 红 / 琥珀）—— 色条是最可靠的区分手段，不受底色明暗影响；
+  ④ 裁决下拉框 `.rl-sel-*` 底色同步改用专用色。
+  **验证**：本地真渲染 **9/9**：三态行底色分别为 `rgb(232,248,239)` / `rgb(253,216,216)` /
+  `rgb(253,240,201)`（互不相同）、左侧色条红/琥珀正确、下拉框三色区分、三态标签齐全、0 JS 错误。
+  线上 **6/6**：CSS 变量与带作用域规则均已上线，真实 A2 会话的 include（7 行）与 uncertain（9 行）
+  底色确实不同。
+
+- **下载进度面板文案去除全部「抽取」表述（2026-09-17 用户反馈）**：
+  A2 批准后进入下载期间显示的实时进度面板仍沿用旧文案「📥 A4 数据提取进度（逐篇下载 / 抽取）」
+  +「正在按篇并行下载全文 PDF 并抽取 2×2 表…」——属 A3 拆分时的遗漏。现按开关分两套：
+  数据提取关闭时，标题改「📥 PDF 全文下载进度」、说明只讲下载；状态徽标由
+  「✓ 已抽取 / 🔬 抽取中 / ⚠ 已下·待补抽 / ✕ 需上传」改为「✓ 已下载 / ⬇ 下载中 / ✕ 未获取到」；
+  末尾指引由「回到 A4 节点点『批准 / 放行』继续」改为「回到『PDF 下载』节点点『完成下载』
+  结束流程（或上传数据跳到 B）」。**保留**「上传已有 PDF 补传」入口 —— 它服务于下载环节
+  （付费墙 / 抓取失败时人工补齐），不属数据提取。
+  顺带修掉启动提示里的过期阶段名（`server.py` 的 `stage_hint`）：
+  「A3 初筛 → A4 数据提取」→ 按开关显示「A3 PDF 下载[ → A4 数据提取]」。
+  **验证**：`py_compile` + 内联 JS `node --check` 通过；本地与线上真渲染各 **8/8**：
+  面板标题 / 说明 / 徽标 / 末尾指引全部为下载语义、文本中**「抽取」「2×2」零出现**、
+  补传入口保留、0 JS 错误。
+
+- **首页「自备全文 PDF → 跳到 A4」入口彻底移除 + 根路径禁缓存（2026-09-17 用户反馈）**：
+  用户反馈该选项仍可见，但实测线上首页渲染结果已是 3 条通道（标准 / 自备原始数据 / 自备 B
+  信封）、无 pdf 入口 —— 判定为**浏览器或中间层复用了旧 HTML**（根路由此前未设任何缓存头），
+  用户看到的是发布前的页面。两处修掉根因：
+  1. `workbench.html`：pdf-only 区块由「静态 HTML + `display:none`」改为**条件渲染**
+     （`${FEATURES.fastpath_pdf ? … : ""}`）—— 关闭时连 DOM 都不生成，消除「隐藏但存在」的
+     歧义（此前查看源码仍能搜到「跳到 A4」文案）；同时把该区块内的过期描述
+     （原写「停在 A4 数据提取红线」，而 A4 已转为隐藏备用）改为中性表述。
+  2. `server.py` 根路由：响应加 `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`
+     与 `Pragma` / `Expires` —— 界面随功能开关（features）变化，旧 HTML 会让用户看到已下线入口
+     且极难自查是缓存问题。
+  **验证**：`py_compile` + 内联 JS `node --check` 通过。本地与线上真渲染各 **7/7**：仅 3 条通道、
+  `pdf-only` 区块与 `data_pdfs` 输入**均不存在于 DOM**、可见文本无「A4 / 全文 PDF」、
+  响应头 `no-store` 生效、0 JS 错误。
+
+- **A2「检索状态」误报 error + 沙箱内检索式静默不翻译（2026-09-17，线上会话复现）**：
+  现象：A2 检索概览显示 `检索状态 = error`（红字告警），但合并总数 16、核心二源其实都有数据。
+  线上会话明文：`by_source={'openalex':13,'europepmc':3}`、`core_missing=['OpenAlex','EuropePMC']`、
+  `cli_status='error'`、`translated_query` 是**中文原文**却 `fully_translated=true`。两个独立缺陷：
+  1. **来源名大小写失配**（`adapters/block_a.py`）：coze 统一端返回的 `studies.source` 是小写
+     raw key（`openalex`/`europepmc`），而 `CORE_SOURCES=("OpenAlex","EuropePMC")` 逐字符串比对
+     → 核心二源被判「全部缺位」→ 降级 error（本地走 `fetch_*` 返回规范名，故从未暴露）。
+     新增 `_canon_source()` 归一（忽略大小写/空格/连字符/下划线），并保留 `by_source_raw` 审计留痕。
+  2. **翻译模块在沙箱内不可用 + 谎报完整翻译**：`_CT_BASE_SCRIPTS` 硬编码本机技能树路径
+     `~/.workbuddy/skills/ct-base/scripts`，发布载荷沙箱中不存在 → `import kw_localize` 必失败 →
+     中文检索式原样送国际库（命中偏少），且 `fully_translated` 仍返回初始值 `True`，把漏检伪装成正常。
+     新增 `_kw_localize_scripts_dir()`（ct-base 权威 → ct-literature 同源副本 → 载荷
+     `bundled/ct-literature/scripts` 逐级回落）与 `_bundled_skill_dir()`；`_ct_scripts_dir()`
+     同样加 bundled 兜底（`doc_type_filter` 文献类型预填 / `export_xlsx` 合并表导出一并受益）。
+     模块不可用时，原文含中文则如实标 `fully_translated=False` + `untranslated`。
+  **验证**：① 复现线上数据 → `search_status` error→`ok`、`core_missing` 2 项→`[]`；边界回归：
+  真缺源仍报 partial/error（闸门未修坏）、未知来源不被吞。② 沙箱等价（技能树不可用 + 载荷布局）
+  → 回落 `publish/bundled/ct-literature/scripts`，中文主题真翻译成功、term_map 离线命中
+  （`非小细胞肺癌 → non-small cell lung cancer (NSCLC)`）。③ 载荷冒烟 `/health` 200；
+  线上 `/health` 200 + 无头 Chromium 渲染 0 JS 错误、后端 pill「就绪」。
+  ⚠️ 旧会话的 coverage 已持久化（`build_state` 只回读、不重算）→ **需在本节点重跑检索**才会看到 ok。
+
+- **`build_publish.py` 两处加固（2026-09-17）**：
+  1. `adapters/workbench/app.config.json` 纳入 `WHITELIST_FILES`——此前不在白名单（22 项里没有），
+     发布后载荷内 `deployedAt` 永远滞后于源、只能手工复制（本次实测：源已改，构建仍 `copied=0`）。
+  2. 复制跳过条件由「size 相同 + 源 mtime 不新于目标」改为**内容比对**（`read_bytes()`）：
+     同长度变更（改一个数字 / 时间戳 / 同长度词）会被旧逻辑静默漏同步。
+  **验证**：`py_compile` 通过；run1 `copied=1 skipped=22`、run2 `copied=0 skipped=23`（幂等）；
+  载荷 204 文件、清理 0 项、保护闸 0、自检全过。
+
+- **工作台 A2「文献集」节点一进入即崩、并被误报为「无法连接后端」（2026-09-17，线上回归）**：
+  现象：A1 批准后推进到 A2.literature_search 立刻报
+  `✕ 无法连接后端（Cannot read properties of undefined (reading 'length')）`，而 `/health` 200、
+  coze 端在线 —— 后端其实是好的，误导性文案把排查方向带偏。两层根因：
+  1. `adapters/workbench/form_schema.py`：A2 的「逐条裁决」rowlist **缺 `columns`**
+     （2026-09-10 A2+A3 合并重写 schema 时漏掉；B3/C2 同类面板都有）。A2 是首个含表格的
+     节点，故一进 A2 必崩。
+  2. `adapters/workbench/workbench.html · renderRowlist`：`p.columns` 为 undefined 时仍取
+     `cols.length` → 抛 TypeError；`streamPost` 的 `.catch` 把任何 TypeError 都当网络错误，
+     渲染异常于是被显示成「无法连接后端」。
+  修复：
+  1. 后端补 6 列：标题(可展开) / 年 / 刊名 / 文献类型(下拉可编辑) / 裁决(下拉可编辑) / 理由；
+     口径对齐导出裁决表（`col.decision`/`col.reason`/`col.doc_type_confirmed`），文献类型
+     内部值沿用 `block_a.DOC_TYPE_ORDER`（original/review/guideline/protocol/unknown）。
+  2. 前端 `renderRowlist` 加兜底：`columns` 缺失或非数组 → 回退「按数据自动出列」。
+  3. 前端新增 `isNetError(e)`：仅真正的网络层失败才提示「无法连接后端」，其余异常原样显示
+     「处理响应失败：<msg>」，避免根因被文案掩盖。
+  **验收**：`/api/session` 契约（rowlist.columns=6、decisions=6 行）；无头 Chromium 真渲染
+  pageerror=0、表头 6 列、6 数据行 + 12 个可编辑下拉、无「无法连接后端」文案；源与载荷
+  双份 MD5 一致（form_schema `3ca878792312`、workbench `03229232890d`）。
+
+- **`publish-kit/build_publish.py` 删除范围收敛为受控清理 + 保护闸；载荷一次性清掉 362 项历史垃圾（2026-09-17）**：
+  背景：publish/ 里堆了 566 个文件，其中 343 个是**旧版递归误生成的嵌套副本**
+  （`publish/adapters/workbench/publish/**`）+ 19 个 junk，每次构建都要全树扫删一遍
+  （`--dry-run` 会删 362 项），风险随垃圾量放大；且旧版 SAFE-DELETE 用的是含 `runs/`、
+  `output/`、`tests/`、`pdfs/` 这类**路径片段**的宽正则、又无保护清单，随时可能误伤合法
+  文件（09-16 已发生过一次删掉 190+ 合法文件的事故）。
+  改动：
+  1. 载荷清理：删除 343 嵌套副本 + 19 junk，载荷 566 → **204 文件（10.0 MB）**；删除前
+     整包备份（`backups/meta-workbench-publish-preclean-*.zip`，30.4 MB），并以 md5 基线
+     闭环校验「消失项恰好等于应删集合、多删 0 / 漏删 0 / 204 项逐字节一致」。
+  2. `build_publish.py` 三级受控清理：**目录级**只删点名目录（`NESTED_JUNK_DIRS` —— 嵌套
+     副本与误拷入的 `runs/`，删前校验目录内无保护文件）；**文件级**只认明确垃圾形态
+     （`__pycache__`、`*.pyc/*.pyo`、`*.log`、`*.bak*`、`*.ctbase_bak_*`、`*.dat`、
+     `dist/coze_deploy_bundle*`），**取消路径片段宽正则**；**保护闸**（`PROTECTED_FILES` =
+     白名单源 + `main.py`/`app.config.json`）一律拒删，命中即告警（正常应为 0）。
+  3. 新增构建后自检（fail loud）：`main.py` / `requirements.txt` / workbench 三件套缺失即
+     报错退出，杜绝「构建成功但载荷已残」的静默故障。
+  **验收**：新脚本 `--dry-run` 与连续两次正式构建均 **清理 0 项、保护闸 0、载荷 204 文件
+  且内容零变化**（幂等）；清理后的载荷起真实服务通过 `/health` + `/api/session`
+  （A2 rowlist.columns=6）+ 根路径 HTML 117,790 字符。
+
+- **ctsearch_client.search_literature 增加请求级去重闸门（2026-09-16，飞书 searchlog 复盘）**：
+  后台 searchlog（CTDB_searchlog (4).xlsx）显示 2026-09-15 选题门控「简单分析」路径出现
+  「同参重复 coze 调用」burst——2 个不同查询（PD-1 × openalex/europepmc）各被原样重发
+  4 轮、间隔约 2 分钟，coze 每次都真跑检索并落库。根因：调用方把偶发失败/解析空
+  （`_parse_coze_stream` 失败返 `[]` 被误当「检索无结果」）判成没查到 → 同参重试 →
+  重复出站。修复（对齐 coze_client._DEDUP_CACHE 已验证模式）：
+  1. `search_literature` 出站前加去重闸门：键 = source+keyword+year_from+year_to+max_results；
+     窗口默认 300s（env `CT_SEARCH_DEDUP_WINDOW`，≤0 关闭）；命中直接回放缓存（`from_cache:True`）。
+  2. 缓存**跨进程生效**（内存 dict + 临时目录文件双写，env `CT_SEARCH_DEDUP_DIR` 覆盖）——
+     发布沙箱每次 CLI 是独立进程，纯内存拦不住。
+  3. 只缓存成功（works 非空且无 error）——偶发失败不入，避免毒化窗口内真实重试。
+  4. 流式空结果不再被当作成功：`projects==[]` 视为失败继续走 /run 回退，杜绝
+     「解析失败伪装成检索为 0 → 上层误判重试」。
+  本机 3 项验收通过：同参二次调用 from_cache=True；换 max_results=6 不串味；跨进程命中磁盘缓存。
+  技能与已发布应用（meta.app.workbuddy.link）两份代码同步（MD5 一致）。
+
+- **pdf_extractor v0.4.1：基于 78 篇真实 PDF 实证改进数据抓取能力（2026-09-14，用户指令「利用 pdf_cache 改进 PDF 信息识别和抓取」）**：
+  对 `adapters/pdf_cache` 中 78 篇有效 PDF（排除 <5KB 的 stub/error 页）做批量 benchmark，发现并修复：
+
+  **诊断发现**：
+  1. **表格模板全面失效**：`T_DICHOT`=0、`T_CONT_TABLE`=0 命中。`_rebuild_borderless_table` 把正文段落拼成 2 列伪表（min_cols=2 太低，2 列布局的期刊正文被误识别为表格），99% 模板不匹配
+  2. **综述类文献 43% 零行**：20 篇 review 中 16 篇 0 行——meta 论文用表格汇总证据，不在正文写 HR/OR 叙述句
+  3. **1767 个页面 unresolved**：所有 tier 层都不命中
+
+  **修复**：
+  1. **`_rebuild_borderless_table` 伪表过滤**：min_cols 2→3（真实数据表几乎都 ≥3 列）；列间距阈值 20pt→12pt（避免 5 列表被压成 2 列）；新增数值行占比过滤（<50% 视为正文段落，不产出伪表）→ unresolved 从 1767 降至 548（-69%）
+  2. **新增 `t_forest_table` 模板**（森林图/效应量汇总表）：识别 meta 论文最常见表格式（首列研究名 + 效应列含 (lo-hi) CI + 可选权重列），+142 行命中
+  3. **新增 `t_meta_table` 模板**（纳入研究特征表）：识别 Table 1/2 格式（Study/Year/Design/n/Age），v0.4.1 硬化过滤参考文献/编号引用/期刊缩写/子组标签，+334 行命中
+  4. **新增 `_narrative_pooled_effects` 叙述模板**（pooled/overall 句式）：覆盖 "The pooled OR was 1.25 (95% CI 1.08 to 1.45)" 等 meta 论文高频句式，+6 行
+  5. **新增 `_narrative_subgroup_effects` 叙述模板**（subgroup 句式）：覆盖 "In the subgroup of patients with diabetes, the OR was 1.45..." 等
+
+  **改进结果**：
+  - 总抽取行数：1037 → 1260（+21%）
+  - 有行文档：43 → 46
+  - 零行文档：33 → 30
+  - Unresolved 页面：1767 → 548（-69%）
+
+  **已知局限**：
+  - T_META_TABLE 仍有少量噪声（参考文献行、期刊缩写被误匹配），通过 v0.4.1 的过滤规则持续收窄
+  - T_DICHOT 在真实 meta PDF 上仍为 0——meta 论文多用效应量表而非 2×2 计数表，这是预期行为
+  - 扫描件（8 页）仍不支持，属 P2 范围
+
+  **关键文件**：`adapters/pdf_extractor.py`（v0.4.1）、`adapters/tests/test_pdf_extractor.py`（已有测试用例保持通过）
+
+- **系统自审修复：网络 Meta 研究数/对比数口径错误 + 一致性缺陷 6 项（2026-09-14，用户发起「系统检查相关流程与代码有无错误」后落地）**：
+  对 CNMA 接入与 CINeMA 解读层做全链路审计（R 引擎 → 解读 → 质量 → 渲染 → 写作建议），逐项复核后修复：
+
+  1. **【高】`stats.k` 在 arm-based 多臂研究下被高估**：`stats.k = nrow(prep)`，而 `prep` 是**对比级**数据——`.nma_prep` 会把三臂研究展开为 C(3,2)=3 行。实测「2 项研究（1 个三臂 + 1 个两臂）」→ `k = 4`，真实研究数 = 2；同一份产物里 `stats.k`(=4) 与 `extra.network.n_studies`(=2，取 `fit$k`) **自相矛盾**。
+     - 影响链：报告结论写错研究数 → CINeMA「不精确性」域 `k < 3` 判据**漏报** → `k < 5` 警告数值错。
+     - **Linde2016 实测：`k` 由 `124` 修正为 `93`**（124 是对比行数）——这也解释了此前「调研脚本报 93、引擎报 124」的困惑（此前误归因为"调研期做过研究级过滤"，实为本缺陷）。
+     - 修复：新增 `.k_studies()` / `.k_comparisons()`（按 `studlab` / treat-pair 去重）；`nma` 与 `cnma` 的 `stats.k`、`extra.network.n_studies`、`n_comparisons` 及 `notes` 全改走去重口径。
+  2. **【中】CNMA 的 `stats.heterogeneity` 缺 `Q`/`df`/`p`** —— 实只回 `tau`/`tau2`/`I2` 三字段，而 `coze_contract.md` §4 已声明网络 Meta 返回 6 字段 → 文档不实、加性模型的异质性检验丢失。补 `Q.additive` / `df.Q.additive` / `pval.Q.additive`（`df ≤ 0` 判 `null`）。
+  3. **【中】CHANGELOG 字段路径笔误**：`stats.extra.components.additivity` → 实际为 `stats.extra.additivity`（与 `coze_contract.md` §4 一致）。
+  4. **【中】CNMA 缺 `prop_direct`** → CINeMA「间接性」域对 CNMA 恒为 `unclear`，与 NMA 不对等。改从 `nc$x`（netcomb 保留的入参 netmeta 对象）取，`nma`/`nma_rank`/`cnma` 三个网络任务口径统一。
+  5. **【低】`interpretation.py` 死变量** `n_cmp_tbl`（赋值后从未使用，且注释声称"唯一对比数见结论后半句"而代码并未使用）→ 删除并改正注释。
+  6. **【中】`writing_advisor` 质量等级语义混用**：网络 Meta 改走 CINeMA 六域后 `grade` 值域变为 `major_concerns` 等，但 `grade_reported` 仍输出裸值。新增 `grade_framework` 参数 → 输出 `CINeMA: major_concerns` 形式；`_prisma_checklist` 补 `cnma` / `nma_rank` 条目（此前只有 `nma` 会追加一致性检验，且一律写 GRADE）；`_discussion_template` 不再对网络 Meta 套用"单一合并效应量"措辞。
+  7. **【中】引擎指纹与技能版本撞号**：`.MA_ENGINE_VERSION = "2.11.0"` 与 CHANGELOG `## [2.11.0]`（2026-09-10 CCM 对话菜单）**同名异义** → 按指纹去 CHANGELOG 查部署记录会查到无关条目，误判线上生效。改为**与 `SKILL.md` 版本对齐**（`2.15.0`）；该字段**无程序化消费方**（全库 grep 确认，纯人读探针），改口径无破坏风险。
+
+  - **回归覆盖缺口一并堵上**：原 18 例全是「1 研究 1 对比行」构造数据，缺陷逃过回归。新增 `caseF_multiarm_armbased` / `caseG_multiarm_cnma`（2 研究 / 含一个三臂），并把「`stats.k` == `extra.network.n_studies`」写成回归断言。回归 **20/20 通过**。
+  - **文档同步**：`SKILL.md §5`（补唯一研究数/唯一对比数口径、`prop_direct` 三任务通用）、`coze_contract.md` §4（`n_comparisons`/`n_studies` 去重口径说明 + `prop_direct` 适用范围）。
+
+### Removed
+
+- **废弃 `adapters/coze/rendering.py` 死载荷（2026-09-14，用户「不需要的代码就废弃」指令）**：
+  该文件随部署包发布（`_deploy/meta_analysis_coze_mirror_2026-09-08.zip` 与 `..._2026-09-09.zip` 均含），但**包内没有任何模块引用它**——证据：
+  - AST 解析全包 **29 个 `.py`**，`import rendering` 命中 **0**（含 `src/main.py` 的 85 条 import、`graphs/nodes/meta_analysis.py` 的 28 条）；
+  - 动态导入（`importlib` / `__import__` / 模块名字符串拼接）命中 **0**；
+  - `scripts/pre_deploy_check.py` **无必需文件清单校验**（只校验 3 个 pyproject 依赖）；`scripts/pack.sh` 仅执行 `uv lock`；`docker/.dockerignore`、`pyproject.toml`、`.gitignore` 均未声明该文件。
+  - **根因**：coze 云端服务只做流式转发、**不渲染 HTML**；报告渲染发生在**本机 agent 侧**（`adapters/rendering.py`，有 `render_case_report.py` / `run_analysis.py` / `run_real_meta.py` 三个真实消费方）。镜像副本自 **2026-08-31** 起未再跟进，与本地版已分叉：镜像 **38 KB / 852 行** vs 本地 **75 KB / 1509 行**，且缺「结果解读」「发表建议」「CINeMA」三张卡 —— 保留它既无功能价值，又会误导「改它可影响线上呈现」。
+  - **处置**：文件已移出技能目录（可逆备份 → `_removed/coze_rendering.py.removed_20260914`，MD5 `508bf76e9d3a0b84706ae9131096cb6f`）；本地 `adapters/rendering.py` **保留不动**。
+  - **移除后验证**：coze 包内 **29/29 `.py` 语法自检通过**、`import rendering` 命中仍为 **0**、本地渲染三消费方完好。
+
+### Added
+
+- **C 入口独立启动：`run_fastpath("draft")` + `/api/start_data?data_mode=draft`（2026-09-15，用户「ABC 三阶段各自可独立启动」裁定落地）**：
+  补齐 A/B/C 独立启动架构的最后一环——从 C 起（自备 Block B 信封，跳过 A+B，停在 C1 软停闸）。
+  - `adapters/fullflow.py`：`run_fastpath` 新增 `data_mode="draft"` 分支（`b_env` 必填校验，用户裁定 2026-09-15：C2/C3/C4 需 Block B 上下文）；A/B 块均标 done，cursor 指向 C，`_advance` 跑 Block C 停在 C1 软停。
+  - `adapters/workbench/server.py`：`/api/start_data` 新增 `b_env_text` Form 参数 + `data_mode="draft"` 分支（两种录入：粘贴 JSON / 上传 `.json` 文件，复用 `json.loads` + `utf-8-sig` 解码）。
+  - 菜单层零改动：flow_menu 对任意暂停节点渲染菜单，C1 软停在 `_fallback_options` 兜底下产出 `[批准/跳过/打回]`。
+  - 验证：`_verify_draft_entry.py` 停在 `cursor={'block':'C','stage_id':'C1.draft','await_kind':'pause'}`，菜单正确；回归 `tests/test_flow_menu.py` 189 PASS / 0 FAIL。
+  - 文档：`references/menu_logic_reference.md` §9 更新为已实现状态。
+
+- **结果解读 / 质量评估层补齐网络 Meta（NMA / CNMA）覆盖：CINeMA 六域 + 修两处静默失效（2026-09-14，用户发起「结果解释分析是否覆盖 netmeta 结果」核查后落地）**：
+  核查发现**三层对 netmeta 类结果全部失效，且均为静默失败**——用户拿到 NMA/CNMA 报告时「📊 结果解读」卡为空、「📋 质量评估」卡为空、报告顶部 hero 留白，而这三样正是 2026-09-13 新加的核心增值功能，此前**只对通用 pairwise 类任务生效**。
+  - **根因不是漏加分支，而是数据形状不兼容**：`interpretation.py` 按标量写死 `pooled.get("estimate")`，而 netmeta 的 `pooled` 是**多对比向量**（`estimate: [-0.28, -0.543, ...]`）→ `float(list)` 抛 `TypeError` → 被上层 `except` 吞掉 → `est=None` → 所有依赖它的判定（结论 / 效应量极端 / CI 跨度）**静默跳过**。
+  - **R 引擎** `adapters/coze/src/r_engine/run_task.R` 补网络诊断数据（缺失一律 `null`，**绝不填 0**）：
+    - 新增辅助函数 `.cin_num1` / `.cin_het` / `.cin_incoh` / `.cin_network` / `.cin_incoh_cnma` / `.cin_network_cnma`；
+    - `nma` / `nma_rank`：补 `stats.heterogeneity`（`tau`/`tau2`/`I2`/`Q`/`df`/`p`，**I² 由 netmeta 的 0–1 比例换算为百分数**，对齐 pairwise 契约）+ `stats.extra.inconsistency`（全局不一致性 `Q.inconsistency`/`pval.Q.inconsistency`，**netmeta 对象自带、无需额外调用** + `netsplit()` 逐对比「直接 vs 间接」差异表 + `Q_total`/`Q_heterogeneity`）+ `stats.extra.network`（干预数/对比数/研究数/设计数/直接证据占比）；
+    - `cnma`：补 `stats.extra.inconsistency`（`netcomb` 无 `Q.inconsistency`，改用 **加性假设检验 `Q.additive`/`Q.standard`/`Q.diff` 作为成分模型层的不一致性判据**）+ `stats.extra.network`。
+  - **`adapters/interpretation.py`** 新增 `_interpret_netmeta()`（`_NETMETA_TASKS = {nma, nma_rank, cnma}` 路由）：
+    网络结构摘要、各对比/成分效应（`log` 尺度 → 比值尺度还原）、**不一致性**（`Q.inconsistency` + 逐对比）、**加性假设 `Q.diff`**、**不可识别成分**、传递性假设、SUCRA 缺位提示（未算排序时明示「若结论涉及『哪种干预更优』需补做 `nma_rank`」）。
+  - **`adapters/quality_advice.py`**：
+    - 新增 **`cinema_grade()` / `_evaluate_quality_cinema()`**，按 **CINeMA 六域**输出（研究内偏倚 / 报告偏倚 / 间接性 / 不精确性 / 异质性 / 不一致性），每域给出 `no_concerns` / `some_concerns` / `major_concerns` / `unclear` + 依据文字；`unclear` 明示「统计侧拿不到数据、须人工补」，**不猜**；netmeta 类走 CINeMA、pairwise 类维持原 GRADE（`framework` 字段标注）；
+    - 修 `b2_grade` 的向量型 `ci` 比较崩溃（`list < float`）；修 `b4_quality_gate` **返回元组 `(report, nha)` 却被当 dict 使用**——该 `AttributeError` 由上层 `except` 吞掉，**质量评估引擎自上线起从未真正工作过**（含 pairwise）；
+    - 缺 `pooled` 的 task（`diagnostic_meta` / `dose_resp` / `bayesian_pairwise`）补「评估不完整」透明度标注，避免仅凭研究数给出 `High` 的过度乐观评级。
+  - **`adapters/rendering.py`**：`_render_hero` 对向量型 `pooled` 由「直接 `return ""`」改为渲染 `_render_hero_network()`（结构 + 可达估计数 + 显著性概况，跳过 CNMA 参考组自身的 `est=lo=hi=0` 占位项）→ 消除报告顶部留白；「📋 质量评估」卡支持 CINeMA 六域明细展开与中文评级文案（`_CINEMA_DOMAIN_CN` / `_CINEMA_RATING_CN`）。
+  - **文档同步**：`coze_contract.md` §4 出参（`stats.heterogeneity` / `stats.extra.inconsistency` / `stats.extra.network` / `stats.extra.additivity`）；`SKILL.md §5` 能力边界表新增「Network diagnostics + CINeMA」条；`references/component_nma.md` 新增 §4.5「网络证据质量：CINeMA 六域」。`.MA_ENGINE_VERSION` 2.10.0 → **2.11.0**。（注：原写作 `stats.extra.components.additivity` 为笔误，实际字段路径是 `stats.extra.additivity`，与 `coze_contract.md` §4 一致——2026-09-14 自审修正。）
+  - **回归验证（本地端到端，18/18 通过）**：`regress_all.py` 覆盖 18 个代表用例（含 `nma` case3 / `cnma` case47 / Linde2016 / `pairwise_meta` / `subgroup_analysis` / `metareg` / `diagnostic_meta` / `dose_resp` / `bayesian_pairwise` 等）；**非网络任务零回归**（修复前 3 例抛 `TypeError`，修复后全部正常且带"评估不完整"标注）。
+    解读层实测：`nma` 由「`conclusion` 空 + 0 条 caveats」变为含网络结构/不一致性/逐对比差异的完整解读；`cnma` 含成分效应 + 加性假设 + 不可识别成分。
+    **单位口径修正（实测发现）**：Linde2016 的 `I²` 原显示 `0`（实为 `0.1833` 比例未换算）→ 修正后 `18.3324`，`τ=0.149` 与 I² 不再自相矛盾。
+
+- **新增 `cnma` 任务：成分网络 Meta（CNMA）（2026-09-14，ct-update P1 `meta-analysis::B` 落地）**：
+  经调研确认 `netmeta` **原生**提供完整 CNMA 函数族（`netcomb` / `discomb` / `netcomplex` /
+  `netcomparison` / `createC`），**无需引入任何新依赖**——2026-09-14 双端实测：本地与 coze
+  容器均为 `netmeta 3.6.1`。此前「CNMA 未实现」的判断有误（其依据「netmeta 只做 arm-based
+  NMA」不成立）。
+  - `adapters/coze/src/r_engine/run_task.R` 新增 `cnma` 分支（数据契约复用 `.nma_prep`；
+    治疗标签以 `sep_comps` 拼接成分，如 `A+B`）：
+    - 连通网络走 `netcomb()`（加性成分模型）；`params.interaction=true` 时以 `createC(fit)`
+      传入 `C.matrix` 拟合交互模型；
+    - **断开网络**下 `netmeta()` 会直接拒绝（`Network consists of N separate sub-networks.`），
+      自动改走 `discomb()`（断开网络 CNMA），并置 `cnma:disconnected_network` 告警；
+    - 产出：成分效应 `stats.extra.components`、组合效应 `stats.pooled`、**加性假设检验**
+      `stats.extra.additivity`（`Q_diff`/`df_diff`/`p_diff`/`additive`）、成分设计矩阵
+      `stats.extra.design`、不可识别成分 `stats.extra.unidentifiable`、每成分证据量
+      `stats.extra.comp_k`、CNMA vs 标准 NMA 对照 `te_cnma`/`te_nma`；
+    - 默认出图 `forest`（成分效应森林图，S3 派发至 `forest.netcomb`）+ `netgraph`。
+  - 新参数（`coze_contract.md` §2/§3 已同步）：`sep_comps`（单个字符，默认 `+`；非法值回退
+    并告警）/ `inactive`（非活性·锚定成分）/ `interaction`（交互模型，默认 false）。
+  - `.MA_ENGINE_VERSION` 2.9.18 → **2.10.0**。
+  - **防御性设计（源自实测约束）**：
+    1. 不可识别成分**如实返回 `null`，绝不填 0**（`netmeta` 默认 `na.unident=TRUE`；断网
+       `discomb` 场景实测成分全不可识别），并置 `cnma:unidentifiable_components` 告警；
+    2. 自由度 ≤ 0（不可检验）时 Q 统计量置 `null`——实测 `discomb` 断网场景 `Q.additive`
+       会给出 `1.16e-30` 这类浮点退化值，看似有效数值、实为不可检验，直接判定为缺失；
+    3. 治疗标签不含分隔符时置 `cnma:no_combination_labels` 告警，并提示可能误用 `nma`；
+    4. 非 ASCII 标签置 `cnma:non_ascii_labels` 告警（netmeta 网络构建期对 locale 敏感）；
+    5. NA → `null` 显式转换：jsonlite 的 `na` 参数默认为 `"string"`，与已设的
+       `null = "null"` **不是同一开关** → NA 被序列化成字符串 `"NA"`（数字字段混入字符串，
+       消费端无法按数值处理）。本分支输出已递归转换。**该问题为全引擎共性，其余 task 分支
+       本次未改动，待单独评估后统一修复。**
+  - **回归验证（本地端到端，5/5 通过）**：
+    1. 加性 CNMA（合成，6 研究 / 6 治疗 / 3 成分）：`Q.diff=1.1469, df=2, p=0.5636`（加性
+       假设可接受），成分效应 A/B/C = -0.280 / -0.263 / -0.241，与调研期独立脚本**逐位一致**；
+    2. 断开网络（`discomb`）：成分全不可识别 → 全部 `null`，并触发 `no_combination_labels`
+       / `disconnected_network` / `unidentifiable_components` 三重告警；
+    3. 无组合标签（纯单成分治疗）：触发 `no_combination_labels` + `unidentifiable_components`；
+    4. 二分类 OR + `inactive=["P"]`：成分数由 3 正确降为 **2**（锚定成分被排除）；
+    5. **Linde2016 真实数据集**（124 对比 / 22 治疗 / **19 成分** / 耗时 39 s）：成分效应全部
+       可识别；3 个真实组合治疗（`"Face-to-face CBT + SSRI"` 等）正确拆解为两成分——同时
+       验证了「分隔符带空格自动 trim」；**加性假设被拒绝**（`Q.diff=6.5309, df=2,
+       p=0.0382 < 0.05`）→ `cnma:additivity_violated` 告警如期触发，证明该诊断不是摆设。
+    5 例均产出 forest + netgraph SVG（Linde 例：forest 19.8 KB / netgraph 67.3 KB）。
+    > 注：调研期报告中 Linde2016 记为「93 研究 / 18 成分 / Q.diff p=0.083」，与本次
+    > 「124 / 19 / p=0.0382」不一致，差异源于**所用数据子集不同**（调研期为验证目的做过
+    > 研究级过滤）；本次为 `Linde2016` 全量 124 条对比行，结果可复现。
+  - 文档同步：`coze_contract.md` §2（新参数）/ §3（task 枚举）/ §4（专属出参字段）；
+    `SKILL.md §5` 能力边界表（原「CNMA 未实现」条目改写为已实现）；
+    **新增 `references/component_nma.md`**（方法学选型 / `Q.diff` 解读 / 6 条常见坑 / 最小复现）；
+    `classify.py`（新增 CNMA 关键词识别，且**前置**于 NMA 判定以免被抢）；
+    `build_request.py`（`DEFAULT_PLOTS["cnma"]`）；`adapters/coze_contract_validate.py` 与
+    `tests/deploy_retest.py`（`VALID_TASKS` / 完备性策略 / k≥2 拦截白名单加 `cnma`）；
+    `adapters/coze_cases/case47_cnma_additive.json`（新增联调用例，契约校验无 fatal）。
+
+- **能力边界表补全：RoB / PRISMA / GRADE 任务可发现性（2026-09-14，ct-update P1 复核）**：
+  `run_task.R` 早已实现 `rob2`（RoB2 交通灯，自绘 ggplot，无 robvis 依赖）/ `rob_summary`
+  （堆叠条形摘要）/ `prisma_checklist`（PRISMA 2020，27 项）/ `prisma_flow`
+  （`metagear::plot_PRISMA` 四阶段流程图）/ `grade` / `tsa` / `power` / `nnt` / `gosh` /
+  `ipd_meta` / `metainc`，但 `SKILL.md §5` 的 "Endpoint capability boundaries" 表**只列了
+  pairwise/nma/survival/diagnostic**，导致这些已实现任务在能力边界上不可发现（易被误判为该技能缺口）。
+  本次仅**补文档、不改引擎**（引擎位于 `adapters/coze/`，由作者人工维护）。
+  同时显式标注：**component NMA (CNMA) 未实现**（netmeta 仅覆盖 arm-based NMA），
+  请求 CNMA 必须声明缺口、**不得静默降级为 `nma`**。
+  → ⚠️ **该「未实现」判断已于同日被推翻并落地实现**（见上方 `cnma` 条目：netmeta 3.6.x
+  原生支持 CNMA，无需新依赖）。此处保留原文仅为记录判断演变，**以 `cnma` 条目为准**。
+
+- **结果解读引擎 + 质量评估引擎（P0 + P1，2026-09-13）**：
+  新增 `adapters/interpretation.py`（结果解读引擎）和 `adapters\quality_advice.py`（质量评估引擎），
+  把 meta 技能从"计算工具"提升为"统计顾问"：
+  - `interpretation.py`：基于 stats 自动生成结构化解读——一句话结论（显著/不显著/CI 跨零）、
+    注意事项（异质性分档、发表偏倚、研究数过少、效应量极端、CI 跨度）、
+    建议（亚组分析、敏感性分析、剪补法）、审稿人可能追问的问题。
+    判定规则覆盖 I² 三档（≥75%/50-75%/＜25%）、Egger p（显著/不显著/研究数不足）、
+    k 三档（<3/<5/≥5）、效应量极端（OR>10/<0.1, SMD|d|>3）、CI 跨无效值。
+  - `quality_advice.py`：把 block_b 中 B2 GRADE / B3 过度声明 / B4 质量门解耦为独立函数，
+    供 run_analysis（独立分析路径）和 fullflow（完整流水线）共用。
+    自动推断偏倚风险、发表偏倚、不精确性，输出 GRADE 等级 + 过度声明列表 + 质量门评估。
+  - `run_analysis.py`：B1 完成后自动调用两个引擎，结果体贴 `_interpretation` + `_quality_advice`。
+  - `rendering.py`：HTML 报告 hero 卡下方新增"📊 结果解读"卡，展示结论、注意事项、建议、
+    审稿人问题、GRADE 等级、过度声明数量。
+  - 新增 `tests/test_interpretation.py`（19 例全绿）。全量 **66 例通过**。
+
+- **出站信封前置校验 + 自动修复（2026-09-13，用户诉求）**：新增 `adapters/coze_contract_validate.py`，
+  在 POST 到 coze 之前按 `coze_contract.md` 校验请求信封，拦截装错的信封（无论来源：LLM 手搓 /
+  用户裸 POST / `build_request` 回归）。自动修复最常见的结构错误——并行顶层数组
+  `data.yi/sei/slab`（或 2×2 四列）→ `data.rows[]` 行对象数组；`model:"random"→"REML"`、
+  `"fixed"→"FE"`；`measure→sm`。致命不合规（缺 rows 且无并行数组 / 未知 task / 非法 model）→
+  抛 `EnvelopeValidationError`，由 `run_analysis` 转 `_source:envelope_invalid` + `_error_analysis`
+  结构化错误，**绝不把装错的信封发到云端**。校验点在 `coze_client.run_meta` 与 `run_stage`（stage 路径）
+  出站前统一接入。
+
+- **coze error 针对性诊断（2026-09-13，用户诉求）**：新增 `adapters/coze_error_analyze.py`，
+  coze 返回 `status=="error"`（HTTP 200 ≠ 任务成功，对齐 LRN-20260817-002）时，把 `notes`/`warnings`
+  按已知签名（data.rows 为空 / 缺效应量 SE / 缺列 / 缺 R 包 / NMA 需 ≥2 arm / 未知 task / 数据值异常）
+  映射成`{code, summary, causes, fixes}`结构化诊断，附 `_error_guidance` 多行文本。`run_analysis`
+  在 `status==error` 响应上自动附加；`run_meta.py` CLI 转印 `META_ERROR_GUIDANCE`。
+
+- **测试**：新增 `tests/test_envelope_guard.py`（9 例，标准库），覆盖真实 bug 信封自动修复、
+  修复后复验通过、合规信封无致命、缺 rows 致命拦截、coze error 各签名命中。
+
+- **错误诊断细化 + 数据预检（2026-09-13，飞书 searchlog 实证驱动）**：用 `ct-update` 的
+  `bugreport_download` 端点拉取 searchlog 表 `tblQ8OQ0rXsXQWkh`，筛 `skillname=meta` 共 322 条，
+  其中 42 条 coze `status:error`。分析发现 **31 条（74%）落入 `COZE_E99_GENERIC` 兜底**，无针对性
+  指引。据此：
+  - `coze_error_analyze.py` 新增 7 个具体签名（E09–E15）+ NMA 非数值专项（E16），覆盖全部 42 条，
+    generic 归零：E09 `sm` 与数据类型不匹配 / E10 必需列为 NULL（mean/n）/ E11 数据含 NA /
+    E12 数据格式无法识别 / E13 NMA 网络不连通 / E14 该 task 需预计算效应量列 / E15 列数不对齐 /
+    E16 NMA 数值列非数值。每条带 `causes` + 可操作 `fixes`。
+  - `coze_contract_validate.py` 新增**警告级**数据预检（不阻断合法发送）：W07 `data.rows` 内
+    NA/空值扫描（对应 9 条 `missing value where TRUE/FALSE needed`）。让用户出站前即时修，而非等 coze 报错。
+  - 测试扩至 21 例（+12：9 个新签名命中 + W06/W07 正反向 4 例）。仍 0 条错误落 generic。
+
+- **出站前预防性阻断（数据完备性，2026-09-13 续，用户诉求「明确不完备就直接打回」）**：
+  在 `coze_contract_validate.py` 新增 `_check_data_completeness`（**致命 E07_DATA_INCOMPLETE**），
+  按 task 的「数据形状」策略（`_COMPLETENESS_POLICY`）在 POST 前拦下**明确不完备**的请求，并
+  **点名缺哪些列、每列用途**，由 `coze_client` 直接打回（绝不发到云端）。覆盖：`single_group_meta`
+  （均数 mean+n / 比例 event+n 任一完备，缺则拦）、`pairwise_meta`/`subgroup_analysis`/`metareg`/
+  等 strict_shape 家族（二分类四格表 / 连续型六列 / 发生率人时 / 预计算效应量 四选一，缺必需列即拦；
+  `metareg` 额外需至少一个协变量列）、`forest_plot` 等 es_only 任务（缺 te/sete 即拦）、`nma` 轻量校验
+  （需研究标识 + 干预臂 + 结局三件套）。设计权衡：**只对明确不完备抛 fatal**，冷门/未枚举格式不阻断
+  （交 coze 端校验），宁可放过、绝不误杀合法请求；`render_guidance` 对 E07 额外输出「⚠ 数据明显不完备：
+  请求已被【直接打回】」醒目横幅；`run_analysis` 的 `envelope_invalid` 分支现直接回传 `_error_guidance`
+  供 CLI 打印 `META_ERROR_GUIDANCE`。（注：原 W06 警告级单组检查已升级为 E07 致命阻断。）
+  - 测试：复用并扩展 `tests/test_envelope_guard.py`，纳入 `TestPreventiveBlock`（单组缺列 / pairwise
+    无形状 / 二分类缺 n_ctrl / es_only 缺 sete / metareg 缺协变量 / nma 缺结构 均被 E07 阻断且明确
+    ok=False；合法四格表/连续型/metareg 带协变量/nma 对比格式 均放行）。全量 **32 例通过**。
+
+- **E11 单研究伪合并拦截 + quality 门防御（2026-09-13 续，飞书 searchlog 成功记录异常分析驱动）**：
+  下载全量 680 条 searchlog → 筛 meta 323 条 → 281 条成功 → 逐条解析 `stats.pooled` / `heterogeneity` /
+  `quality_gate`。发现 **111 条（39.5%）"表面成功实则可疑"**，6 类异常：F2 极端效应量（60条）、F5 红灯仍呈现（31条）、
+  F3 CI 过宽（26条）、F4 CI Inf/NaN（20条）、F6 高异质+极小证据体（4条）、F1 k=1 伪合并（1条）。据此：
+  - `coze_contract_validate.py` 新增 `_check_single_study`（**致命 E11_SINGLE_STUDY**）：对 pairwise_meta /
+    single_group_meta / subgroup_analysis 等 task，rows < 2 直接拦截（k=1 的"合并"实为单研究效应，统计无意义）。
+  - `run_analysis.py` 新增 **本地 quality 门防御**：即使顶层 status=ok，也检查 `stats.quality_gate.status`，
+    red 时强制标记 `_pooled_suppress=True` + 追加 `_quality_gate_red_warning` + 顶层 status 降级为 warn。
+    **消费端（渲染层/CLI）不应呈现红灯记录的合并效应**。
+
+- **F2 效应量极端防御 + W08 零单元格预警（2026-09-13 续，飞书 searchlog 111 条成功异常中 60 条）**：
+  上一轮 `analyze_success.py` 已标记 60 条极端效应量（OR>10/<0.1、SMD>3），但 `run_analysis` 仅
+  flag + 记文件，未给用户任何提示。现新增 `_check_effect_size_extreme()` 判定函数（OR/RR/PLO/PLOGIT
+  阈值 >10 或 <0.1；SMD/MD/ZCOR 阈值 |d|>3），命中时顶层 status 降为 warn、结果贴
+  `_effect_size_extreme_warning`。**极端可能真实，故不阻断**——只给用户看提示，用户确认后再决定是否切
+  Peto 法重跑（不自动重跑）。文字指引已修正：coze 端已内置 Haldane 自动校正（event+0.5, n+1），
+  无需建议用户手动加 0.5；改为提示"若仍不理想可改用 Peto 法"。
+  - `coze_contract_validate.py` 新增 **W08_ZERO_CELL 警告**：扫描二分类四格表中 event_exp/event_ctrl=0
+    的行（用 `is not None` 避免 Python truthiness 把 0 当 falsy 跳过），预警 OR 可能极端并建议 Peto 法。
+    仅警告不阻断。
+  - 测试扩至 47 例（+2：W08 正反向）。
+  - coze 端修复标注：bug 根源在 `run_task.R` 第 1433 行 `list(status = if (length(warns)) "warn" else "ok", ...)`，
+    quality_gate=red 不影响顶层 status。修复：在第 1433 行前插入 `if (!is.null(stats$quality_gate) &&
+    stats$quality_gate$status == "red") warns <- c(warns, "quality_gate:red")`，确保红灯强制顶层 warn。
+    **待下次 coze 部署时生效**（本地防御已立即生效）。
+  - 测试扩至 **35 例全绿**（+3：E11 单组/配对 k=1 拦截 + 配对 2 行放行）。
+
+- **A2 菜单二轮调整（2026-09-11 二次裁定）**：`[1] 批准并导出合并表` → **「批准并下载 PDF」**
+  （明示批准触发 A4 自动落盘：OA 下载 + 本地 `pdf_dir` 优先抽取）；**恢复 `[4] 传回修改后的合并表`**
+  —— 修复接缝：[4] 由原 `kind=file`（纯展示，`build_decision` 不可执行）改为
+  **`kind=revise, key=screened`**（`EDITABLE_KEYS` 本就收录），传回内容经
+  `apply_screening_upload` 解析后走**标准 decide 通路**落 `screened` 修订并重跑下游；
+  `[3] 导出检查（不改变状态）` 保持 file/export（agent 侧动作）。A2 选项 4 项；
+  `file_io_v` 交接文案、`a1_need_topic` 提示同步。测试 189 PASS。
+
+- **A4 首次出现提示：要求提供本地 PDF 路径**（2026-09-11，用户裁定）：③ 数据抽取（A4）
+  菜单首次出现时提示用户发送本地 PDF 所在文件夹/文件路径；路径经新增修订键
+  `pdf_dir`（EDITABLE_KEYS["A4.data_extraction"]）登记，`_run_block` 注入
+  `run_block_a(pdf_dir=…)` → 覆盖 A4 PDF 缓存目录，本地已有 PDF 优先被抽取，
+  减少付费墙漏检。已登记后提示行改为展示路径值；启动配置可预置 `cfg.pdf_dir` 跳过提示。
+  触及文件：`scripts/flow_menu.py`（pdf_hint/pdf_dir_set 文案 + `_a4_summary` 提示行）、
+  `adapters/fullflow.py`（EDITABLE_KEYS + 注入）、`adapters/block_a.py`
+  （`run_block_a` 新增 `pdf_dir` 形参）。测试 187 PASS。
+
+- **论文撰写辅助 · writing_advisor 引擎（P2a 本地基线，2026-09-14）**：新增
+  `adapters/writing_advisor.py`（论文撰写与发表建议引擎）+ `references/field_templates.json`
+  （领域知识库：oncology/cardiology/general 真实种子 + 8 个 stub 领域），把 Block C 的
+  「发表建议」子能力落地为可单测的自包含模块（不依赖 coze / LLM，离线可交付）：
+  - 领域推断 `infer_field`（关键词纯规则，确定性强可单测；未命中→general）。
+  - 基于 stats + 领域模板生成结构化建议：优势 / 限制段要点 / 填空式讨论段模板 /
+    审稿人可能追问 / 期刊推荐表（field_templates 静态种子，IF 带 * 为近似值）/
+    PRISMA 核查 / 报告规范 / 数据可用性 / 参考核验（结构层：DOI 格式校验）。
+  - 混合架构（v2）：默认 `use_network=True` 预留 P2b 网络增强 seam
+    （`_fetch_openalex_journals` 查 OpenAlex sources 实时指标 + `_verify_refs_online`
+    接 verify_citations 在线核验 + 复用 `.merged.json` 证据接地），网络失败静默降级静态/结构层，
+    不阻断主流程。
+  - `rendering.py`：HTML 报告「📊 结果解读」卡之后新增「📝 发表建议」卡
+    （期刊推荐表 / 优势 / 限制段要点 / 审稿人问题 / 讨论段模板折叠 / PRISMA 核查 /
+    报告规范 / 数据可用性 / 参考核验，双语文案 zh+en）；`out["_publication_advice"]` 缺省不渲染。
+  - `run_analysis.py`：B1 完成后（仅当 `advise=True`）自动调用 `advise_publication`，
+    复用 `_interpretation` + `_quality_advice`（GRADE 透传），结果贴 `_publication_advice`，异常静默跳过。
+  - 新增 `tests/test_writing_advisor.py`（14 例全绿）：领域推断 / 全字段齐备 / 静态种子来源 /
+    缺 stats 不崩 / 讨论段数字填空 / `use_network=False` / 结构层参考核验。
+  - 附（关键 bug 修复）：原 `run_analysis.py` 缺失 `def run_analysis`，编排块误嵌于
+    `_check_effect_size_extreme` 内，致 `import run_meta` 直接 ImportError、整条计算轨不可用；
+    已恢复 `def run_analysis(...)`，并在 `_quality_advice` 之后、`render_html_report` 之前接线 advise。
+
+- **论文撰写辅助 · writing_advisor 引擎 P2b 网络增强（2026-09-14）**：默认 `use_network=True` 时
+  复用兄弟技能 `ct-literature` 的 `http_utils`（OpenAlex 礼貌池 + 指数退避，优先 keyed 池
+  `OPENALEX_API_KEY`，无 key 走 keyless 100/day）+ `verify_citations`（DOI/PMID/OpenAlex 三重解析
+  + 标题作者一致性，抑制幻觉引用），并通过 `.merged.json` 做证据接地：
+  - `_fetch_openalex_journals`：按领域种子期刊名查 OpenAlex `sources`，以 `summary_stats.2yr_mean_citedness`
+    覆盖近似 IF（标记 `if_proxy`）、并补充 `h_index` / `cited_by_count` / `apc_prices`（USD 格式化）/
+    `is_oa`；名称不匹配或单刊失败保留静态种子。
+  - `_verify_refs_online`：逐条 `verify_one` 在线核验，状态词表 verified / bot_blocked / mismatch /
+    unresolved / no_identifier / suspicious；出版方 403 记为 bot_blocked（疑似真实，非缺失）；
+    单条异常退化为结构层校验，整批不阻断。
+  - 证据接地：入参 `merged_json`（路径或 dict）报告真实检索语料规模，与 `stats.k` 对齐（`k_match`）；
+    未显式给 references 时从其 works 抽 DOI 走在线核验。
+  - `rendering.py`：来源=openalex 时期刊表脚注改为「OpenAlex 实时（IF* 为 2yr_mean_citedness 代理）」；
+    参考核验卡支持在线状态词表 + 一致性标记；新增「🔎 证据接地（merged.json）」行。
+  - 降级保证：ct-literature 缺失 / 断网 / 配额耗尽 → 自动回退静态种子 + 结构层核验（`network_ok=False`），
+    不抛、不阻断。`adapters/tests/test_writing_advisor.py` 由 14 例扩至 **26 例**（注入假模块离线验证）；
+    回归 `test_interpretation` + `test_envelope_guard` 共 **92 例无回归**。
+
+- **论文撰写辅助 · writing_advisor 引擎 P2c 打磨（2026-09-14）**：三项「联网可选、失败降级」增强，
+  与 P2b 同构；`use_network=True`（默认）生效，任一失败静默回退，不抛不阻断。
+  - **领域自动归类增强（OpenAlex concepts）**：规则命中优先级不变（确定性强、可单测）；
+    未命中且有语料时，取 `.merged.json` 的 `works[].concepts` / `keywords` 概念名做词频投票
+    （`_concept_names` → `_vote_field_from_concept_names`，映射复用现有 `_FIELD_KEYWORDS`，
+    泛概念如 Medicine/Biology 不误命中）；仍不命中且联网则用 OpenAlex 作品搜索取概念；
+    最终兜底 `general`。新增 `_infer_field_ex(topic, field, merged_json, use_network)`，
+    输出 `field_source ∈ rule | corpus | openalex | default` **透明标注来源**。
+    实测真实语料（psychiatry 相关 `works`）→ `corpus` 命中 psychiatry（58 票）。
+  - **报告规范在线核验（EQUATOR 无免费 API 的稳健替代）**：`_reporting_standards(task, use_network)`
+    维护 PRISMA 2020 / MOOSE 权威登记（名称 + 出处 DOI + URL），联网时用 `verify_citations`
+    核验出处 DOI 真实存在，输出 `prisma_source ∈ verified_online | static`。
+    ⚠️ 判据修正：早期误用 `status == "verified"`，导致出版方 403 的 `bot_blocked`（DOI 真实、
+    仅拦爬虫）被误判为失败、`prisma_source` 低估为 static；已改用 `citation_verified`
+    （ok / bot_blocked 均表示 DOI 已解析到真实资源）→ 真实网络下正确得到 `verified_online`。
+  - **Semantic Scholar 高引推荐（有 key 才用）**：`_highly_cited(topic, field, use_network, limit=5)`
+    沿用 ct-literature 既有策略——`load_s2_key()` 无 key 直接跳过（不发注定 429 的请求），
+    有 key 时按主题/领域查高引论文 top 5（title/year/citations/venue/doi）并排序；
+    状态词表 ok | skipped_no_network | skipped_no_client | skipped_no_key | skipped_no_query | degraded，
+    经输出键 `s2_status` 暴露。
+  - `rendering.py`：发表建议卡增加 `field_source` 来源标注、`prisma_source` 脚注与出处链接、
+    高引推荐列表（折叠 `<details>`）。
+  - 降级保证不变：ct-literature 缺失 / 断网 / 无 S2 key → 静态清单 + 规则领域 + 跳过高引。
+    `adapters/tests/test_writing_advisor.py` 由 26 例扩至 **52 例**（P2c 新增 26 例，全部离线 mock）；
+    连同 `test_interpretation` + `test_envelope_guard` 共 **118 例通过**。
+
+- **Block C（论文撰写与修改）全流程完备性审查与修复（2026-09-14）**：对 C1→C4 做端到端审查，
+  发现并修复 **8 类缺陷（含 2 处红线级）**；`adapters/tests/test_block_c.py` 由 15 例扩至 **26 例**。
+  - 🔴 **C3 断网误判「疑似虚构」**：`ref_verify._get` 把所有异常吞成 `None` → `not_found`，
+    离线/API 不可达时**真实文献被判虚构并置 critical**（红线误杀）。新增 `_get2` 区分
+    **明确未收录（HTTP 404）** 与 **网络/接口不可达**，后者新增状态 `unverified_offline`
+    （C3 计 `n_unverified`、**不判 critical**，note 提示「须联网重试」）；`_get` 降为兼容包装。
+  - 🔴 **C4 QA 红线泄漏**：`references=None`（零条参考被真实核验）时，「参考完整性核验通过（C3）」
+    仍报 `pass=True`。改为按 C3 新增的 `refs_verified`（= 有参考 ∧ 无 critical ∧ 全部完成真实核验）
+    判定，未核验时 `pass=False` + 「不可投稿」。
+  - 🔴 **C3 忽略上游 `is_retracted` 标注**：已知撤稿文献若缺 DOI/PMID，API 无法判定 → 撤稿文献
+    可绕过 `reference_verification` 红线。`verify_references` 现采纳入参 `is_retracted` 提示并置
+    `status=retracted`（含无标识条目）。
+  - **C3 英文稿误判缺章**：章节核验只认中文（`s.title()` 对中文无变化）→ 英文章节名全被判缺失并置
+    critical。改为 `_SECTION_PAIRS` 中英对照、**任一侧命中即视为存在**；`_REQUIRED_SECTIONS` 由其
+    派生（消除原死代码）。另加兜底：只给 `manuscript` 未给 `sections` 时从正文 `## 标题` 识别。
+  - **C 阶段 `prev_stage_id` 跨块泄漏**：`block_c` 复用 `block_b._mk_stage`（内部取
+    `BLOCK_B_SEQUENCE`/`BLOCK_B_TOTAL`）→ C2/C3/C4 的 `prev_stage_id` 指向 `B1/B2/B3`（溯源错误）。
+    本块自行实现 `_mk_stage`（用 `BLOCK_C_SEQUENCE`/`BLOCK_C_TOTAL`），与 block_a/block_b 同构。
+  - **C3 静默丢弃无标识参考**：去重键 `"{doi}|{pmid}"` 使多条无 DOI/PMID 的参考折叠为同一 key
+    `"|"` 而被跳过。改为只对有标识条目去重，无标识用下标唯一化。
+  - **C3 `notes` 计算后被丢弃**：`notes`（核验结论说明）构建后未进返回 dict，与 docstring 声明的
+    `{report, critical, notes, coze_ready, ...}` 不符。现返回 `notes` 并新增 `refs_verified`
+    （`coze_ready` 保留为向后兼容别名，coze 依赖已于 P2b 移除）；`note` 改为随结论动态生成。
+  - **死代码/坏味**：`c3["critical"] or True` 恒真三元（C3 为红线闸，恒需人工批准）→ 直写 `await_human`。
+  - **SPEC 漂移**：`contracts/pipeline_stage/v1.0.0/SPEC.md` §9 的阶段 ID 与实现及全部 fixtures
+    （`fullflow.GATE_TO_STAGE` / `flow_menu` / `form_schema` / `driver_demo` / `cases/fullflow_session_*.json`）
+    长期不一致（SPEC 写 `C2.manuscript_review`/`C3.ref_verification`/`C4.grade_table_ev` 与 5 段 B，
+    实际为 `C2.ai_review`/`C3.ref_verify`/`C4.evidence_qa` 与 4 段 B）；§3 示例同步更正为 `C2.ai_review`。
+  - 附：`scripts/smoke_human_gates.py` 的 `fake_a2` 形参漂移（缺 `sources`）致脚本中断在 A2、C3/C4
+    覆盖无法执行 → 签名对齐后 **ALL PASS**。
+  - 验证：`test_block_c` 15→**26 例全绿**；`adapters/tests` 全量失败数 11→8（余 8 项为既有 coze 契约层
+    与缺 `fastapi`/`reportlab` 环境问题，与本模块无 import 交集）；`deploy_retest` G3 **GO**；
+    真实网络端到端：PRISMA 2020（`10.1136/bmj.n71`）等 2 篇 → `status=ok`、`refs_verified=True`、
+    QA 全 PASS，闸门 `C3→C4→done` 正确推进。
+
+### Changed
+
+- **A2 菜单收敛为 3 项（2026-09-11 用户裁定）**：移除「[4] 传回合并表」（上传入口撤销，
+  用户离线修改后直接走 ③ 数据抽取/A4 修订）；`[1]` 标签改为「批准并导出合并表」
+  （明示批准即自动落盘 Excel）；`[3]` 标签改为「导出检查（不改变状态）」（明示只读、
+  不推进状态机）。摘要「文件交接」行同步改为「仅供检查；如需修改，到 ③ 数据抽取（A4）
+  修订」；A1 缺选题提示文案同步。底层 `apply_screening_upload` 解析器保留（编程式
+  调用仍可用），仅撤销菜单入口。回归 `tests/test_flow_menu.py` 185 PASS。
+- **飞书汇总留痕降耗（协同变更，meta-analysis 侧零代码）**（2026-09-11）：
+  下游 ct-literature v1.1.2 的飞书汇总调用改用 `mode="log_only"`
+  （Coze 端 `ct-registry/adapters/coze` v0.2.0 `route_by_mode` 直连 `feishu_write_node`，
+  跳过检索节点，仅写审计记录）。meta-analysis 经 `tool_card` 传入的常规检索调用
+  不带 `mode`，行为完全不变。
+
+### Added
+
+- **A1 菜单新增「帮助选题（可行性速览）」**（现为 A1 第 4 项，`scripts/flow_menu.py`，2026-09-11）：
+  选题阶段即可按需触发一次注册库探针（`block_a.a1_registry_check`），把
+  `registry_probe` / `feasibility` 写回 A1 `stage_result`，菜单摘要随即补出
+  「注册库探针」行（条数 + 拥挤度 + 风险预警），辅助用户在放行 ② 前先评估可行性。
+  - 新增 CLI 子命令 `probe`（`flow_menu.py probe --apply`），默认 dry-run；
+    `--max N` 控制探针样本上限。
+  - 非状态机决策项（不推进流程、不进 `human_decisions`）；选题缺失时菜单自动隐藏。
+  - 探针异常（`ct-registry` 缺失 / 网络失败）优雅降级为 `status=error`，不阻断 A1。
+
+### Changed
+
+- **A1 缺选题时不再渲染可操作选项**（2026-09-11 逻辑修正）：选题菜单在尚无有效选题（`_a1_topic_missing`）时，只渲染提示行（`a1_need_topic`，引导用户先发主题文字），**不渲染** `[1]批准 / [2]改PICOS / [3]改检索范围 / [4]可行性速览`——避免"还没选题就出现批准选项"的怪异状态。选题确认后菜单才给出完整 4 项。测试：`tests/test_flow_menu.py` 178 PASS（新增「A1 缺选题 → 不渲染任何可操作选项」断言）。
+- **A1 移除「上传裁决表并放行」入口**（2026-09-11 用户裁定）：该入口**只保留在 A2 合并节点**
+  （`[4] 传回合并表`），不再出现在 A1。A1 现收敛为 4 项：
+  `[1]批准 [2]改PICOS [3]改检索范围 [4]可行性速览`。A1 缺选题提示文案同步改为指引用户在
+  进入 ② 后用 A2 节点上传。测试：`tests/test_flow_menu.py` 177 PASS（A1 选项 5 → 4）。
+- **A1 选项 3「改检索范围」扩展为同时控「综述 + 数据源」**（2026-09-11 用户裁定）：
+  除 `include_reviews`（原始研究-only ↔ 含综述类）外，新增 `sources` 检索数据源增减。
+  - 菜单项 `[3]` 现声明 `keys=["include_reviews","sources"]`，agent 收集两值；
+    `build_decision` 对多键修订一次性占位两键。
+  - `sources` 进入 `EDITABLE_KEYS["A1.topic_selection"]`；`fullflow._run_block` 读
+    `latest_revision("A1.topic_selection").sources` 注入 `run_block_a(sources=…)` →
+    `a2_literature_search` → `a2_build_tool_card` 的 `params.sources`，透传 ct-literature。
+  - 可选池 `block_a.AVAILABLE_SOURCES` = OpenAlex / EuropePMC / bioRxiv / medRxiv /
+    SemanticScholar / arXiv（与 ct-literature `fetch_coze_unified._SOURCE_DISPLAY`
+    单一真源一致）。
+  - A1 摘要「检索范围」行追加数据源列表（`检索范围：<模式> ｜ 数据源：OpenAlex、EuropePMC`）。
+  - 测试：`tests/test_flow_menu.py` 182 PASS（新增「选项3 声明双键」「sources∈EDITABLE_KEYS」
+    「decide→双键占位」「scope 行含数据源」4 条断言）。
+- **检索数据源（`sources`）现已真正被 ct-literature 消费**（2026-09-11 实测修复）：
+  此前 `params.sources` 会被静默丢弃——`tool_mapping_meta.json` 的 `arg_map` 未把
+  `sources` 映射到 CLI，且 ct-literature 根本没有 `--sources` 参数。三处已补齐：
+  - `tool_mapping_meta.json`：`arg_map` 增 `"sources": "--sources"`；
+  - `block_a.a2_build_tool_card`：`sources` 列表归一为逗号串（`str(list)` 会得到
+    `"['A', 'B']"`，ct-literature 无法解析）；`None` 时不写键（默认全量行为不变）；
+  - ct-literature `ct_literature.py` 新增 `--sources`（逗号分隔子集，**覆盖**各
+    `--with-*` / `--cochrane` 默认；未知源名报错退出；`PubMed` 别名并入 EuropePMC；
+    OpenAlex 为管线基座不可关闭，缺省时 stderr 提示）。
+  - **诚实更正**：早先 `AVAILABLE_SOURCES` 里的 `PubMed` / `Cochrane` / `WebOfScience` /
+    `Scopus` 是错的——PubMed 并入 EuropePMC、Cochrane 是 EuropePMC 的 journal-filter
+    子模式、WoWS/Scopus 无授权 API，均非 ct-literature 独立可检索源。
+  - 测试：`adapters/tests/test_block_a.py` 18 OK（新增 `test_sources_wired_to_cli`、
+    `test_available_sources_are_real` 两条回归，锁住「arg_map 缺 sources」这类静默失效）。
+  - 端到端实测（无网络，preview 模式）：`--sources "OpenAlex,EuropePMC"` →
+    `sources=[OpenAlex + EuropePMC]`；`--sources "OpenAlex"` → `sources=[OpenAlex]`；
+    无参 → 默认 `[OpenAlex + EuropePMC, bioRxiv, medRxiv]`（向后兼容）。
+
+### Fixed
+
+- **出站 coze 信封补齐 `skill_version` + `user_language`**（2026-09-11，对齐 ct-base
+  `coze_io_contract.md §1.1/§1.2`）：此前 meta-analysis 的 `run_meta` / `build_stage_payload`
+  只带 `contract_version` / `schema` / `query_origin` / `request_id`，**缺** ct-base 要求的
+  `skill_version`（顶层）与 `params.user_language`（对照组：ct-literature 早已携带三者）。
+  - `adapters/coze_client.py` 新增 `_skill_version()`（读 `SKILL.md` frontmatter `version:`，
+    失败回退 `2.12.0`）、`_resolve_user_language(override)`（三级优先级，复用 `scripts/i18n._current_lang`）、
+    `_with_user_language(params, override)`（单一承载位，已有有效值不覆盖）。
+  - 注入点：`run_meta`（顶层 `skill_version` + `params.user_language`）、`build_stage_payload`
+    （同）、`run_stage`（新增 `user_language` 透传，legacy 分支同样转发）。
+  - 契约细节：`skill_version` **仅顶层**（不得嵌套 `params`）；`user_language` **仅 `params`**
+    （顶层不双写）；均可选 + 向后兼容（缺失不改变旧格式）。`sanitize_payload` 只重写字符串值、
+    不丢键，故两字段安全穿过出站脱敏。
+  - 测试：`adapters/tests/test_pipeline_client.py` 新增 `TestCozeContractFields`（3 条：
+    stage 信封字段位、legacy `run_meta` 字段位、`user_language` override）→ **10 OK**（原 7）。
+    `test_fullflow.py` 9 OK、`test_block_b.py` 20 OK 无回归。
+
+- **A1 修订（改检索范围 / 改 PICOS）之后回到 A1 等待批准**（2026-09-11，用户裁定）：
+  此前 A1 的 `revised` 决策走通用 `_advance` 路径 → 重跑整块 Block A（含全库检索）并越过
+  A1 批准闸直接跳到 A2，既触发无谓的全库检索、又让"改个检索范围"跳过了 A1 批准。
+  - `adapters/fullflow.py` 的 `resume_fullflow` 对 `stage_id=A1.topic_selection` 的 `revised`
+    决策新增特例：**只把修订补丁进 Block A 信封的 A1 `stage_result`**（`include_reviews` /
+    `sources` / `report`，跳过值为 `None` 的占位键），随后**停回 A1**（`await` 仍为 A1
+    软停，不重跑、不前进）。用户复核新检索范围后于 A1 批准，才按新范围触发真正的检索。
+  - 修订仍经 `record_decision` 落盘（审计不丢）；`latest_revision("A1.topic_selection")`
+    后续被 `_run_block` 读取，注入 `run_block_a(include_reviews=…, sources=…)`，批准即生效。
+  - 信封缺失（异常）时回退通用重跑路径，行为降级安全。
+  - 测试：`adapters/tests/test_fullflow.py` 新增 `TestA1ReviseStaysAtA1`（3 条：
+    `test_revise_scope_returns_to_a1` 断言停回 A1 且 `a2_literature_search` 调用 0 次、
+    信封 A1 `stage_result` 已补写、修订已落盘；`test_revise_report_also_returns_to_a1`；
+    `test_approve_after_revise_triggers_search_and_advances` 断言批准后才触发检索且仅 1 次）
+    → **12 OK**（原 9）。
+
+## [2.12.0] — 2026-09-10 — A2/A3 合并为单节点「文献集」（D21）
+
+> **一句话**：把 Block A 的 **A2 检索** 与 **A3 初筛** 合并为单节点「文献集」
+> （`A2.literature_search`）——一次软停、一张合并表。A 阶段序列 `A1→A2→A3→A4`
+> ⇒ **`A1→A2(文献集)→A4`**（停靠点 4→3）。并顺带修掉「批准即重跑检索」。
+
+### Added
+
+- **合并节点 `_a2_merged_nha()`**（`adapters/block_a.py`）：该节点 `next_human_action` 的唯一真源，
+  键位刻意保留 `coverage`（原 A2）/ `summary` / `decisions`（原 A3），避免下游漂移。
+- **两条入口**（用户明确要求）：
+  1. **从 A1 过来**——A1 批准 → 系统自动检索 + 同节点内规则初筛 → 软停。
+  2. **用户自己上传 Excel 转换过来**——A1 菜单 `[4] 上传裁决表并放行`，或 A2 节点内 `[4] 传回合并表`。
+     识别到「裁决」列即按裁决表解析（`apply_screening_upload`，仅替换 `summary`/`decisions`，保留 `coverage`）；
+     无「裁决」列视为文献清单整表替换。
+- 合并表导出 `export_screening_xlsx()` 产出单张表：检索结果底表 + 「裁决 / 理由 / 文献类型确认」列。
+
+### Changed
+
+- `BLOCK_A_SEQUENCE` = `[A1, A2, A4]`；`fullflow.DEFAULT_PAUSE_AT` 删 `A3.screening`；
+  `EDITABLE_KEYS["A2.literature_search"] = ["query", "screened"]`。
+- `workbench/form_schema.py`：`STAGE_ORDER` 删 A3 行、A2 标题改「文献集（检索 + 初筛）」；
+  `SCHEMA["A3.screening"]` 整段删除；`TITLE_EN` 同步。导航条 12 → **11 节点**。
+- `scripts/flow_menu.py`：`A_STAGES` 去 A3；`_a2_summary` 合并检索覆盖 + 初筛漏斗；
+  `_a2_options` = `[1]批准 [2]改检索式 [3]导出合并表 [4]传回合并表`；`_a1_options` 增 `[4]`；
+  删 `_a3_summary`/`_a3_options`；A4 回退目标改 A2。L0 导航条与 A 阶段编号随之更新。
+- 自动导出文件名 `A2_检索结果_<pid>.xlsx` → **`A2_文献集_<pid>.xlsx`**。
+
+### Fixed
+
+- **「批准即重跑检索」**：原 `_run_block` 仅在（旧）A3 已批准时复用缓存，批准 A2 会整块重算 →
+  检索漂移 + 人工在 Excel 上的复核被作废。合并后判断点上移到 **A2 已批准**，续跑复用 A1/A2
+  缓存、只跑 A4（`start_stage="A4"`）。
+- `scripts/smoke_human_gates.py` stub `fake_a2` 的 `source` 用小写（`openalex`）而生产为 TitleCase
+  （`OpenAlex`）→ `CORE_SOURCES` 判定漏配、`search_status` 误降级为 `partial`；已修正 stub 并补
+  `skipped` 断言。
+- `adapters/tests/test_fullflow.py` `sys.path` 只加了测试目录（未加 `adapters/`）→ `import block_a` 失败；
+  补 parent 路径。
+- `adapters/tests/test_block_a.py`（全仓扫描才发现的漏检项）：① `_fake_execute_tool_cards` 与
+  `_fake_reg_exec` 缺 `on_line` 形参 → 生产侧 `a2_literature_search` 透传流式回调时 `TypeError`；
+  ② `test_a2_ran_in_pipeline` 断言 `[A1,A2,A3,A4]` → `[A1,A2,A4]`；③ `test_gate_rejects_wrong_stage`
+  的反例由 `ba.A3` 改 `"B1.merge"`（A3 已非停靠阶段，避免歧义）。修前 7 errors → 修后 16 tests OK。
+
+### Verified
+
+- `tests/test_flow_menu.py` **175 PASS / 0 FAIL**（原基线 179，见说明：删 A3 用例、并入 A2 断言）。
+- `tests/test_a3_doc_type_confirm.py` **28 PASS / 0 FAIL**；`adapters/tests/test_fullflow.py` **9 tests OK**；
+  `adapters/tests/test_block_a.py` **16 tests OK**；`adapters/tests/test_block_b.py` 20 OK；
+  `adapters/tests/test_pipeline_client.py` 7 OK；
+  `adapters/tests/test_phase2_rewind_revise.py` OK；`scripts/smoke_human_gates.py` **ALL PASS**。
+- **两处既有失败与本轮合并无关**（供后续单独处理）：`tests/test_pdf_extractor.py` 缺 `reportlab` 依赖；
+  `tests/test_block_c.py` 3 failures —— 该测试只 import `coze_client`/`block_c`（不 import `block_a`），
+  失败源自更早会话对 `coze_client.py` 文案的改动，属既有技术债。
+
+### Compatibility
+
+- `block_a.A3 = "A3.screening"` 常量保留；旧会话的独立 A3 载荷（`screened`/`decisions`）仍可被
+  `export_screening_xlsx` / `apply_screening_upload` / `_run_block` 续跑读回；**新会话不再产生 A3**。
+
+---
+
+## [2.11.1] — 2026-09-10 — CCM 实测记录：2 项契约缺口 + 1 类数据陷阱（**无代码改动**）
+
+> **一句话**：用 `runs/` 真实会话把 CCM 跑起来做验收，渲染器本身正确，
+> 但暴露了 **A4 下载配额**、**A4 菜单不暴露 `fetch_log`**、以及**旧会话数据被当新契约渲染**三类问题。
+> 本轮**只改文档**：规范新增 §7.1 + §8 两行；交接文档 `references/HANDOFF_2026-09-10.md` 整篇重写。
+
+### Added — 规范 `references/conversation_flow_menu.md`
+
+- **§7.1 会话版本漂移**：`runs/` 存量会话可能早于当天契约，CCM 会**照实渲染旧语义**（看起来正常、实则误导）。
+  给出**贴菜单前必验的 4 个字段**：`await.gate` 是否闸名字符串 / `per_doc[*].doc_type_confirmed` /
+  A3 行有无 `doc_type_source` / `cursor.block` 与 `stage_id` 是否同块。附两例实测（`ff-9fc5c5469a4d`、`ff-65e2e0076337`）。
+- **§8 新增 D18**：A4 下载配额 `max_attempts=12`（`block_a.py:1645`，值来自 `fullflow.py:232`）
+  **与「100% 按列表下载」直接冲突** —— 实测 59 篇过 A3 门控仅 12 篇发起下载、**45 篇被静默 `quota_deferred`**；
+  且 A4 菜单**无「继续下一批」入口**，这 45 篇在对话侧不可达。
+- **§8 新增 D19**：A4 菜单未暴露 `fetch_log` 门控分布，`已下载全文 0` 甚至掩盖
+  「盘上已有 1 份 PDF 但抽取失败（fitz 缺失）」这一事实。与 A2「沉默漏检」同类，应照搬其做法。
+
+### Changed — 交接文档 `references/HANDOFF_2026-09-10.md`（整篇重写）
+
+- 状态从「CCM 设计完成、**代码未写**」更正为「**两轮均已落地**（2.11.0）」。
+- 新增 §1.2（CCM 7 项改动 + 实现期修的 4 个渲染层 bug）、§5（CCM 怎么调用：两个调用面 / CLI / 三层菜单 / 六条硬约束 / 全局指令）。
+- 静默失效模式从 3 类扩为 **4 类**（新增「旧会话数据」）。
+- §6.2 决策表补 **D18 / D19** 并附实测数据；§6.3 记录 `test_a4_b1_handoff.py` **现在会中途崩溃**
+  （`tests/test_a4_b1_handoff.py:164` 未捕获 `TypeError`，一行守卫即可，**未改**）。
+- §8 陷阱清单从 A–H 扩为 **A–L**（新增 I 会话版本漂移 / J `relevance_skip` 误读 / K A4 计数不同量纲 / L 渲染器不做版本校验）。
+- §7 基线更正：`test_a4_b1_handoff.py` 为 **9 PASS / 4 FAIL + 尾部崩溃**（原文档记的 7 PASS/4 FAIL 已过时）。
+
+### Docs — 澄清一处易误判点
+
+- `a4_stream` 的 `gate="relevance_skip"` 触发条件是 `decision_of(sc) == DECISION_EXCLUDE`，
+  即**消费 A3 裁决**，**不是**在 A4 重新判类型。会话数据里「review-guard 默认排除：命中综述特征…」
+  是 A3 侧写下的 `reason` 被原样带出 —— 看到这句话不要误判为违反「人工确认后不再判类型」。
+
+---
+
+## [2.11.0] — 2026-09-10 — CCM 对话上下文菜单落地：菜单由代码产出，不再靠 LLM 即兴
+
+> **一句话**：给工作台同一套 schema 加一层**对话投影**——全流程轨道每次停靠都渲染
+> **代码生成、选项穷举、红线约束由状态机派生**的菜单，解决"同一节点两次渲染不一致"。
+> **规范 → `references/conversation_flow_menu.md`** · **代码 `scripts/flow_menu.py`** · **回归 `tests/test_flow_menu.py`（153 PASS / 0 FAIL）**
+> 设计归档 → `references/design/ccm/`（v0.1–v1.0，仅存设计过程）
+
+### Added — `scripts/flow_menu.py`（CCM 渲染器，确定性）
+
+- **三层菜单**：L0 导航条（12 节点压一行，✓/▶/○，每轮必贴）· L1 节点菜单（标题 + 摘要 + ⚠️ 预警 + 穷举编号选项）· L2 字段菜单（`EDITABLE_KEYS`）。
+- **CLI**：`status` / `menu` / `nodes` / `decide` / `rewind`，支持 `--session` `--lang zh|en` `--json`。
+  - `decide` / `rewind` **默认 dry-run**（只校验不落盘），加 `--apply` 才推进状态机。
+  - 退出码 `0` 成功 / `2` 用法或校验错误 / `3` 会话缺失。
+- **回显块**：固定前缀 `## 当前流程设定 / Current pipeline settings:`，与计算轨道 `## 当前分析设定:` 分离、互不覆盖。
+- **A 阶段四节点菜单**：A1（PICOS + 探针一行 + 检索范围开关）、A2（覆盖 + 沉默漏检 + `/源` 上限标注）、
+  A3（纯文件交接，**对话内零逐条编辑入口**）、A4（🔴 无跳过 + 待补传 PDF + 类型只读），加块间交接闸 2 选项。
+
+### Changed — 防漂移：选项与可编辑键一律由代码派生
+
+- **R3** 🔴 选项集由 `cc._REDLINE_GATES` 过滤 → A4 菜单**不可能**出现「跳过」；即使 LLM 误造，
+  `fullflow._validate_decision` 也会拒（双保险，不靠提示词）。
+- **R4** revise 选项 ⊆ `fullflow.EDITABLE_KEYS`；**未收录的键显式标注「暂不可用」，不静默丢弃** ——
+  A2「改检索式」因 D16 未决而暴露为 `[2] 改检索式（暂不可用）`，把既有接缝摆在明面上。
+- **R5** 当前节点与回退候选集从信封 stage 序列派生（与 `workbench/server.build_state` 同源），
+  **不重写 `workbench.html` 的 JS 逻辑**。
+- **R6** 纯算数请求（合并 / NMA / 敏感性分析）**零 CCM**，保住「描述即执行」卖点。
+
+### Changed — A2「沉默漏检」判据改为保守版（避免天天误报）
+
+- 不再拿「可调度的全部源」（`fetch_coze_unified._SOURCE_DISPLAY`，6 个）当期望——会话并未记录本次
+  实际请求了哪些源，那样必然误报。改为：`search_status ≠ ok` / `by_source` 为空 / `total == 0` /
+  **仅 1 个库返回** 四条硬判，外加调用方显式给 `--expected-sources a,b` 时才做缺库差集。
+
+### Changed — `adapters/workbench/form_schema.py`（纯增量）
+
+- 新增 `TITLE_EN`（12 节点英文标题）+ `title_for(stage_id, lang)`。原有 `title` / `SCHEMA` / `schema_for`
+  行为**逐字节不变**，工作台零影响；自检通过。
+
+### Added — `tests/test_flow_menu.py`（149 断言，0 失败）
+
+覆盖：AC-A1（A4 无 skip + 状态机拒 skipped）· AC-A2（软停含 skip）· AC-A3（A3 无逐条入口）·
+AC-A4（EDITABLE_KEYS 派生，D16 显式标注）· AC-A6（`/源` 标注）· AC-A7（沉默漏检且不误报）·
+AC-A9（12 节点 × zh/en 无缺键）· R1 只读（字节级）· R2 确定性 · R3 选项派生 + 编号连续 ·
+R5 回退候选集 · `expected_sources` 与 ct-literature 同步 · CLI 端到端 dry-run。
+
+### 文档
+
+- **新增** `references/conversation_flow_menu.md`（规范 v1.0：六条硬约束 / 状态真源映射 / 逐节点菜单 /
+  CLI / 全局指令 / 验收证据 / 不适用边界 / 未决项）。
+- `SKILL.md` §2.4 的 CCM 条目由「designed, NOT implemented」改为「implemented」并挂上命令与规范；
+  新增触发词「上下文菜单 / 对话菜单 / 全流程菜单 / flow menu」；版本 2.10.0 → 2.11.0。
+- `references/design/ccm/README.md` 状态改为「设计完成 · 已实现」，并记录 **3 处实现偏差**
+  （未加 `form_schema.menu_for()`、`pending_actions` 闸态仍未加、漏检判据改保守版）。
+
+### 未决 / 已知接受项
+
+- **D16**（A2 改检索式语义）**D10**（A4 对话内收文件）**D11**（A2 前置下载）**D14**（A1 探针展示）仍待定，
+  菜单已按建议实现但语义未闭合。
+- R 路径硬编码 `C:/Tools/R-4.6.1`（`coze_client.py:1414`）→ `tests/test_a4_b1_handoff.py` 4 项 FAIL 为既有环境问题，非本轮回归。
+
+---
+
+## [2.10.0] — 2026-09-10 — A 阶段契约重构：类型降为人工确认字段，A3 纯文件交接，A4 按清单直下
+
+> **一句话**：把「文献类型」从**判定门**降为**人工确认的一等字段**。判定权唯一归属 = A3 裁决表；A4 只读。
+> 同时修掉三类**静默失效**（接口不报错、只是安静地少做事）：写死解释器路径、元组解包元数不对称、缺 PyMuPDF。
+> **交接文档 → `references/HANDOFF_2026-09-10.md`**（含环境事实、待决策点、验证方式、陷阱清单）
+
+### Changed — 文献类型：判定门 → 人工确认字段（规则闭环）
+
+- **全链路不再做类型判断（用户裁定，2026-09-10）**：**人工确认文献类型后，任何一层都不再判类型；要改类型必须人工确认或人工发起。**
+  - `pdf_extractor.extract()`：**删除规律 R1 短路返回**（原 review/guideline/protocol → 直接 `return excluded=True`）。`classify_pdf` 保留但仅作标注，且调用包进 `try/except`（探测失败降级 `unknown`，绝不阻断抽取）。
+  - `extract()` 返回 `review_summary` 增 `excluded`（**恒 False**）/ `doc_type` / `signals` / **`type_notice`**（给闸位人读的提示文案）。
+  - `block_a._a4_extract_pdf`：`doc_info["excluded"]` 恒 False，`type_notice` 透传。
+  - 上传快速通道（`a4_seed_from_pdfs`）：删 `if doc_info.get("excluded")` 分支 → 一律 `extracted`。
+  - `a4_stream` 缓存分支：删 `doc_info.excluded` 判断 + 删已成死分支的 `elif status == "excluded_review"`。
+  - 结果：A4 **100% 按 A3 清单下载与抽取**，不存在 `excluded_review` 状态。
+
+- **D17-A：文献类型成为 A3 裁决表的一等字段**
+  - 类型词表 `original | review | guideline | protocol | unknown` 两个技能本就同源；预填**直接复用 `ct-literature doc_type_filter.classify_record()`**，**不在本技能内写第二套判定**。
+  - 新增 `block_a.rule_doc_type()`（规则预填）与 `_read_doc_type()`（A4 只读唯一入口）。
+  - 导出表新增「文献类型确认」列（规则已预填，下拉可选）；回传读取 + 校验 + 落审计字段：
+    - 单元格非空 → 权威值，`doc_type_source="human"`；与预填不同 → 记 `doc_type_changed` + 留 `doc_type_rule` 对照（**「改判几篇」可审计**）
+    - 留空 → 未确认，沿用规则预填，`doc_type_source="rule"`（不拦流程，计数可见）
+    - 取值非法 → **报错不前进**，并指出具体哪一行
+  - A4 侧：抽取层探测降为 `doc_type_detected`，**仅在与确认值不一致时**提示人工；`review_note` 由确认值驱动。工作台 A4 文案改为「类型只读 A3，要改请回 ③」。
+  - **保留的两处类型判断均不越界**：A3 `is_likely_review()` review-guard（人工确认**之前**的预填建议，可改）；`review_note` / 工作台 `🔍 疑似综述` 徽标（**纯提示**，不做排除）。
+
+### Changed — A3 = 纯文件交接
+
+- A3 不再在对话/界面内逐条裁决：**导出裁决表 → 人工改 → 回传 → 校验 → 直接接 A4**。接线复用既有的 `export_screening_xlsx()` / `parse_screening_xlsx()`（`block_a.py`），**双端（工作台 + 对话）走同一套函数，漂移风险归零**。
+- 回传校验失败一律不前进：列完整 / 行可对齐 / `decision` 合法 / `exclude` 必填 `reason` / 不允许新增行 / **零匹配拦截**。
+
+### Fixed — 三类静默失效
+
+- **A1/A2 解释器路径写死（P0，静默失效）**：`tool_mapping_meta.json` 两条 `cmd[0]` 写死 `C:/Anaconda3/python.exe`（本机不存在，实际为 `C:/Tools/Anaconda3/python.exe`）。`_load_tool_mapping()` 只展开 `skill_dir`、不碰 `cmd` → 每次 `FileNotFoundError` → 被 `except Exception` 吞掉 → `status:error` → 兜底读空目录 → **A2 静默返回 0 篇、A1 注册库探针静默无返回**（界面只显示「合并总数 0」或「探针无返回」，不报错）。
+  修法：`cmd[0]` 改为占位符 `{python}`；新增 `coze_client.resolve_python_exe()` 运行时解算（环境变量 → Anaconda base 候选 → `sys.executable` → PATH，**只认实际存在的文件**）。这样 `cmd[0]` 从「硬编码环境事实」降级为「兜底默认值」，换机不再复现。
+
+- **A4 下载路径元组解包元数不对称（静默失效）**：`_a4_extract_pdf` 自 v0.3 起返回 **6 元组**（末位新增 `doc_info`），三个调用点中**只有下载路径（`_a4_fetch_one`）仍按 5 元组解包** → 每次「下载成功 → 抽取」抛 `ValueError: too many values to unpack (expected 5, got 6)`，被 `a4_stream` 的 `except` 兜成 `gate=worker_error` / `status=needs_upload`。
+  **症状极具迷惑性**：首轮全篇显示「待补传 PDF」，**重跑却正常**（PDF 已落盘 → 走缓存分支，那条是 6 元组）→ 易误判为 OA 覆盖不足。
+
+- **缺失 PyMuPDF 致 A4 抽取不可用**：`fitz` / `pymupdf` 均缺失（仅 `pdfplumber` 在）→ `classify_pdf`（`:142`）与 `parse_pdf`（`:218`）硬依赖 `fitz`。已安装（见下方「环境」）。
+
+- **G：裁决表 Works 表无 DOI 列**：`_WORKS_COLS` 11 列不含 DOI，而导出侧按 DOI 建键、回传侧只能给出标题键——当时能对上只因 `_match_keys` 生成多键且在含 DOI 的基线 decisions 上匹配，属**巧合容错**。一旦两端标题归一化口径分叉，匹配会**静默降为 0 且不报错**。修法：`_WORKS_COLS` **补 DOI 列**（回传匹配键显式化）+ 零匹配拦截。
+
+### Added
+
+- **`ct-literature/scripts/export_xlsx.py` 通用附加决策列能力 `decision_extra`**（e.g. meta 的「文献类型确认」列）：**不传该参数时行为与旧版逐字节一致**（实测无附加列表头仍以「理由」结尾）——不把 meta 的需求硬编码进 ct-literature。
+- **`tests/test_a3_doc_type_confirm.py`**：A3 类型确认链路回归测试（临时冒烟固化为技能资产）。覆盖 4 类预填 → 导出预填 → 改判/留空 → 非法值拦截 → A4 只读 + 不一致提示 → 导出器向后兼容。
+- **`references/HANDOFF_2026-09-10.md`**：交接文档（改动清单、环境事实、静默失效模式、待决策点、验证方式、陷阱清单）。
+- **`references/design/ccm/`**：对话上下文菜单（CCM）设计归档（v0.1–v1.0 + README 索引）。**设计完成、代码未实现。**
+
+### Environment
+
+- **PyMuPDF 1.28.2 已装，但在 user site**：base 的 `site-packages` 对本机普通用户**只读**（`BUILTIN\Users: ReadAndExecute`）→ 必须 `pip install --user`，落点 `C:\Users\Wintone\AppData\Roaming\Python\Python314\site-packages`（**不在 PATH，换机部署需重新确认**）。wheel 文件名**不可重命名**（否则 `Invalid wheel filename (wrong number of parts)`）。
+- **R 解释器路径为已知接受项（用户明确决定跳过，勿误判为回归）**：`coze_client.py:1414` 写死 `C:/Tools/R-4.6.1/bin/Rscript.exe`，本机不存在（实际 `C:/Program Files/R/R-4.2.2/bin/Rscript.exe`，且已在 PATH）→ B1 `k=0` / `TE=None`。`tests/test_a4_b1_handoff.py` 的 4 个 FAIL 均由此项所致。
+
+### Verification
+
+| 检查 | 结果 |
+|---|---|
+| `tests/test_a3_doc_type_confirm.py` | **28 PASS / 0 FAIL** |
+| `tests/test_a4_b1_handoff.py` | 7 PASS / 4 FAIL（FAIL 全为 R 路径已知项，与改动前逐条一致） |
+| A2 端到端（修复后） | `ct-literature --help` / `ct-registry --help` 双双 **rc=0**；`a2_build_tool_card` → `execute_tool_cards` `status=ok`，`_read_literature_dir` 取回 **20 篇真实文献** |
+| A4 综述篇目 | 旧逻辑必拦 → 现 `gate=pass_downloaded`，PDF 落盘、`event=extracted` |
+| `extract()` 类型短路（哨兵法） | 类型=review 仍走到 `parse_pdf`；`classify_pdf` 抛缺 `fitz` 异常不阻断 |
+| 合成 PDF 真实抽取 | `doc_type=original` / `excluded=False` / `A4 rows=1` |
+| `grep excluded_review\|type_screen_page\|_skip_page_screen`（`.py`） | **无代码级残留**（仅注释） |
+
+### Notes — 陷阱与教训（详见 HANDOFF §7）
+
+- **A2 `--max` 是每源上限，非合并上限**（`--max 5` × 4 源 = 20 篇）——菜单文案须写「5/源（合并 20）」。
+- **`_read_literature_dir` 是主路径而非兜底**：stdout 只吐 NDJSON 日志，数据全在 `.merged.json`，`_extract_studies` **恒为 0**。注释曾写「回退读取」，是维护陷阱。
+- **改了返回契约（元组加长、字段新增）后，必须 `grep` 全部调用点逐一核对解包元数**——`_a4_extract_pdf` 三处调用点改了两处，漏的那处恰在关键路径上。
+
+---
+
 ## [2.9.19] — 2026-09-09 — 开发期结束，恢复生产态双站点路由
 
 ### Changed
@@ -102,6 +2150,21 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ### 验证
 - `node --check` 抽取内联 JS 通过；HTTP GET / 返回 200 且含 `wb-brand`/`--wb-topbar-bg`/`--wb-row-alt` 等新标记；server 已重启载入。
+
+---
+
+## [2.9.17] — 2026-09-17 — 回退/提交报错可诊断化（前端错误透传 + 渲染容错）
+
+> **目标**：用户反馈"回退按钮选了目标后报错"。经排查，当前源码下 rewind→decide 全链路 422/报错均不可复现：① `DecideReq.stage_id` 已于 2.9.12 改为 `Optional[str]`（handoff_confirm 的 null stage_id 不再 422）；② 前端 `decide()` 所有调用点均传字符串 action、`STATE.session.path` 恒由 `build_state` 注入，故 `decide_stream` 在源码层面不可能 422（已用 TestClient 端到端复现 rewind→decide 两次均 200 证实）；③ `schema_for()` 对任意未知 stage_id 回退通用 schema，不会返回 null。本版本不修"假想 422"，而是修复"报错无信息"——让真实错误（含字段级校验 detail）与渲染异常透传到界面，使残留问题可定位。
+> 退出标准：① 任何非 200 响应（422/400/500）在前端显示 FastAPI `detail` 而非裸状态码；② `render()` 异常不再静默黑屏，显式提示 + 堆栈。
+
+### Fixed
+- **前端错误透传（关键）**：`workbench.html streamPost()` 原在非 200 时仅抛 `"422 Unprocessable Entity"`，丢弃 FastAPI 的 `detail`（含 pydantic 字段级校验错误）。新增 `_extractDetail()`：`!r.ok` 时读取响应体、提取 `detail`（字符串或 422 数组逐条展开），错误信息由"处理响应失败：422"升级为可读的字段级原因。同步收敛 `rejectAndRewind()` 与快速通道 `start_data` 的 `!r.ok` 处理到同一 `_extractDetail()`。
+- **渲染容错**：`render()` 外包 try/catch（实现体移入 `_renderInner()`）。此前任一渲染异常会静默黑屏、表现为"页面报错且无信息"；现显式提示"渲染失败：<msg>"并附堆栈到后台输出，便于定位回退/提交后渲染问题。
+
+### Verification
+- `adapters/tests/test_phase2_rewind_revise.py` 9/9 PASS；新增 `adapters/tests/_repro_rewind_full.py`：从"已推进到 B"的会话回退到 A2 / A1，再 `POST /api/decide`，两次均 200、无 422。
+- `node --check` 校验 workbench.html 两个 `<script>` 块语法通过。
 
 ---
 
