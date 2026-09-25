@@ -8,6 +8,11 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ### Fixed
 
+- **发布版接入 ct-base §12 后台大模型 LongCat-2.0 + 修复「后端未连接」误报（2026-09-25）**：
+  - **背景**：云端 sandbox 无 `~/.workbuddy/models.json` 与 LLM 环境变量 → `topic_translate._candidates()` 为空 → 中文主题自动翻译在发布版上**静默失效**（境外库 0 命中老坑的另一种形态）。按 ct-base `references/workbench_ui.md` §12（家族统一 LongCat-2.0，2026-09-25 起）接入：新增 `adapters/llm_loader.py`（ct-base 拷贝）+ `config/llm_key.py`（XOR 混淆公用 key，不落明文），`_candidates()` 末尾追加 LongCat-2.0 兜底候选（`LONGCAT_API_KEY` 环境变量 > 混淆文件；本地 models.json 命中更快源时行为不变）。两文件入 `WHITELIST_FILES` + `REQUIRED_IN_PAYLOAD` 自检（漏发=静默丢功能类）。验证：载荷级模拟 sandbox（`WORKBUDDY_MODELS_JSON=/nonexistent`）起服，`/api/topic_help` 返回 LongCat 翻译的英文检索式；线上中文主题实测 `semaglutide cardiovascular outcomes…` ✓。
+  - **「后端未连接」误报**：sandbox 冷启动首请求 >2s，而前端 `wbProbeBackend` 是**单次 2s 超时探测**、失败后永不再试 → 页面永显离线（`/health` 实测热态 0.45s、服务本身正常）。修复：探测改为带退避的多次重试（2s→3s→5s→8s，间隔 400ms，任一成功即「后端就绪」），并给状态 pill 加「点击重新探测」兜底。线上回归：新逻辑已在首页、`/health`、`/api/features`、翻译链路全绿。
+  - 重发布：沿用 appId 覆盖，链接不变 `https://meta.app.workbuddy.host/`（载荷 35 文件、自检 + py3.11 守卫通过）。
+
 - **重新发布应用（2026-09-25）+ 线上 3.11 语法回归修复**：首次部署失败——线上 import `block_c.py:882` 抛 `SyntaxError: unterminated string literal`（C1 摘要段的 f-string 把三元条件在 `{ }` 内折行续写，PEP 701 跨行表达式仅 3.12+ 合法；本地 3.13 编译通过故未拦截）。修复：条件表达式提出 f-string 存 `_synth_part` 变量。
   - **守门盲区补齐**：`check_py311.py` 此前只查「表达式内反斜杠」，漏掉跨行与同引号两类 PEP 701 放宽。已增 `fstring-expr-multiline` / `fstring-expr-same-quote` 规则（三引号外层自动跳过 same-quote，避免合法嵌套单引号误报），并用本次事故代码做复现自测：旧版 0 检出、新版精准命中 1。全树重扫：源码树 0 问题（唯一命中即该未同步的旧载荷副本，重建后清零）。
   - **发布结果**：重建载荷（33 文件自检全过 + py3.11 守卫通过）→ 本地冒烟（`python main.py` 起服、`/health` ok、首页 200）→ 沿用 appId `wbapp_hNZl928SI6wByvJt2COtcC` 覆盖发布成功，链接不变 `https://meta.app.workbuddy.host/`。线上回归：`/health` ok、`/` 200、`/api/features` 正常下发（a4_extraction=false）、别名域 `meta.app.workbuddy.link` 200。
