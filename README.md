@@ -188,6 +188,11 @@ Tests are grouped by **analysis purpose** (7 categories below). Each row gives t
 | Survival meta | "Pool survival HR via metafor (survmeta removed)" |
 | Trial sequential analysis | "Run TSA — see how many more studies are needed" |
 | Bootstrap meta | "Use Bootstrap for nonparametric DL estimation" |
+| Component NMA (CNMA) | "Run component network meta — decompose combination treatments (A+B, additive model) and test the additivity assumption" |
+| NMA ranking | "Rank the NMA interventions: SUCRA and P-scores" |
+| Diagnostic accuracy meta | "Run diagnostic-accuracy meta — I have tp/fp/fn/tn" |
+| Incidence-rate meta | "Run incidence-rate (person-time) meta" |
+| Power analysis | "What power does this meta have / how large a sample do I need" |
 
 ### ④ Effect Size & Conversion
 | Scenario | Try saying in chat |
@@ -220,19 +225,37 @@ Tests are grouped by **analysis purpose** (7 categories below). Each row gives t
 | RoB 2.0 | "Assess risk of bias with RoB 2.0" |
 | RoB 1.0 | "Assess with Cochrane RoB 1.0" |
 | ROBINS-I | "Non-randomized study — use ROBINS-I" |
+| RoB summary plot | "Draw the stacked risk-of-bias summary bar plot" |
 | GRADE | "Do a GRADE evidence-quality assessment" |
+| CINeMA (network evidence) | "Assess the NMA with the CINeMA six domains" |
 | PRISMA checklist | "PRISMA checklist" |
 
 ### ⑦ Systematic Review Workflow
 | Scenario | Try saying in chat |
 |:---|:---|
+| Topic feasibility check | "Judge my topic: efficacy of ×××" (real literature hit counts + 4-dim score verdict) |
+| Full topic report | "Produce the full topic-assessment report" (PICO → scoring → dedup → compliance pre-check → 11-section report) |
+| Literature retrieval | "Run a systematic search on this topic" (multi-source + dedup + Excel/HTML, delegated to ct-literature) |
+| Title/abstract screening | "Screen the search results" (machine pre-screen + per-record human verdict, PRISMA counts bridged) |
 | PRISMA flow | "Help me generate a PRISMA flow diagram" |
-| Literature screening | "Title/abstract screening, AI-assisted" |
+| PRISMA checklist | "Generate the PRISMA 2020 checklist (27 items)" |
+| Data-extraction assistant | "Give me an extraction sheet to fill from the papers" (blank sheet → LLM draft → **line-by-line human verification** → stamp to release) |
+| Quality gate | "Run the quality gate" (k count / I² / missing bias check — red cards block presentation) |
+| Overclaim check | "Check whether the conclusions overclaim" (abstract claims vs pooled evidence) |
+| Manuscript drafting | "Draft a submission manuscript from my analysis" (methods/results auto-filled from real data; background/discussion expanded by LLM; journal-fit advice) |
+| Author-supplied evidence | "I have my own reference list — use it" (xlsx/csv/RIS/BibTeX/PDF bundle as the draft's evidence base) |
+| Reference verification | "Verify every citation in the draft" (DOI/title reverse lookup — no hallucinated references) |
+| Pre-submission QA | "Run pre-submission evidence QA" (numbers reconciled against statistics, red-line gate) |
 | PDF batch download | "Batch download full texts from a DOI list (needs confirmation)" |
 | Graph digitize | "Extract data from a scatter plot" |
 | Missing value imputation | "Impute missing standard deviations" |
+| Full-flow web workbench | "Open the meta workbench" (guided browser-based full pipeline with clickable human gates) |
 
 > ⚠️ **PDF batch download** connects to external networks and writes files to your local disk. Run it only on explicit user instruction, and respect copyright and access controls.
+>
+> ⚠️ **Extraction red line**: an extraction table never enters pooled analysis until a human verifies it and runs `stamp --confirm` — medical numbers are never auto-fed unattended.
+>
+> ⛔ **Automatic PDF value extraction (A4) is currently suspended** (2026-09-27): the web app does not extract 2×2 numbers from PDFs automatically; if you already have the data, use the raw-data fast path (upload an ai/bi/ci/di or te/sete table).
 
 ---
 
