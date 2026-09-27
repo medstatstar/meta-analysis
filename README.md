@@ -6,6 +6,8 @@
   <img src="assets/icon.svg" width="240" height="240" alt="meta-analysis logo"/>
 </div>
 
+> **No install needed for the basics:** if you don't want to install this skill and just want to try its core features quickly, use the web app directly at **https://meta.medstatstar.com**.
+
 > **Easy-to-use R-based Meta-Analysis for Clinical Researchers**
 >
 > You don't need to code or memorize commands — just describe your meta-analysis needs in **plain language inside a chat**, and the skill **automatically runs** the full analysis (pooling, figures, report) for you. Powered by R and 14 core + 2 optional professional R packages (metafor, meta, netmeta, bayesmeta, dosresmeta, mada, etc.), it returns results in Chinese or English depending on your OS language setting (you can force-switch via a prompt at any time). Once you describe a request, the skill **auto-executes** and returns results + figures; ask for the full reproducible R code at any time.
