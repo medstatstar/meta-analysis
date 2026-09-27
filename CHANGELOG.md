@@ -6,6 +6,12 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ## [Unreleased]
 
+## [2.20.0] — 2026-09-27 — 全流程支持：从选题到投稿的端到端 Meta 分析
+
+### Added
+
+- **选题 → 投稿全流程支持**：meta-analysis 技能现覆盖系统评价/Meta 分析的完整生命周期——① 选题方向判断（topic assessment，含查新与可行性评估）② 文献检索与整理（Europe PMC / OpenAlex / biorxiv/medrxiv 多源检索、去重、筛选）③ 数据提取（A4 数值提取通道）④ 统计分析（23 种分析 + 图形，R 引擎云端计算）⑤ 研究质量评估（RoB 2.0 / AMSTAR-2 / GRADE）⑥ 论文撰写（writing-advisor，11 节结构化初稿）⑦ 投稿建议（期刊匹配与投稿策略）。用户从零开始到投稿-ready 一站式完成。
+
 ## [2.17.2] — 2026-09-27 — 开发期结束：coze 路由回切 ct-meta 主 / ct-meta2 备
 
 ### Changed
