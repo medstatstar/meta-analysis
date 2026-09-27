@@ -36,6 +36,7 @@ import datetime
 import json
 import os
 import re
+import time
 import uuid
 
 import coze_client as cc
@@ -1013,7 +1014,7 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
 def run_fastpath(topic: str, data_mode: str, *, rows=None, a4_result=None,
                  b_env=None, effect_measure: str = "OR", nma: bool = False,
                  session_dir: str = ".", debug: bool = False, demo: bool = False,
-                 topic_en: str = None) -> dict:
+                 topic_en: str = None, defer_advance: bool = False) -> dict:
     """快速通道：跳过 Block A 的选题/检索/筛选，按 data_mode 直接进入分析起点。
 
     data_mode:
@@ -1028,6 +1029,13 @@ def run_fastpath(topic: str, data_mode: str, *, rows=None, a4_result=None,
     约定：raw_csv 返回前已 _advance 跑完 Block B（停在 B4 红线）；pdf 返回前停在 A4 红线
     （cursor.block 均置为 "B"，使放行后直接进入 Block B，不再重跑空 Block A）；draft 返回前
     停在 C1 软停闸（cursor.block 置为 "C"）。
+
+    defer_advance（2026-09-27 网关 504 修复 · 方案 A）：raw_csv / draft 不在本请求内
+    同步跑 _advance（C1 初稿含 LLM 扩写，实测 50~70s，贴着 Cloudflare 60s 网关超时线，
+    时好时坏 504）。改为：建会话、落 cursor 后打 `data["_starting"]={"status":"advancing",
+    "started_at":...}` 即返回，由调用方（server 端点）交给后台线程执行
+    advance_started_session()；前端轮询 /api/session 直到 _starting ∈ {done, error}。
+    pdf 模式不经 _advance（停在 A4 人工闸），不受影响。
     """
     # 功能开关（2026-09-17）：两条快速通道已从网页隐藏；接口层同样拒绝，
     # 避免绕过 UI 生成「走了半截又无法继续」的会话。
@@ -1077,6 +1085,11 @@ def run_fastpath(topic: str, data_mode: str, *, rows=None, a4_result=None,
         sess.data["blocks"]["A"] = {"envelope": a_env, "status": "done"}
         sess.data["handoff"]["studies_for_b"] = rows
         sess.data["cursor"] = {"block": "B", "stage_id": None, "await_kind": None}
+        if defer_advance:
+            sess.data["_starting"] = {"status": "advancing",
+                                      "started_at": datetime.datetime.now().isoformat(timespec="seconds")}
+            sess.save()
+            return sess
         sess.save()
         res = _advance(sess, debug=debug)
         if isinstance(res, dict) and "error" in res:
@@ -1158,6 +1171,11 @@ def run_fastpath(topic: str, data_mode: str, *, rows=None, a4_result=None,
             "done": True, "await_human": False}, "status": "done"}
         sess.data["blocks"]["B"] = {"envelope": b_env, "status": "done"}
         sess.data["cursor"] = {"block": "C", "stage_id": None, "await_kind": None}
+        if defer_advance:
+            sess.data["_starting"] = {"status": "advancing",
+                                      "started_at": datetime.datetime.now().isoformat(timespec="seconds")}
+            sess.save()
+            return sess
         sess.save()
         res = _advance(sess, debug=debug)
         if isinstance(res, dict) and "error" in res:
@@ -1165,6 +1183,41 @@ def run_fastpath(topic: str, data_mode: str, *, rows=None, a4_result=None,
         return sess
 
     return {"error": f"未知 data_mode: {data_mode!r}"}
+
+
+def advance_started_session(session_path: str, *, debug: bool = False) -> dict:
+    """defer_advance 会话的后台推进包装（2026-09-27 · 网关 504 修复方案 A）。
+
+    由 server 端点在 run_fastpath(defer_advance=True) 之后交给后台线程调用：
+    跑 _advance（raw_csv → Block B 合并计算；draft → Block C 初稿含 LLM 扩写），
+    结束后把状态写进会话顶层键 `_starting`（done / error），供前端轮询 /api/session 判定：
+      - advancing → 继续等；done → 正常渲染当前 await 闸；error → 展示 _starting.message。
+    _advance 自身已「遇停即存即返」（内部多次 sess.save()），本函数只负责终态标记与
+    异常兜底（LLM / coze / 网络异常不得逃逸到线程外）。
+    返回 {"ok": bool, "error": str|None, "cursor": ...} 供日志。
+    """
+    try:
+        sess = FullflowSession.load(session_path)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"会话加载失败: {type(e).__name__}: {e}"}
+    t0 = time.time()
+    try:
+        res = _advance(sess, debug=debug)
+    except Exception as e:  # noqa: BLE001 — _advance 有内层捕获，这里是最后防线
+        res = {"error": f"{type(e).__name__}: {e}"}
+    try:
+        sess = FullflowSession.load(session_path)   # 重读（_advance 内部已 save，取最新落盘态）
+        elapsed = round(time.time() - t0, 1)
+        if isinstance(res, dict) and "error" in res:
+            sess.data["_starting"] = {"status": "error", "message": str(res["error"]),
+                                      "elapsed_sec": elapsed}
+        else:
+            sess.data["_starting"] = {"status": "done", "elapsed_sec": elapsed}
+        sess.save()
+        return {"ok": "error" not in (res or {}), "error": (res or {}).get("error")
+                if isinstance(res, dict) else None, "cursor": dict(sess.cursor)}
+    except Exception as e:  # noqa: BLE001 — 标记写失败只记日志，不影响会话本体
+        return {"ok": False, "error": f"_starting 标记失败: {type(e).__name__}: {e}"}
 
 
 #: 批准后自动产出「供人工审阅」的 Excel 的节点（用户裁定 2026-09-10）：

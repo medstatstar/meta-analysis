@@ -6,6 +6,23 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ## [Unreleased]
 
+### Fixed — 工作台快速通道 504（流程C「启动失败：<!DOCTYPE html>…」）
+
+- **根因**：Block C 快速通道（`POST /api/start_data`，draft/raw_csv）在请求内同步跑
+  `_advance`（C1 初稿含 LLM 扩写，实测 47~70s），恰好压在 Cloudflare 网关 ~60s 超时线上，
+  时好时坏 504；前端把网关 HTML 错误页前 300 字符当错误详情展示，故用户看到乱码报错。
+  线上复现：同一请求 56.7s 成功 / 60.8s 504。
+- **方案 A（根治·异步化）**：`fullflow.run_fastpath` 新增 `defer_advance`——raw_csv/draft
+  建会话、落 `starting:{status:advancing}` 即返回（实测 0.24s / 0.81s），计算转后台任务执行
+  （新增 `advance_started_session`，终态写 done/error + elapsed_sec，异常全兜底）；
+  `build_state` 透出 `starting`。前端检测到 advancing → 每 3s 轮询会话直到 done/error
+  再渲染，进度条显示「后台计算中 Ns」。
+- **方案 B（兜底）**：前端对 504/502 不再判失败，提示「已在服务器继续处理，可从历史会话打开」。
+- **验证**：本地双端口冒烟——draft：0.24s 返回 advancing → 47.5s done → 停 C1.draft 软停闸、
+  初稿产出；raw_csv：0.81s → 22.3s done → 停 B1.meta_analysis。pdf 模式不经后台推进，行为不变。
+- 落点：`adapters/fullflow.py` + 工作台 `server.py`/`workbench.html`（工作台前端不进技能
+  发布包，随线上应用更新）。**线上 meta.app 需重新发布后生效（等确认）。**
+
 ## [2.20.0] — 2026-09-27 — 全流程支持：从选题到投稿的端到端 Meta 分析
 
 ### Added
