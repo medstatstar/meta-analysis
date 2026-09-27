@@ -6,6 +6,13 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ## [Unreleased]
 
+## [2.17.2] — 2026-09-27 — 开发期结束：coze 路由回切 ct-meta 主 / ct-meta2 备
+
+### Changed
+
+- **删除 `adapters/DEV_POLICY.json`**：开发期策略文件已移除，coze_client 路由恢复生产态 —— `DEFAULT_ENDPOINT = https://ct-meta.coze.site/run`（主），`FALLBACK_ENDPOINT = https://ct-meta2.coze.site/run`（备）。token 按端点分别取用（ct-meta 用旧 JWT aud=oxwSsfwdtRRfByYIM8Xg3U4RQH5OgEjO；ct-meta2 用新 JWT aud=5v9HMQWtTSzxrEeZjI7kJJEzeMPrHXny）。
+- **回退逻辑恢复**：主端点 token 鉴权失败（401/403 + token 关键字）时自动回退到 ct-meta2，附 `_coze_endpoint_notice` 提示。
+
 ## [2.17.1] — 2026-09-27 — 文档瘦身（SKILL.md 334→200 行，章节外迁 + README 结构对齐）
 
 ### Changed
