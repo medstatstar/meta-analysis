@@ -28,9 +28,9 @@ meta-analysis is part of the CT-series skill family, built for three groups:
 
 meta-analysis is a **conversational skill**: you simply tell the assistant what you want in natural language — no commands, no parameter names to remember. As a WorkBuddy skill it **auto-loads with no extra installation**.
 
-Below are 7 real conversational examples. **Example 1 is the upstream topic-selection gate** (choose among candidate directions before running any analysis), followed by Examples 2–7 ordered from simple to advanced. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
+Below are 7 real conversational examples — **one per category** in the Scenario Index (§2): ① systematic-review workflow, ② pairwise meta, ③ heterogeneity & bias, ④ advanced models, ⑤ effect-size conversion, ⑥ visualization, ⑦ study quality. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
 
-### Example 1 · Topic selection: choose among candidate meta-analysis directions
+### Example 1 · ① Systematic review workflow: topic selection
 **You say:**
 > I'm interested in SGLT2 inhibitors for renoprotection and cardiovascular benefit in chronic kidney disease (CKD), but I haven't decided which specific meta-analysis direction to pursue. Can you help me shortlist candidate directions?
 
@@ -57,7 +57,7 @@ Below are 7 real conversational examples. **Example 1 is the upstream topic-sele
 
 **📌 Note:** When you have a direction but are unsure which specific meta to run, the assistant uses the topic-selection framework to produce **1–3 candidate directions + a 4-dim score + meta type**, instead of deciding for you or giving a single answer. This is the **topic-selection gate** before analysis — no R computation is invoked. Candidates are stratified by **evidence gap / novelty**, each backed by the **in-skill dedup probe (Cochrane + PubMed real hit counts)** — so a saturated generic direction (including the "intuitively niche" non-diabetic CKD or dialysis) is no longer mis-pushed as the top pick.
 
-### Example 2 · Two-group binary meta (most common)
+### Example 2 · ② Pairwise meta: two-group binary (most common)
 **You say:**
 > Combine the OR across these 5 binary studies:
 > Study A: experimental 30/100, control 20/100
@@ -70,14 +70,7 @@ Below are 7 real conversational examples. **Example 1 is the upstream topic-sele
 
 **📌 Auto-execution:** Once you describe the request, the assistant **auto-executes** and returns the real result; ask for the reproducible code by saying **"give me the full R code"**.
 
-### Example 3 · Effect size conversion
-**You say:**
-> Convert Cohen's d = 0.8 to logOR
-
-**Assistant replies (sketch):**
-> ✅ d = 0.8 → logOR ≈ 1.45 (SE ≈ 0.38), based on logOR = d × π/√3
-
-### Example 4 · Heterogeneity + subgroup
+### Example 3 · ③ Heterogeneity & bias: I² + subgroup
 **You say:**
 > I did a continuous meta with 8 studies, SMD pooled, but I² is high — I want to subgroup by region
 
@@ -88,7 +81,7 @@ Below are 7 real conversational examples. **Example 1 is the upstream topic-sele
 > - Euro-US (k=4): SMD = 0.28, I² = 62%
 > - Between-group Q = 4.12, p = 0.04
 
-### Example 5 · Complex: Network meta with multiple decisions (popup menu)
+### Example 4 · ④ Advanced models: network meta with multiple decisions
 **You say:**
 > I want to do a network meta with 4 interventions, but I haven't decided whether to use frequentist or Bayesian, and I'm not sure if I should include dose-response
 
@@ -107,130 +100,36 @@ Below are 7 real conversational examples. **Example 1 is the upstream topic-sele
 
 **📌 Note:** When you've **named the test type but are stuck on "which option / design family"**, the assistant **pops a routing menu** to confirm step by step — instead of deciding for you or dumping the full menu. The menu also offers an "explain the differences" option — when you're unsure, it explains before you decide.
 
-### Example 6 · Vague: Not sure which model (grill-me)
+### Example 5 · ⑤ Effect size conversion
 **You say:**
-> I want to do a meta-analysis but I'm not sure which model to use — help me figure it out
+> Convert Cohen's d = 0.8 to logOR
 
 **Assistant replies (sketch):**
-> Sure — let's pin down your needs first; a few key questions will locate the right model:
-> 1. What type is your **primary endpoint**? — continuous (e.g. SMD) / binary (e.g. OR) / survival (HR) / single-group rate / other?
-> 2. Is it a **two-group comparison or multi-group network**?
-> 3. Any **special dependency structure**? — multi-arm / multi-outcome / IPD / none
->
-> (After you answer, the assistant keeps probing until the model is locked, then computes — no full menu dumped on you.)
+> ✅ d = 0.8 → logOR ≈ 1.45 (SE ≈ 0.38), based on logOR = d × π/√3
 
-**📌 Note:** When you say "not sure which model", the assistant uses **branch-by-branch probing** to clarify your needs, instead of dumping the full menu.
-
-### Example 7 · Systematic review workflow
+### Example 6 · ⑥ Visualization
 **You say:**
-> Help me generate a PRISMA flow diagram
+> Draw a forest plot, lancet theme
 
 **Assistant replies (sketch):**
-> Sure, please provide:
-> - Records identified: ___
-> - Records screened: ___
-> - Records excluded: ___
-> - Full-text assessed: ___
-> - Full-text excluded (+ reasons): ___
-> - Studies included: ___
->
-> User: 520, 380, 140, 80, 52(20 no data, 18 wrong pop, 14 wrong design), 28
->
-> ✅ PRISMA flow diagram generated! [SVG output]
+> ✅ Forest plot generated (lancet theme, with summary diamond and I² label). [SVG output]
 
-> 💡 **Tip:** Most analyses need only three things — effect size (or rate / HR) + α + power. Anything you omit is filled with sensible defaults. It's fine to be incomplete — the assistant will tell you what's missing.
+### Example 7 · ⑦ Study quality
+**You say:**
+> Assess risk of bias with RoB 2.0
+
+**Assistant replies (sketch):**
+> ✅ RoB 2.0 assessment complete. Please provide the risk-of-bias judgment (Low / Some concerns / High) for each study — I'll generate the traffic-light plot and stacked summary bar. [SVG output]
 
 ---
 
 ## 2. What You Can Do — Scenario Index
 
-Tests are grouped by **analysis purpose** (7 categories below). Each row gives the typical **clinical scenario** and a line you can **copy verbatim** under "Try saying". The same test may be reached from multiple entry points.
+Categories are grouped by **workflow stage first, then analysis purpose** (7 below). The systematic-review workflow comes first as the upstream gate, followed by six analysis-purpose categories. Each row gives the typical **clinical scenario** and a line you can **copy verbatim** under "Try saying". The same test may be reached from multiple entry points.
 
 > The underlying R packages (metafor / meta / netmeta …) are listed in Section 6 "Advanced Reference"; ordinary users don't need to care.
 
-### ① Pairwise Meta-Analysis
-| Scenario | Try saying in chat |
-|:---|:---|
-| Binary (OR/RR/RD) | "Combine the OR across these 5 binary studies" |
-| Continuous (SMD/MD) | "Pool the SMD of these 6 continuous studies" |
-| Pre-calculated (yi+CI) | "I have effect sizes and CIs for 5 studies — draw the forest plot directly" |
-| Survival (HR) | "Pool the HR across these 8 studies" |
-| Correlation (r→Zr) | "Convert these 4 correlations via Fisher z then pool" |
-| Single-group rate/mean | "Pool the incidence rates across these studies" |
-| Generic inverse-variance | "I have yi and vi — run the meta directly" |
-
-### ② Heterogeneity & Bias
-| Scenario | Try saying in chat |
-|:---|:---|
-| Heterogeneity assessment | "I ran a meta, I² is very high — help me assess heterogeneity" |
-| Subgroup analysis | "Run subgroup analysis by region" |
-| Meta-regression | "Run meta-regression on publication year and sample size" |
-| Egger test | "Check publication bias, run Egger's test" |
-| Begg test | "Begg rank-correlation test" |
-| Trim-and-fill | "Correct publication bias with trim-and-fill" |
-| Selection model | "Assess publication bias with a selection model" |
-| Sensitivity analysis | "Run leave-one-out sensitivity analysis" |
-| Cumulative meta | "Run cumulative meta by publication year" |
-| GOSH plot | "Plot a GOSH graph to see heterogeneity patterns" |
-| Baujat diagnosis | "Make a Baujat plot to see which study contributes most heterogeneity" |
-| Drapery plot | "Plot a Drapery graph to assess α robustness" |
-
-### ③ Advanced Models
-| Scenario | Try saying in chat |
-|:---|:---|
-| Frequentist NMA | "Run network meta with 4 interventions, use netmeta" |
-| Bayesian NMA (Stan) | "Run Bayesian network meta, Stan backend" |
-| Bayesian NMA (JAGS) | "Run Bayesian network meta, JAGS backend" |
-| Multilevel meta | "Run 3-level meta with multiple effects within studies" |
-| Multivariate meta | "Pool a meta with multiple correlated outcomes" |
-| IPD meta | "I have individual patient data — run IPD meta" |
-| Dose-response | "Run dose-response meta, dosresmeta" |
-| Survival meta | "Pool survival HR via metafor (survmeta removed)" |
-| Trial sequential analysis | "Run TSA — see how many more studies are needed" |
-| Bootstrap meta | "Use Bootstrap for nonparametric DL estimation" |
-| Component NMA (CNMA) | "Run component network meta — decompose combination treatments (A+B, additive model) and test the additivity assumption" |
-| NMA ranking | "Rank the NMA interventions: SUCRA and P-scores" |
-| Diagnostic accuracy meta | "Run diagnostic-accuracy meta — I have tp/fp/fn/tn" |
-| Incidence-rate meta | "Run incidence-rate (person-time) meta" |
-| Power analysis | "What power does this meta have / how large a sample do I need" |
-
-### ④ Effect Size & Conversion
-| Scenario | Try saying in chat |
-|:---|:---|
-| Mean/SD→d | "Convert mean and SD to Cohen's d" |
-| t/F→d | "Convert a t value to d" |
-| r→Fisher z | "Convert a correlation to Fisher z" |
-| d↔logOR | "Convert d to logOR" |
-| OR↔logOR | "Convert OR to logOR" |
-| Batch convert | "Batch convert SMD to logOR" |
-| NNT | "Calculate NNT" |
-
-### ⑤ Visualization
-| Scenario | Try saying in chat |
-|:---|:---|
-| Forest plot | "Draw a forest plot, lancet theme" |
-| Funnel plot | "Draw a funnel plot with contour enhancement" |
-| Bubble plot | "Draw a meta-regression bubble plot" |
-| GOSH plot | "Plot a GOSH graph" |
-| Network plot | "Draw the network meta graph" |
-| League table | "Draw the NMA league table" |
-| RoB traffic-light | "Draw a risk-of-bias traffic-light plot" |
-| Power curve | "Draw a power curve" |
-| Drapery plot | "Plot a Drapery graph" |
-| Inconsistency heatmap | "Plot an NMA inconsistency heatmap" |
-
-### ⑥ Study Quality
-| Scenario | Try saying in chat |
-|:---|:---|
-| RoB 2.0 | "Assess risk of bias with RoB 2.0" |
-| RoB 1.0 | "Assess with Cochrane RoB 1.0" |
-| ROBINS-I | "Non-randomized study — use ROBINS-I" |
-| RoB summary plot | "Draw the stacked risk-of-bias summary bar plot" |
-| GRADE | "Do a GRADE evidence-quality assessment" |
-| CINeMA (network evidence) | "Assess the NMA with the CINeMA six domains" |
-| PRISMA checklist | "PRISMA checklist" |
-
-### ⑦ Systematic Review Workflow
+### ① Systematic Review Workflow
 | Scenario | Try saying in chat |
 |:---|:---|
 | Topic feasibility check | "Judge my topic: efficacy of ×××" (real literature hit counts + 4-dim score verdict) |
@@ -251,11 +150,87 @@ Tests are grouped by **analysis purpose** (7 categories below). Each row gives t
 | Missing value imputation | "Impute missing standard deviations" |
 | Full-flow web workbench | "Open the meta workbench" (guided browser-based full pipeline with clickable human gates) |
 
-> ⚠️ **PDF batch download** connects to external networks and writes files to your local disk. Run it only on explicit user instruction, and respect copyright and access controls.
->
-> ⚠️ **Extraction red line**: an extraction table never enters pooled analysis until a human verifies it and runs `stamp --confirm` — medical numbers are never auto-fed unattended.
->
-> ⛔ **Automatic PDF value extraction (A4) is currently suspended** (2026-09-27): the web app does not extract 2×2 numbers from PDFs automatically; if you already have the data, use the raw-data fast path (upload an ai/bi/ci/di or te/sete table).
+### ② Pairwise Meta-Analysis
+| Scenario | Try saying in chat |
+|:---|:---|
+| Binary (OR/RR/RD) | "Combine the OR across these 5 binary studies" |
+| Continuous (SMD/MD) | "Pool the SMD of these 6 continuous studies" |
+| Pre-calculated (yi+CI) | "I have effect sizes and CIs for 5 studies — draw the forest plot directly" |
+| Survival (HR) | "Pool the HR across these 8 studies" |
+| Correlation (r→Zr) | "Convert these 4 correlations via Fisher z then pool" |
+| Single-group rate/mean | "Pool the incidence rates across these studies" |
+| Generic inverse-variance | "I have yi and vi — run the meta directly" |
+
+### ③ Heterogeneity & Bias
+| Scenario | Try saying in chat |
+|:---|:---|
+| Heterogeneity assessment | "I ran a meta, I² is very high — help me assess heterogeneity" |
+| Subgroup analysis | "Run subgroup analysis by region" |
+| Meta-regression | "Run meta-regression on publication year and sample size" |
+| Egger test | "Check publication bias, run Egger's test" |
+| Begg test | "Begg rank-correlation test" |
+| Trim-and-fill | "Correct publication bias with trim-and-fill" |
+| Selection model | "Assess publication bias with a selection model" |
+| Sensitivity analysis | "Run leave-one-out sensitivity analysis" |
+| Cumulative meta | "Run cumulative meta by publication year" |
+| GOSH plot | "Plot a GOSH graph to see heterogeneity patterns" |
+| Baujat diagnosis | "Make a Baujat plot to see which study contributes most heterogeneity" |
+| Drapery plot | "Plot a Drapery graph to assess α robustness" |
+
+### ④ Advanced Models
+| Scenario | Try saying in chat |
+|:---|:---|
+| Frequentist NMA | "Run network meta with 4 interventions, use netmeta" |
+| Bayesian NMA (Stan) | "Run Bayesian network meta, Stan backend" |
+| Bayesian NMA (JAGS) | "Run Bayesian network meta, JAGS backend" |
+| Multilevel meta | "Run 3-level meta with multiple effects within studies" |
+| Multivariate meta | "Pool a meta with multiple correlated outcomes" |
+| IPD meta | "I have individual patient data — run IPD meta" |
+| Dose-response | "Run dose-response meta, dosresmeta" |
+| Survival meta | "Pool survival HR via metafor (survmeta removed)" |
+| Trial sequential analysis | "Run TSA — see how many more studies are needed" |
+| Bootstrap meta | "Use Bootstrap for nonparametric DL estimation" |
+| Component NMA (CNMA) | "Run component network meta — decompose combination treatments (A+B, additive model) and test the additivity assumption" |
+| NMA ranking | "Rank the NMA interventions: SUCRA and P-scores" |
+| Diagnostic accuracy meta | "Run diagnostic-accuracy meta — I have tp/fp/fn/tn" |
+| Incidence-rate meta | "Run incidence-rate (person-time) meta" |
+| Power analysis | "What power does this meta have / how large a sample do I need" |
+
+### ⑤ Effect Size & Conversion
+| Scenario | Try saying in chat |
+|:---|:---|
+| Mean/SD→d | "Convert mean and SD to Cohen's d" |
+| t/F→d | "Convert a t value to d" |
+| r→Fisher z | "Convert a correlation to Fisher z" |
+| d↔logOR | "Convert d to logOR" |
+| OR↔logOR | "Convert OR to logOR" |
+| Batch convert | "Batch convert SMD to logOR" |
+| NNT | "Calculate NNT" |
+
+### ⑥ Visualization
+| Scenario | Try saying in chat |
+|:---|:---|
+| Forest plot | "Draw a forest plot, lancet theme" |
+| Funnel plot | "Draw a funnel plot with contour enhancement" |
+| Bubble plot | "Draw a meta-regression bubble plot" |
+| GOSH plot | "Plot a GOSH graph" |
+| Network plot | "Draw the network meta graph" |
+| League table | "Draw the NMA league table" |
+| RoB traffic-light | "Draw a risk-of-bias traffic-light plot" |
+| Power curve | "Draw a power curve" |
+| Drapery plot | "Plot a Drapery graph" |
+| Inconsistency heatmap | "Plot an NMA inconsistency heatmap" |
+
+### ⑦ Study Quality
+| Scenario | Try saying in chat |
+|:---|:---|
+| RoB 2.0 | "Assess risk of bias with RoB 2.0" |
+| RoB 1.0 | "Assess with Cochrane RoB 1.0" |
+| ROBINS-I | "Non-randomized study — use ROBINS-I" |
+| RoB summary plot | "Draw the stacked risk-of-bias summary bar plot" |
+| GRADE | "Do a GRADE evidence-quality assessment" |
+| CINeMA (network evidence) | "Assess the NMA with the CINeMA six domains" |
+| PRISMA checklist | "PRISMA checklist" |
 
 ---
 

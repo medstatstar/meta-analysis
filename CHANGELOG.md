@@ -6,6 +6,19 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ## [Unreleased]
 
+## [2.17.1] — 2026-09-27 — 文档瘦身（SKILL.md 334→200 行，章节外迁 + README 结构对齐）
+
+### Changed
+
+- **SKILL.md 行数从 334 → 200（-40%）**：大量章节从 SKILL.md 移入独立 references 文件，内容零丢失。
+  - §2.3 上游编排细节 + §2.4 CCM/全流程模式 → `references/chat_orchestration.md`（writing-advisor、evidence-upload、A-stage contract、type-confirmation model、完整 CCM 归档）
+  - §2.5 工作台元数据 + 发布命令 + 能力表 → `references/workbench.md`（含 appId/share-link/publish-toolchain/local-launch 全套）
+  - §5.1 跨轮连续性 + endpoint capability boundaries → `references/cross_turn.md`
+  - §4/§5/§6/§7/§8 保留摘要骨架（约 30 行），细节指向 ADVANCED.md / data_templates.md / bug_report_endpoint.md
+  - §3 初始化精简为 2 行指向 ADVANCED.md
+
+- **README §2 大类顺序重排 + §1 示例对齐**（详见 README commit）：⑦ 系统评价流程 → ①，①–⑥ 顺延为 ②–⑦；§1 示例删 grill-me + PRISMA 旧示例，新增⑤⑥⑦三示例，7 个示例与 7 大类一一对应。中英双语同步。
+
 ## [2.17.0] — 2026-09-27 — 屏蔽收口 + 发布前检查整改：A4 旁路闸门、CCM 停用、工作台四项修复
 
 ### Changed
