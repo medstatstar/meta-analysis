@@ -154,6 +154,131 @@ def _compliance_sections(comp):
 
 
 # ---------------------------------------------------------------------------
+# SVG charts (inline, no third-party deps) — injected into HTML output
+# ---------------------------------------------------------------------------
+
+def _radar_svg(scores):
+    """Inline SVG radar chart of the four-dimension scores (0–5).
+
+    Returns an <svg> string. Gracefully degrades to 0 when a value is missing.
+    """
+    import math
+    s = scores or {}
+    dims = [
+        ("临床价值", s.get("clinical", 0)),
+        ("方法学可行性", s.get("feasibility", 0)),
+        ("数据可得性", s.get("data", 0)),
+        ("新颖性", s.get("novelty", 0)),
+    ]
+    n = len(dims)
+    cx, cy, R, maxv = 240, 210, 120, 5
+    angles = [-math.pi / 2 + 2 * math.pi * i / n for i in range(n)]
+
+    rings = ""
+    for k in range(1, maxv + 1):
+        pts = []
+        for a in angles:
+            rr = R * (k / maxv)
+            pts.append(f"{cx + rr * math.cos(a):.1f},{cy + rr * math.sin(a):.1f}")
+        rings += (f'<polygon points="{" ".join(pts)}" fill="none" '
+                  f'stroke="#cfd8dc" stroke-width="1"/>')
+    axes, labels = "", ""
+    for i, (name, val) in enumerate(dims):
+        a = angles[i]
+        x2, y2 = cx + R * math.cos(a), cy + R * math.sin(a)
+        axes += (f'<line x1="{cx}" y1="{cy}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                 f'stroke="#cfd8dc" stroke-width="1"/>')
+        lx, ly = cx + (R + 22) * math.cos(a), cy + (R + 22) * math.sin(a)
+        anchor = "middle" if abs(math.cos(a)) < 0.01 else ("start" if math.cos(a) > 0 else "end")
+        labels += (f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="11" text-anchor="{anchor}" '
+                   f'fill="#333" dominant-baseline="middle">{name} ({val})</text>')
+
+    data_pts = []
+    for i, (name, val) in enumerate(dims):
+        a = angles[i]
+        rr = R * (val / maxv)
+        data_pts.append(f"{cx + rr * math.cos(a):.1f},{cy + rr * math.sin(a):.1f}")
+    data_poly = (f'<polygon points="{" ".join(data_pts)}" '
+                 f'fill="rgba(56,142,90,0.30)" stroke="#388e5a" stroke-width="2"/>')
+    dots = "".join(
+        f'<circle cx="{cx + (R * (val / maxv)) * math.cos(angles[i]):.1f}" '
+        f'cy="{cy + (R * (val / maxv)) * math.sin(angles[i]):.1f}" r="3" fill="#388e5a"/>'
+        for i, (name, val) in enumerate(dims))
+    total = s.get("total", "")
+    title = (f'<text x="{cx}" y="20" font-size="13" text-anchor="middle" fill="#164">'
+             f'四维评分（满分 5，合计 {total}/20）</text>')
+    return (f'<svg viewBox="0 0 480 410" xmlns="http://www.w3.org/2000/svg" '
+            f'style="max-width:480px;width:100%;height:auto">{title}{rings}{axes}'
+            f'{data_poly}{dots}{labels}</svg>')
+
+
+def _gap_bar_svg(candidates):
+    """Inline SVG horizontal bar chart of candidate real-gap ratios.
+
+    `candidates` is a list of dicts: {label, ratio (narrow/broad), verdict,
+    narrow_pubmed, cochrane, disposition}. Bars are colored by verdict
+    (real_gap=green, saturated=red, caution=amber) with reference lines at
+    0.3 (real-gap) and 0.5 (saturation). Returns None when no data.
+    """
+    if not candidates:
+        return None
+    items = []
+    for c in candidates:
+        try:
+            ratio = float(c.get("ratio"))
+        except (TypeError, ValueError):
+            ratio = None
+        v = c.get("verdict")
+        color = "#388e5a" if v == "real_gap" else ("#d32f2f" if v == "saturated" else "#f9a825")
+        items.append((c.get("label", ""), ratio, color))
+    W, x0, bar_max = 760, 240, 480
+    H = 44 + len(items) * 42 + 16
+    ref = ""
+    for rf_val, lab, col in [(0.3, "真实缺口线 0.3", "#388e5a"), (0.5, "饱和线 0.5", "#d32f2f")]:
+        rx = x0 + bar_max * min(rf_val, 1.0)
+        ref += (f'<line x1="{rx:.1f}" y1="34" x2="{rx:.1f}" y2="{H - 16}" '
+                f'stroke="{col}" stroke-width="1" stroke-dasharray="4 3"/>')
+        ref += (f'<text x="{rx:.1f}" y="28" font-size="10" fill="{col}" '
+                f'text-anchor="middle">{lab}</text>')
+    bars = ""
+    y = 44
+    for label, ratio, color in items:
+        bars += (f'<text x="{x0 - 8}" y="{y + 15}" font-size="11" text-anchor="end" '
+                 f'fill="#333">{label}</text>')
+        bw = 0 if ratio is None else bar_max * min(ratio, 1.0)
+        bars += (f'<rect x="{x0}" y="{y}" width="{bw:.1f}" height="22" rx="3" fill="{color}"/>')
+        if ratio is None:
+            rtxt = "—"
+        elif ratio >= 0.01:
+            rtxt = "%.0f%%" % (ratio * 100)
+        else:
+            rtxt = "1/%d" % round(1 / ratio)
+        bars += (f'<text x="{x0 + bw + 6:.1f}" y="{y + 16}" font-size="11" fill="#333">{rtxt}</text>')
+        y += 42
+    title = (f'<text x="10" y="18" font-size="13" fill="#164">'
+             f'候选方向真实缺口（窄/宽 PubMed SR-MA 对比比，越短越值得做）</text>')
+    return (f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" '
+            f'style="max-width:760px;width:100%;height:auto">{title}{ref}{bars}</svg>')
+
+
+def _candidate_landscape_table(cands):
+    """Compact Markdown table of candidate directions (derived field)."""
+    if not cands:
+        return ""
+    rows = []
+    for c in cands:
+        rows.append([
+            c.get("label", ""),
+            _gap_label(c.get("verdict")),
+            c.get("narrow_pubmed", "—"),
+            _ratio_str(c.get("ratio")),
+            c.get("cochrane", "—"),
+            c.get("disposition", "—"),
+        ])
+    return _md_table(["候选方向", "缺口判定", "窄PubMed(5y)", "对比比", "Cochrane", "处置"], rows)
+
+
+# ---------------------------------------------------------------------------
 # Renderers
 # ---------------------------------------------------------------------------
 
@@ -181,7 +306,11 @@ def build_markdown(d):
         _sec(2, "PICO/PECO Decomposition", pico),
         _sec(3, "Meta Type & Rationale",
              f"**Type**: {d.get('meta_type', '—')}\n\n{d.get('meta_type_rationale', '')}"),
-        _sec(4, "Four-Dimension Assessment", f"{scores}\n\n**Cross-check rules (R1–R6)**: {cc}"),
+        _sec(4, "Four-Dimension Assessment",
+             f"{scores}\n\nRADAR_CHART_PLACEHOLDER\n\n"
+             f"**Cross-check rules (R1–R6)**: {cc}\n\n"
+             f"### 候选方向缺口全景\n\n{_candidate_landscape_table(d.get('candidate_landscape'))}\n\n"
+             f"GAPBAR_CHART_PLACEHOLDER"),
         _sec(5, "Dedup Search Report",
              _md_table(["Layer", "Result"], [
                  ["PROSPERO", dedup.get("prospero", "")],
@@ -369,6 +498,12 @@ def md_to_html(md):
 
 def build_html(d):
     md = build_markdown(d) if d.get("path") != "quick" else build_quick_card(d)
+    radar = _radar_svg(d.get("scores"))
+    gapbar = _gap_bar_svg(d.get("candidate_landscape"))
+    rendered = md_to_html(md)
+    # Replace placeholder tokens (wrapped as <p>…</p> by the converter) with charts
+    rendered = rendered.replace("<p>RADAR_CHART_PLACEHOLDER</p>", radar)
+    rendered = rendered.replace("<p>GAPBAR_CHART_PLACEHOLDER</p>", gapbar or "")
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -380,6 +515,7 @@ body {{ font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
        max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.65; }}
 h1 {{ font-size: 1.5rem; border-bottom: 2px solid #4a7; padding-bottom: .4rem; }}
 h2 {{ font-size: 1.15rem; margin-top: 1.8rem; color: #164; }}
+h3 {{ font-size: 1.02rem; margin-top: 1.4rem; color: #2a7; }}
 table {{ border-collapse: collapse; width: 100%; margin: .6rem 0; }}
 th, td {{ border: 1px solid #ccc; padding: .35rem .55rem; font-size: .9rem; text-align: left; }}
 th {{ background: #eef7f2; }}
@@ -387,10 +523,11 @@ blockquote {{ border-left: 4px solid #4a7; margin: .5rem 0; padding: .3rem .8rem
              background: #f6fbf8; color: #345; }}
 hr {{ border: none; border-top: 1px dashed #bbb; margin: 1.2rem 0; }}
 code {{ background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; }}
+svg {{ display: block; margin: .8rem auto; }}
 </style>
 </head>
 <body>
-{md_to_html(md)}
+{rendered}
 </body>
 </html>"""
 

@@ -70,8 +70,25 @@ REPORT_SCHEMA = {
 
 # ── 统一报告端点（占位符；各技能接入时替换为真实 URL）──────────────────
 # 全库共用一个端点（§20.3.5），由作者一次性建设：接收 → 校验 → 落库 → 通知。
-DEFAULT_ENDPOINT = "https://ct-bugreport.coze.site/run"  # TODO: 替换为实际部署 URL
+DEFAULT_ENDPOINT = "https://ct-bugreport.coze.site/run"  # 统一 bug-report 端点
 AUTHOR_EMAIL = "medstatstar@gmail.com"  # §13.2 联系方式（本地兜底）
+SKILL_NAME = "meta-analysis"
+
+def _read_skill_version():
+    """从技能根 SKILL.md frontmatter 读 version:（对齐 ct-samplesize，避免硬编码漂移）。"""
+    import re as _re
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "SKILL.md")
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            for line in f:
+                m = _re.match(r"^version:\s*(\S+)\s*$", line)
+                if m:
+                    return m.group(1)
+    except Exception:
+        pass
+    return "unknown"
+
+SKILL_VERSION = _read_skill_version()
 
 # ── 内置双语文案（一次性提示走 i18n 精神：中英各一版，供 agent 原样复述）──
 _MSGS = {

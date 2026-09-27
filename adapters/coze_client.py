@@ -39,6 +39,7 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -55,6 +56,28 @@ except ImportError:  # 平铺模块直接运行（run_analysis 把 adapters 加�
         from coze_token import get_token_for
     except ImportError:
         get_token_for = None  # 极端情况：仅回退到 COZE_META_TOKEN 环境变量
+
+# 出站信封前置校验 + 自动修复（2026-09-13 新增）：POST 前按 coze_contract.md 校验，
+# 拦截装错的信封（无论来自 LLM 手搓 / 用户裸 POST / build_request 回归），并自动修复
+# 最常见的结构错误（并行顶层数组 → data.rows[]、model random→REML、measure→sm）。
+# 致命不合规 → 抛 EnvelopeValidationError（绝不发出去）。
+try:
+    from .coze_contract_validate import (
+        validate_request as _validate_request_impl,
+        EnvelopeValidationError as _EnvelopeValidationError,
+    )
+except ImportError:  # 平铺模块直接运行
+    try:
+        from coze_contract_validate import (
+            validate_request as _validate_request_impl,
+            EnvelopeValidationError as _EnvelopeValidationError,
+        )
+    except ImportError:
+        _validate_request_impl = None
+        _EnvelopeValidationError = None
+
+# 公开别名（供 run_analysis / 上层 import）：EnvelopeValidationError
+EnvelopeValidationError = _EnvelopeValidationError
 
 # 2026-08-26 改造：主分析工作流切到 ct-meta2（新 token，aud=5v9HMQWtTSzxrEeZjI7kJJEzeMPrHXny），
 # 同日后续互换：主工作流回切 ct-meta（旧 token，aud=oxwSsfwdtRRfByYIM8Xg3U4RQH5OgEjO），
@@ -249,6 +272,77 @@ def _default_query_origin(debug: bool = False) -> str:
 
 
 # --------------------------------------------------------------------------
+# ct-base coze_io_contract：skill_version（顶层） + user_language（params 内）
+# — 2026-09-11 补齐（此前 meta-analysis 出站信封缺这两个字段）
+# --------------------------------------------------------------------------
+# 契约来源：ct-base/references/coze_io_contract.md §1.1 / §1.2（全库单一事实来源）。
+#   · skill_version：顶层信封字段（与 query_origin 同级），**不得**嵌套进 params/report；
+#     取值 = SKILL.md frontmatter `version:`（单一事实来源，升版本免改代码），读取失败回退常量。
+#   · user_language：**仅**存在于请求 params 内（顶层不得双写），zh/en；服务端读取顺序
+#     params.user_language → 顶层（向后兼容）→ 空。仅供 coze 端决定文案语言，非强制覆盖。
+_SKILL_VERSION_FALLBACK = "2.12.0"
+
+
+def _skill_version() -> str:
+    """技能版本号：读技能根 SKILL.md frontmatter 的 `version:`，失败回退常量。
+
+    ct-base §1.2：作为**顶层**信封字段随每次出站携带，供服务端按发布版本归因调用量。
+    """
+    try:
+        skill_md = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "SKILL.md")
+        with open(skill_md, encoding="utf-8") as f:
+            head = f.read(4000)
+        m = re.search(r"^version:\s*([0-9][\w.\-]*)", head, re.M)
+        if m:
+            return m.group(1)
+    except Exception:  # noqa: BLE001 — 读版本失败绝不阻断出站，回退常量
+        pass
+    return _SKILL_VERSION_FALLBACK
+
+
+def _resolve_user_language(override: str | None = None) -> str:
+    """语言提示（zh/en）—— ct-base §1.1 三级优先级。
+
+    1) 显式 override 最高（中文语境→zh / 英文→en）；
+    2) 否则按 scripts/i18n.py::_current_lang() 判定；
+    3) 失败回退 "zh"。
+    与 `locale`（引擎输出开关）并存，本字段仅作 caller→coze 的提示。
+    """
+    if override:
+        v = str(override).strip().lower()
+        if v.startswith("zh"):
+            return "zh"
+        if v.startswith("en"):
+            return "en"
+    try:
+        _scripts = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
+        if _scripts not in sys.path:
+            sys.path.insert(0, _scripts)
+        import i18n as _i18n  # type: ignore
+        lang = (_i18n._current_lang() or "").lower()
+        if lang.startswith("zh"):
+            return "zh"
+        if lang.startswith("en"):
+            return "en"
+    except Exception:  # noqa: BLE001
+        pass
+    return "zh"
+
+
+def _with_user_language(params: dict | None, override: str | None = None) -> dict:
+    """把 user_language 注入 params（已有有效值不覆盖）—— §1.1 单一承载位。"""
+    out = dict(params or {})
+    cur = str(out.get("user_language") or "").strip().lower()
+    if cur.startswith("zh"):
+        out["user_language"] = "zh"
+    elif cur.startswith("en"):
+        out["user_language"] = "en"
+    else:
+        out["user_language"] = _resolve_user_language(override)
+    return out
+
+
+# --------------------------------------------------------------------------
 # 调用方约束：query_origin 发送层硬守卫 — 2026-08-30 新增
 # --------------------------------------------------------------------------
 # 背景：2.2.28 客户端已在 run_meta 自动注入 query_origin，但仍有"裸 POST /run、
@@ -273,6 +367,26 @@ def _assert_query_origin(payload: dict) -> str:
             "且飞书日志无法溯源。" % (qo,)
         )
     return qo
+
+
+def _validate_outbound(env: dict) -> dict:
+    """POST 前按 coze 契约校验出站信封；返回（可能已自动修复的）信封。
+
+    2026-09-13 新增（用户诉求：避免装错的信封到达 coze）：
+      - 校验库可用时：修复成功（ok） → 返回修复后的信封（附 _envelope_repaired 提示）；
+        致命不合规 → 抛 _EnvelopeValidationError（绝不发出去，由上层转结构化错误）。
+      - 校验库不可用时退化为透传（不阻断主路径，仅丢失防御性校验）。
+    """
+    if _validate_request_impl is None or _EnvelopeValidationError is None:
+        return env
+    res = _validate_request_impl(env)
+    if not res.ok:
+        raise _EnvelopeValidationError(env, res)
+    repaired = res.repaired
+    if res.repaired_notes:
+        repaired = copy.deepcopy(repaired)
+        repaired["_envelope_repaired"] = res.repaired_notes
+    return repaired
 
 
 # --------------------------------------------------------------------------
@@ -728,7 +842,8 @@ def _post_run_with_fallback(run_url: str, body: bytes, headers: dict, timeout: i
 
 def run_meta(task: str, data: dict, params: dict | None = None,
              figure: dict | None = None, query_origin: str | None = None,
-             debug: bool = False) -> dict:
+             debug: bool = False, user_language: str | None = None,
+             timeout: int | None = None) -> dict:
     """调用 coze 元分析工作流，返回解析后的结果 dict。
 
     Args:
@@ -771,13 +886,19 @@ def run_meta(task: str, data: dict, params: dict | None = None,
     payload = {
         "task": task,
         "data": data or {},
-        "params": params or {},
+        # ct-base §1.1：user_language 仅承载于 params（顶层不双写）
+        "params": _with_user_language(params, user_language),
         "figure": fig,
         "query_origin": origin,
         "request_id": request_id,
+        # ct-base §1.2：skill_version 为**顶层**信封字段，不得嵌套进 params
+        "skill_version": _skill_version(),
     }
     if debug:
         payload["_debug"] = True
+    # 2026-09-13：POST 前按 coze 契约校验出站信封；修复成功则替换为修复后的信封，
+    # 致命不合规则抛 EnvelopeValidationError（绝不把装错的信封发到云端）。
+    payload = _validate_outbound(payload)
     # 短窗幂等去重（2026-08-29）：窗口内完全相同的请求直接复用上次结果，
     # 不再打 coze —— 避免误双击 / 调试连跑把算力与飞书日志翻倍。
     fp = _dedup_fingerprint(payload)
@@ -809,7 +930,8 @@ def run_meta(task: str, data: dict, params: dict | None = None,
 
     # 主端点请求；token 不一致（401/403 + token 关键字）则回退 FALLBACK_ENDPOINT
     # （**回退端点使用自身专属 token**，见 _headers(fb_url)）
-    raw, _elapsed, used_fallback, run_url = _post_run_with_fallback(run_url, body, headers, _timeout())
+    raw, _elapsed, used_fallback, run_url = _post_run_with_fallback(
+        run_url, body, headers, timeout if timeout is not None else _timeout())
 
     outer = json.loads(raw)
     # /run 返回 GlobalState（GraphOutput.result = R 引擎 JSON 字符串）
@@ -943,8 +1065,10 @@ def _is_legacy_envelope(env: dict) -> bool:
     return not any(k in env for k in _STAGE_FIELDS)
 
 
-def build_stage_payload(env: dict, debug: bool = False) -> dict:
-    """规范化 stage 信封：补齐 contract_version/schema/request_id/query_origin；
+def build_stage_payload(env: dict, debug: bool = False,
+                        user_language: str | None = None) -> dict:
+    """规范化 stage 信封：补齐 contract_version/schema/request_id/query_origin
+    + skill_version（顶层）/ user_language（params 内，ct-base §1.1/§1.2）；
     coze 恒只返 SVG（2026-08-20 收紧）；byvar→subgroup 归一化。"""
     env = dict(env)
     fig = dict(env.get("figure") or {})
@@ -959,6 +1083,10 @@ def build_stage_payload(env: dict, debug: bool = False) -> dict:
     if "request_id" not in env:
         env["request_id"] = str(uuid.uuid4())
     env["query_origin"] = env.get("query_origin") or _default_query_origin(debug=debug)
+    # ct-base §1.1/§1.2：语言仅落 params、版本仅落顶层；调用方已给有效值则不覆盖。
+    env["params"] = _with_user_language(env.get("params"), user_language)
+    if not env.get("skill_version"):
+        env["skill_version"] = _skill_version()
     if debug:
         env["_debug"] = True
     return env
@@ -975,7 +1103,8 @@ def attach_billing(env: dict, account_id: str | None = None,
     return env
 
 
-def run_stage(env: dict, debug: bool = False, transport=None) -> dict:
+def run_stage(env: dict, debug: bool = False, transport=None,
+              user_language: str | None = None) -> dict:
     """发送 per-stage 信封并解析响应。
 
     - 旧 per-task 信封（无管线字段）→ 委派 run_meta（R1 双模在客户端层也成立）。
@@ -986,8 +1115,11 @@ def run_stage(env: dict, debug: bool = False, transport=None) -> dict:
         return run_meta(
             env.get("task"), env.get("data"), env.get("params"),
             env.get("figure"), query_origin=env.get("query_origin"), debug=debug,
+            user_language=user_language,
         )
-    payload = build_stage_payload(env, debug=debug)
+    payload = build_stage_payload(env, debug=debug, user_language=user_language)
+    # 2026-09-13：POST 前按 coze 契约校验出站信封（同 run_meta 主路径）。
+    payload = _validate_outbound(payload)
     fp = _dedup_fingerprint(payload)
     cached = _dedup_lookup(fp)
     if cached is not None:
@@ -1097,10 +1229,79 @@ def parse_stage_response(outer, request_id, elapsed: float = 0.0) -> dict:
     return out
 
 
+def resolve_skill_dir(base: str) -> str:
+    """解析技能安装目录，兼容 SkillHub 的 `__skillhub` 后缀命名。
+
+    SkillHub 安装时可能把技能命名为 `ct-literature__skillhub` 而非 `ct-literature`，
+    调用方不应硬编码任一名字。依次尝试原路径 → 追加 `__skillhub` 后缀，返回首个存在的目录；
+    都不存在则返还原值（让上层报错信息更直观）。
+    """
+    base = os.path.expanduser(base)
+    if os.path.isdir(base):
+        return base
+    alt = base + "__skillhub"
+    if os.path.isdir(alt):
+        return alt
+    return base
+
+
+# ---------------------------------------------------------------------------
+# 解释器解析（修复 tool_mapping_meta.json 硬编码 python 路径导致的静默失效）
+# ---------------------------------------------------------------------------
+# 历史问题：映射表把 `C:/Anaconda3/python.exe` 写死在 cmd[0]，换机/换装后该路径不存在，
+# subprocess 抛 FileNotFoundError → 被 execute_tool_cards 的 except 吞成 status:error
+# → 上层读到空结果，界面表现为"检索 0 篇 / 注册库无返回"而**不报错**（A2 检索、
+# A1 注册库查重均受影响）。故改为占位符 `{python}` 运行时解析，硬编码路径降级为
+# "候选之一"。优先级：显式环境变量 → Anaconda base → 当前解释器 → PATH。
+_PYTHON_PLACEHOLDER = "{python}"
+
+_PYTHON_CANDIDATES = (
+    r"C:/Tools/Anaconda3/python.exe",   # 本机 Anaconda base（实测位置）
+    r"C:/Anaconda3/python.exe",         # 旧约定路径，保留兼容
+    "/opt/anaconda3/bin/python",
+    "/opt/homebrew/bin/python3",
+    "/usr/local/bin/python3",
+    "/usr/bin/python3",
+)
+
+_PYTHON_EXE_CACHE = None
+
+
+def resolve_python_exe() -> str:
+    """解析驱动 ct-* 子进程的 Python 解释器绝对路径（结果进程内缓存）。
+
+    只接受**实际存在**的文件：配置里写的不等于存在的。全部候选落空时回退
+    sys.executable，让 subprocess 如实报错，而不是被静默吞掉。
+    """
+    global _PYTHON_EXE_CACHE
+    if _PYTHON_EXE_CACHE:
+        return _PYTHON_EXE_CACHE
+
+    for env_key in ("META_PYTHON", "WORKBUDDY_PYTHON"):
+        cand = (os.environ.get(env_key) or "").strip()
+        if cand and os.path.isfile(cand):
+            _PYTHON_EXE_CACHE = cand
+            return cand
+
+    for cand in _PYTHON_CANDIDATES:
+        if os.path.isfile(cand):
+            _PYTHON_EXE_CACHE = cand
+            return cand
+
+    if sys.executable and os.path.isfile(sys.executable):
+        _PYTHON_EXE_CACHE = sys.executable
+        return sys.executable
+
+    _PYTHON_EXE_CACHE = shutil.which("python") or shutil.which("python3") or "python"
+    return _PYTHON_EXE_CACHE
+
+
 def _load_tool_mapping() -> dict:
     """加载 tool_mapping_meta.json（Block A/C 需要的 ct-* 本地调用映射）。缺失返回空。
 
-    skill_dir 中的 ~ 在此展开为绝对路径（subprocess 不会自动展开 ~）。
+    skill_dir 中的 ~ 在此展开为绝对路径（subprocess 不会自动展开 ~）；
+    若目录不存在，自动回退到 `__skillhub` 后缀的同名目录（SkillHub 安装兼容）。
+    cmd 中的 `{python}` 占位符在此解析为真实解释器路径（见 resolve_python_exe）。
     """
     p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tool_mapping_meta.json")
     try:
@@ -1108,9 +1309,22 @@ def _load_tool_mapping() -> dict:
             data = json.load(f)
     except Exception:  # noqa: BLE001
         return {}
+    py = None
     for spec in data.values():
-        if isinstance(spec, dict) and spec.get("skill_dir"):
-            spec["skill_dir"] = os.path.expanduser(spec["skill_dir"])
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("skill_dir"):
+            spec["skill_dir"] = resolve_skill_dir(spec["skill_dir"])
+        cmd = spec.get("cmd")
+        if isinstance(cmd, list) and any(
+            isinstance(c, str) and _PYTHON_PLACEHOLDER in c for c in cmd
+        ):
+            if py is None:
+                py = resolve_python_exe()
+            spec["cmd"] = [
+                c.replace(_PYTHON_PLACEHOLDER, py) if isinstance(c, str) else c
+                for c in cmd
+            ]
     return data
 
 

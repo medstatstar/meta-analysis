@@ -14,7 +14,7 @@ classify.py — meta-analysis 技能的双轨路由 / 归一化脚本
 输出：spec JSON（stdout）
   {
     "track": "compute" | "topic",
-    "task": "pairwise_meta" | "subgroup_analysis" | "metareg" | "nma" | "survival_meta"
+    "task": "pairwise_meta" | "subgroup_analysis" | "metareg" | "nma" | "cnma" | "survival_meta"
           | "diagnostic_meta" | "ipd_meta"
           | "prisma_flow" | "prisma_checklist" | "rob2" | "rob_summary" | "grade",
     "measure": "OR" | "RR" | "RD" | "MD" | "SMD" | "HR" | null,
@@ -61,6 +61,12 @@ MH_WORDS = ["固定效应", "fixed", "mh", "mantel", "固定"]
 SUBGROUP_WORDS = ["亚组", "subgroup", "分层"]
 METAREG_WORDS = ["元回归", "metareg", "meta regression", "回归分析"]
 NMA_WORDS = ["网络", "network", "nma", "网状"]
+# 成分网络 Meta（CNMA）关键词（2026-09-14 新增）。
+# ⚠️ 判定必须**前置**于 NMA_WORDS：CNMA 问句通常同时含「网络」（如"成分网络 meta"），
+#    顺序颠倒会被 NMA 抢走 → 落到普通 arm-based NMA，与用户意图不符。
+#    注意 "cnma" 字符串内含 "nma"，同样依赖前置顺序。
+CNMA_WORDS = ["成分网络", "成分 meta", "成分meta", "cnma", "component network",
+              "component nma", "组分网络", "ingredient-level", "成分-效应", "成分效应"]
 FUNNEL_WORDS = ["漏斗", "funnel"]
 EGGER_WORDS = ["发表偏倚", "egger", "begg", "pub bias", "publication bias"]
 
@@ -165,6 +171,8 @@ def classify(query):
         task = "rob2"
     elif _hit(q, IPD_META_WORDS):
         task = "ipd_meta"
+    elif _hit(q, CNMA_WORDS):
+        task = "cnma"
     elif _hit(q, NMA_WORDS):
         task = "nma"
     elif _hit(q, SUBGROUP_WORDS):
@@ -181,7 +189,9 @@ def classify(query):
     # 3) data_type
     if task == "diagnostic_meta":
         data_type = "diagnostic"
-    elif task == "nma":
+    elif task in ("nma", "cnma"):
+        # cnma 与 nma 共用数据契约（治疗标签 + 事件/样本量，标签以 sep_comps 拼接成分，
+        # 如 "A+B"）——列模板与格式探测完全一致，见 build_request._detect_nma_format
         data_type = "nma"
     elif task == "survival_meta":
         data_type = "survival"

@@ -35,6 +35,7 @@ import uuid
 import numpy as np
 
 import coze_client as cc
+from interpretation import interpret_result
 
 # 本机唯一正确的 R（见用户内存 LRN：C:/Tools/R-4.6.1/bin/Rscript.exe）
 R_BIN = "C:/Tools/R-4.6.1/bin/Rscript.exe"
@@ -122,6 +123,79 @@ def _study_to_te_set(study, effect_measure):
     return TE, se
 
 
+#: 比值类效应量（报告尺度 = exp(分析尺度)）。与 interpretation._RATIO_SM 同源 ——
+#: 这里只作**兜底常量**，正常路径直接引用 interpretation 的那一份，避免第三份清单。
+try:  # pragma: no cover - 正常总能导入
+    from interpretation import _RATIO_SM as _RATIO_SM
+except Exception:  # noqa: BLE001
+    _RATIO_SM = frozenset({"OR", "RR", "HR", "PLO", "PLOGIT", "IRR", "RRR"})
+
+
+def _stats_from_pairwise(pw, effect_measure):
+    """本地 pairwise 结果 → interpretation / quality_advice 期望的 coze stats 形状。
+
+    ⚠️ **尺度**（历史踩过的坑）：pairwise 的 TE / CI 是**对数尺度**（见 b1_pairwise_python
+    docstring），而 interpretation 优先读 `pooled.estimate_exp / ci_low_exp / ci_high_exp`
+    （**报告尺度**）。若不补 `_exp` 变体，比值类效应量会把 log OR 当 OR 打印
+    （例如 0.481 → 印成 “合并 OR = 0.48” 而真实是 1.62）。非比值类（MD/SMD）无 exp 概念，
+    原值即报告尺度，直接复用。
+
+    返回 None 表示「不足以解读」（无 k）—— 调用方据此不下发解读卡。
+    """
+    if not isinstance(pw, dict) or not pw.get("k"):
+        return None
+    em = str(pw.get("effect_measure") or effect_measure or "").upper()
+    ratio = em in _RATIO_SM
+
+    def _exp(x):
+        try:
+            return math.exp(float(x))
+        except Exception:  # noqa: BLE001
+            return None
+
+    te = pw.get("TE_random")
+    ci = pw.get("ci_random")
+    ci = list(ci) if isinstance(ci, (list, tuple)) and len(ci) == 2 else None
+    pooled = {"estimate": te, "p": pw.get("p_random")}
+    if te is not None:
+        pooled["estimate_exp"] = _exp(te) if ratio else te
+    if ci:
+        pooled["ci_low"], pooled["ci_high"] = ci[0], ci[1]
+        if ratio:
+            pooled["ci_low_exp"], pooled["ci_high_exp"] = _exp(ci[0]), _exp(ci[1])
+    return {
+        "k": pw.get("k"), "sm": em, "model": "random",
+        "pooled": pooled,
+        "heterogeneity": {"I2": pw.get("I2"), "tau2": pw.get("tau2"), "Q": pw.get("Q")},
+        "bias": {},
+    }
+
+
+def _interp_quality_from_stats(stats, task="pairwise_meta", params=None):
+    """stats → (interpretation, quality_advice)。任一失败对应的值返回 None。
+
+    **统一出口**（2026-09-22）：原先这段逻辑内联在 b1_meta_analysis 的 coze 成功分支里，
+    local / demo 两条路径完全没有 → 工作台 B1 解读卡在那些路径恒为空。抽成一处后
+    三条路径口径一致（coze 用真实 stats；local / demo 用 _stats_from_pairwise 桥接）。
+    解读/评估失败**不影响主结果**（B1 数值照常返回）。
+    """
+    interp, qa = None, None
+    try:
+        _i = interpret_result(stats or {}, task, params or {})
+        if _i and any(_i.values()):
+            interp = _i
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from quality_advice import evaluate_quality  # 延迟导入：规避与 block_b 的循环依赖
+        _q = evaluate_quality(stats or {}, task)
+        if _q and any(_q.values()):
+            qa = _q
+    except Exception:  # noqa: BLE001
+        pass
+    return interp, qa
+
+
 def b1_pairwise_python(studies, effect_measure="OR"):
     """逆方差加权 pairwise meta 分析（固定+随机效应，DerSimonian-Laird）。
 
@@ -157,7 +231,13 @@ def b1_pairwise_python(studies, effect_measure="OR"):
     w_re = 1.0 / (se ** 2 + tau2)  # 随机效应权重
     TE_re = float(np.sum(w_re * TE) / np.sum(w_re))
     se_re = float(1.0 / math.sqrt(np.sum(w_re)))
-    I2 = max(0.0, (Q - df) / Q) if Q > 0 else 0.0
+    # ⚠️ 单位：与 coze 契约一致，I2 恒为**百分数（0–100）**，不是比例。
+    # （coze_contract.md §4：`stats.heterogeneity.I2` 恒为百分数；netmeta/netcomb 原生
+    #   比例已在 R 引擎侧 ×100。本 oracle 必须与 _coze_stats_to_pairwise 同构 —— 二者
+    #   L345 明文声明「同构」，若此处留比例会导致 B2/B3/B4 判据（I2>=75/50/25）全部假阴性。
+    #   消费端（block_c / interpretation / quality_advice / writing_advisor）一律按百分数
+    #   渲染，**不得二次 ×100**（否则 34.5% 会印成 3450%）。）
+    I2 = max(0.0, (Q - df) / Q) * 100.0 if Q > 0 else 0.0
     z_re = TE_re / se_re
     p_re = 2 * (1 - _norm_cdf(abs(z_re)))
     z_fe = TE_fe / se_fe
@@ -309,7 +389,10 @@ def _build_b1_coze_env(studies, effect_measure):
     """
     return {
         "task": "pairwise_meta",
-        "data": _norm_b1_rows(studies),
+        # ⚠️ data **必须是对象** {rows:[...]}（契约 §2 / 出站校验 E03_DATA_NOT_OBJECT）：
+        # 2026-09-17 修复 —— 此前直接传裸 list，被出站校验拦截（"data 必须是对象"），
+        # B1 实际从未成功发出，合并计算静默落空（B 块容错继续，表面看流程照常走到 B4）。
+        "data": {"rows": _norm_b1_rows(studies)},
         "params": {"effect_measure": effect_measure},
         "figure": {},
         "contract_version": cc.CONTRACT_VERSION,
@@ -391,8 +474,14 @@ def b1_meta_analysis(studies, effect_measure="OR", engine="coze", nma=False,
         if pairwise.get("k", 0) == 0:
             notes.append("pairwise：无可计算研究（请检查 ai/bi/ci/di 或 TE/seTE 字段）。")
         nma_res = _nma_branch(nma, network_studies, effect_measure, notes, nma_reference)
+        # 2026-09-22（一致性审计 P2-13）：local 路径同样产出解读卡 —— 数值是现算的，
+        # 解读引擎完全能用，此前只是没人喂它 → 工作台 B1 面板恒「解读引擎未生成内容」。
+        _interp, _qa = _interp_quality_from_stats(
+            _stats_from_pairwise(pairwise, effect_measure), "pairwise_meta",
+            {"sm": effect_measure})
         return {"effect_measure": effect_measure, "pairwise": pairwise,
-                "nma": nma_res, "notes": notes, "_source": "local"}
+                "nma": nma_res, "notes": notes, "_source": "local",
+                "_interpretation": _interp, "_quality_advice": _qa}
 
     # 默认 coze-only（唯一计算真相源）
     try:
@@ -408,8 +497,16 @@ def b1_meta_analysis(studies, effect_measure="OR", engine="coze", nma=False,
         if pairwise.get("k", 0) == 0:
             notes.append("pairwise：coze 返回无可计算研究。")
         nma_res = _nma_branch(nma, network_studies, effect_measure, notes, nma_reference)
+        # 2026-09-20：结果解读卡（统计顾问层）——基于 coze stats 生成结构化解读，
+        # 供工作台前端像对话模式那样展示「修饰和解读后的结果」。复用 run_analysis.py 同套引擎；
+        # 失败不影响主结果。
+        # 2026-09-22：改走统一出口 _interp_quality_from_stats（local / demo 同源，见其 docstring）。
+        _interpretation, _quality_advice = _interp_quality_from_stats(
+            stats, "pairwise_meta", {"sm": effect_measure})
         return {"effect_measure": effect_measure, "pairwise": pairwise,
-                "nma": nma_res, "notes": notes, "_source": "coze"}
+                "nma": nma_res, "notes": notes, "_source": "coze",
+                "_interpretation": _interpretation,
+                "_quality_advice": _quality_advice}
     except cc.AuthRequiredError as e:
         return {"effect_measure": effect_measure, "pairwise": {"k": 0, "error": "auth_blocked"},
                 "nma": {"status": "skipped", "reason": "auth_blocked"},
@@ -449,49 +546,85 @@ def b2_grade(pairwise, risk_of_bias="moderate", indirectness="none",
       - 发表偏倚：serious → -1
     返回 {grade, reasons[], domain_ratings{}}。
     """
-    I2 = float(pairwise.get("I2", 0.0) or 0.0)
-    k = int(pairwise.get("k", 0) or 0)
-    ci = pairwise.get("ci_random") or pairwise.get("ci_fixed") or [0, 0]
-    crosses_null = (ci[0] < 1.0 < ci[1]) if pairwise.get("effect_measure") in ("OR", "HR", "RR") \
-        else (ci[0] < 0 < ci[1])
+    # 2026-09-14 防御：部分 task 的 stats 不含 pooled（如 diagnostic_meta / dose_resp /
+    # bayesian_pairwise 只有 k + notes）→ ci 为 [None, None]，旧实现 `ci[0] < 1.0` 直接抛
+    # TypeError，被上层 try/except 吞掉 → 这些任务的质量评估静默失效。缺失一律不参与
+    # 判定（而非编造默认值），其余判据照常降级。
+    def _n(v, default=None):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
 
+    I2 = _n(pairwise.get("I2"), 0.0) or 0.0
+    k = int(_n(pairwise.get("k"), 0) or 0)
+    ci = pairwise.get("ci_random") or pairwise.get("ci_fixed")
+    if not isinstance(ci, (list, tuple)) or len(ci) < 2:
+        ci = [None, None]
+    _lo_c, _hi_c = _n(ci[0]), _n(ci[1])
+    _null_c = 1.0 if pairwise.get("effect_measure") in ("OR", "HR", "RR") else 0.0
+    crosses_null = (_lo_c is not None and _hi_c is not None
+                    and _lo_c < _null_c < _hi_c)
+
+    # reasons 供中文工作台页面用；reasons_en 供英文稿件用（2026-09-22）。
+    # 两条列表**同步 append**，任何一侧新增降级理由都必须同时补英文，否则
+    # 英文稿件会漏掉该条降级说明（或回退成中文，造成中英混杂）。
     reasons = []
+    reasons_en = []
     domain = {}
     down = 0.0
 
     # 不一致性
     if I2 >= 75:
-        down += 2; domain["inconsistency"] = "very serious"; reasons.append(f"不一致性很严重（I²={I2:.0f}% → -2）")
+        down += 2; domain["inconsistency"] = "very serious"
+        reasons.append(f"不一致性很严重（I²={I2:.0f}% → -2）")
+        reasons_en.append(f"very serious inconsistency (I²={I2:.0f}% → −2)")
     elif I2 >= 50:
-        down += 1; domain["inconsistency"] = "serious"; reasons.append(f"不一致性严重（I²={I2:.0f}% → -1）")
+        down += 1; domain["inconsistency"] = "serious"
+        reasons.append(f"不一致性严重（I²={I2:.0f}% → -1）")
+        reasons_en.append(f"serious inconsistency (I²={I2:.0f}% → −1)")
     elif I2 >= 25:
-        down += 0.5; domain["inconsistency"] = "some"; reasons.append(f"不一致性中等（I²={I2:.0f}% → -0.5）")
+        down += 0.5; domain["inconsistency"] = "some"
+        reasons.append(f"不一致性中等（I²={I2:.0f}% → -0.5）")
+        reasons_en.append(f"moderate inconsistency (I²={I2:.0f}% → −0.5)")
     else:
         domain["inconsistency"] = "not serious"
 
     # 不精确
     if k < 3:
-        down += 1; domain["imprecision"] = "serious"; reasons.append(f"样本研究少（k={k} → -1）")
+        down += 1; domain["imprecision"] = "serious"
+        reasons.append(f"样本研究少（k={k} → -1）")
+        reasons_en.append(f"few contributing studies (k={k} → −1)")
     elif crosses_null:
-        down += 1; domain["imprecision"] = "serious"; reasons.append("效应估计 CI 跨零（不精确 → -1）")
+        down += 1; domain["imprecision"] = "serious"
+        reasons.append("效应估计 CI 跨零（不精确 → -1）")
+        reasons_en.append("confidence interval crosses the null (imprecision → −1)")
     else:
         domain["imprecision"] = "not serious"
 
     # 偏倚风险
     if risk_of_bias == "high":
-        down += 1; domain["risk_of_bias"] = "serious"; reasons.append("偏倚风险高（→ -1）")
+        down += 1; domain["risk_of_bias"] = "serious"
+        reasons.append("偏倚风险高（→ -1）")
+        reasons_en.append("high risk of bias (→ −1)")
     elif risk_of_bias == "moderate":
-        down += 0.5; domain["risk_of_bias"] = "some"; reasons.append("偏倚风险中等（→ -0.5）")
+        down += 0.5; domain["risk_of_bias"] = "some"
+        reasons.append("偏倚风险中等（→ -0.5）")
+        reasons_en.append("moderate risk of bias (→ −0.5)")
     else:
         domain["risk_of_bias"] = "not serious"
 
     if indirectness == "serious":
-        down += 1; domain["indirectness"] = "serious"; reasons.append("间接性严重（→ -1）")
+        down += 1; domain["indirectness"] = "serious"
+        reasons.append("间接性严重（→ -1）")
+        reasons_en.append("serious indirectness (→ −1)")
     else:
         domain["indirectness"] = indirectness
 
     if publication_bias == "serious":
-        down += 1; domain["publication_bias"] = "serious"; reasons.append("发表偏倚严重（→ -1）")
+        down += 1; domain["publication_bias"] = "serious"
+        reasons.append("发表偏倚严重（→ -1）")
+        reasons_en.append("serious publication bias (→ −1)")
     else:
         domain["publication_bias"] = publication_bias
 
@@ -505,6 +638,8 @@ def b2_grade(pairwise, risk_of_bias="moderate", indirectness="none",
     else:
         grade = "VeryLow"
     return {"grade": grade, "downgrades": down, "reasons": reasons,
+            # 英文版降级理由：C1 英文稿件直接引用（与 reasons 一一对应、同序）。
+            "reasons_en": reasons_en,
             "domain_ratings": domain, "coze_ready": False,
             "note": "半自动 GRADE（κ=0.44 仅半自动），须人工确认各域评级。"}
 
@@ -541,39 +676,150 @@ _OVERCLAIM_PATTERNS = [
 ]
 
 
-def detect_overclaims(claims_text, stats=None):
-    """检测文本中的过度声明（12 模式）。stats 来自 B1：{effect_measure, ci_random/ci_fixed,
-    p_random/p_fixed, k, I2}。返回命中列表 [{id,label,severity,evidence}]（被 B4/C2 复用）。"""
+# 同一 12 类模式的**英文**标签（2026-09-22）。
+# WHY：C1 初稿是英文稿件，把中文 label 直接拼进正文会造成中英混杂；而中文
+# label 是中文工作台页面的唯一真源，不能替换。故并行维护一份英文表，随 hit
+# 以 `label_en` 下发，中文 label 保持不动。
+_OVERCLAIM_LABEL_EN = {
+    "OC1": "Absolute cure / revolutionary wording",
+    "OC2": "Claims significance while the CI crosses the null",
+    "OC3": "Claims no difference while p < 0.05",
+    "OC4": "Claims superiority while CIs overlap (cross the null)",
+    "OC5": "Subgroup finding extrapolated to the whole population",
+    "OC6": "'First / first-in-class' claim (unverified)",
+    "OC7": "Extreme '100% / completely' wording",
+    "OC8": "p-value reported in place of an effect size",
+    "OC9": "Post-hoc subgroup presented as the main conclusion",
+    "OC10": "Non-inferiority inferred from a non-significant test",
+    "OC11": "Absolute safety / 'no side effects' claim",
+    "OC12": "Self-described meta-analysis with weak evidence",
+}
+
+
+# 模式图例 / 统计上下文的中文说法（B3 页面自描述用，2026-09-20）。
+# 由 _OVERCLAIM_PATTERNS 的 severity / aux 字段派生，前端不硬编码任何判据文案。
+_OC_SEVERITY_ZH = {"high": "高（命中即令 B4 判 critical）", "medium": "中", "low": "低"}
+_OC_GUARD_ZH = {
+    None: "无（纯文本命中即计入）",
+    "ci_cross": "需 95% CI 跨过无效线才计入",
+    "p_sig": "需合并 p<0.05 才计入",
+    "ns": "需合并 p≥0.05 才计入",
+    "weak_meta": "需 k<2 或 I²≥75% 才计入",
+    "to_all": "命中后追加提示（亚组表述外推总体）",
+}
+
+
+def _overclaim_context(stats):
+    """把 B1 的 pooled 统计量归一为「模式辅助判定」上下文（单点实现）。
+
+    `detect_overclaims`（判定）与 `overclaim_stats_digest`（B3 页面展示）共用同一份判据，
+    避免「判定一套、页面说明另一套」的漂移。
+    2026-09-14 防御保留：ci 可能为 None（该 task 无 pooled）或含 None（网络 Meta 向量型 CI
+    归一失败）；p / k / I2 亦可能缺或非数值。缺值一律取中性默认（不触发/不放过由各模式自判），
+    旧实现直接参与比较会抛 TypeError。CI 是否跨零：OR/HR/RR 零值=1，MD 零值=0。
+    """
     stats = stats or {}
-    text = (claims_text or "").lower()
     em = stats.get("effect_measure", "OR")
     ci = stats.get("ci_random") or stats.get("ci_fixed")
     p = stats.get("p_random") if stats.get("p_random") is not None else stats.get("p_fixed")
-    k = stats.get("k", 0)
-    I2 = stats.get("I2", 0.0)
-    # CI 是否跨零（OR/HR/RR 零值=1；MD 零值=0）
+
+    def _n2(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
     null = _EFFECT_NULL.get(em, 1.0)
-    ci_cross = bool(ci and (ci[0] < null < ci[1]))
+    _clo, _chi = (None, None)
+    if isinstance(ci, (list, tuple)) and len(ci) >= 2:
+        _clo, _chi = _n2(ci[0]), _n2(ci[1])
+    p = _n2(p)
+    k = _n2(stats.get("k", 0)) or 0
+    I2 = _n2(stats.get("I2", 0.0)) or 0.0
+    has_ci = (_clo is not None and _chi is not None)
+    return {
+        "effect_measure": em, "null_value": null,
+        "ci_lo": _clo, "ci_hi": _chi, "has_ci": has_ci,
+        "p": p, "has_p": p is not None, "k": k, "I2": I2,
+        "ci_cross": (has_ci and _clo < null < _chi),
+        "p_sig": (p is not None and p < 0.05),
+        "is_ns": (p is not None and p >= 0.05),
+        # meta 证据薄弱：研究少或异质性极大（原 `k >= 2 and I2 < 75` 取反，等价）
+        "weak_evidence": (k < 2 or I2 >= 75),
+    }
+
+
+def detect_overclaims(claims_text, stats=None):
+    """检测文本中的过度声明（12 模式）。stats 来自 B1：{effect_measure, ci_random/ci_fixed,
+    p_random/p_fixed, k, I2}。返回命中列表 [{id,label,severity,evidence}]（被 B4/C2 复用）。"""
+    ctx = _overclaim_context(stats)
+    text = (claims_text or "").lower()
     hits = []
     for pid, label, sev, patt, *aux in _OVERCLAIM_PATTERNS:
         if not re.search(patt, text, re.IGNORECASE):
             continue
         aux_kind = aux[0] if aux else None
         evidence = label
-        if aux_kind == "ci_cross" and not ci_cross:
+        if aux_kind == "ci_cross" and not ctx["ci_cross"]:
             continue  # 需 CI 跨零但并未跨零 → 不误报
-        if aux_kind == "p_sig" and not (p is not None and p < 0.05):
+        if aux_kind == "p_sig" and not ctx["p_sig"]:
             continue
-        if aux_kind == "ns" and not (p is not None and p >= 0.05):
+        if aux_kind == "ns" and not ctx["is_ns"]:
             continue
-        if aux_kind == "weak_meta" and not (k < 2 or I2 >= 75):
-            # meta 证据薄弱：研究少或异质性极大；否则不误报
-            if k >= 2 and I2 < 75:
-                continue
+        if aux_kind == "weak_meta" and not ctx["weak_evidence"]:
+            continue
         if aux_kind == "to_all" and "总体" not in text and "all" not in text and "整体" not in text:
             evidence += "（文中含亚组表述，请确认是否外推总体）"
-        hits.append({"id": pid, "label": label, "severity": sev, "evidence": evidence})
+        hits.append({"id": pid, "label": label, "severity": sev, "evidence": evidence,
+                     "label_en": _OVERCLAIM_LABEL_EN.get(pid, label)})
     return hits
+
+
+def overclaim_pattern_legend():
+    """12 类模式的图例：B3 页面用来说明「到底查了什么」（单一真源 = _OVERCLAIM_PATTERNS）。"""
+    out = []
+    for pid, label, sev, patt, *aux in _OVERCLAIM_PATTERNS:
+        aux_kind = aux[0] if aux else None
+        out.append({
+            "id": pid,
+            "label": label,
+            "severity": sev,
+            "severity_zh": _OC_SEVERITY_ZH.get(sev, sev),
+            "guard": _OC_GUARD_ZH.get(aux_kind, aux_kind or "—"),
+            "regex": patt,
+        })
+    return out
+
+
+def overclaim_stats_digest(stats):
+    """B3 页面「本次可用的统计判定条件」：把 _overclaim_context 翻译成可读值。
+
+    目的：让「为什么没命中」可解释 —— 若某条辅助条件缺失（如无 pooled CI），
+    依赖它的模式本次**根本无法触发**，页面必须说清楚，不能让人误读成「没风险」。
+    """
+    ctx = _overclaim_context(stats)
+    em, null = ctx["effect_measure"], ctx["null_value"]
+    if ctx["has_ci"]:
+        ci_txt = "%.4g ~ %.4g" % (ctx["ci_lo"], ctx["ci_hi"])
+        cross_txt = "是（跨过 %g → 合并结论不稳健）" % null if ctx["ci_cross"] else "否"
+    else:
+        ci_txt, cross_txt = "—（本次无合并 CI）", "无法判定（缺 CI，依赖它的模式已跳过）"
+    p_txt = ("%.4g" % ctx["p"]) if ctx["has_p"] else "—（本次无合并 p 值）"
+    guards = []
+    guards.append("CI 跨零：" + ("满足" if ctx["ci_cross"] else "不满足"))
+    guards.append("p<0.05：" + ("满足" if ctx["p_sig"] else "不满足"))
+    guards.append("p≥0.05：" + ("满足" if ctx["is_ns"] else "不满足"))
+    guards.append("证据薄弱（k<2 或 I²≥75%）：" + ("满足" if ctx["weak_evidence"] else "不满足"))
+    return {
+        "effect_measure": em,
+        "null_value": null,
+        "ci": ci_txt,
+        "ci_cross": cross_txt,
+        "p": p_txt,
+        "k": ctx["k"],
+        "I2": ctx["I2"],
+        "guards": "；".join(guards),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +835,7 @@ def b4_quality_gate(grade_report, overclaims):
     high = [h for h in overclaims if h.get("severity") == "high"]
     critical = bool(high) or grade == "VeryLow"
     n_med = len([h for h in overclaims if h.get("severity") == "medium"])
+    _dr = grade_report.get("domain_ratings") or {}
     report = {
         "grade": grade,
         "n_overclaim": len(overclaims),
@@ -597,6 +844,17 @@ def b4_quality_gate(grade_report, overclaims):
         "critical": critical,
         "coze_ready": False,
         "note": "质量门三重：GRADE + 过度声明 + 人工闸。须人工显式批准方可进入 Block C 撰写。",
+        # 2026-09-17 用户要求：「这一步显示的内容最好加以解释」。把 GRADE 的降级理由与五个
+        # 维度评级**展开为顶层标量**（前端 object 面板直接可读，不依赖嵌套 path 支持），
+        # 避免只显示一句 grade=Low 让人不知依据。
+        "grade_downgrades": grade_report.get("downgrades"),
+        "grade_reasons_text": ("；".join(grade_report.get("reasons") or []) or "无降级"),
+        "domain_risk_of_bias": _dr.get("risk_of_bias"),
+        "domain_inconsistency": _dr.get("inconsistency"),
+        "domain_indirectness": _dr.get("indirectness"),
+        "domain_imprecision": _dr.get("imprecision"),
+        "domain_publication_bias": _dr.get("publication_bias"),
+        "overclaim_hits": overclaims[:10],
     }
     nha = {
         "type": "approve",
@@ -645,7 +903,7 @@ def _soft_stop(env, pid, stages, stage, sid, pause_at, decisions):
 # ---------------------------------------------------------------------------
 def run_block_b(studies, effect_measure="OR", nma=False, network_studies=None,
                 claims_text=None, grade_inputs=None, debug=False,
-                human_decision=None, pause_at=None):
+                human_decision=None, pause_at=None, claims_meta=None):
     """Block B 驱动器（coze 计算 + 本地编排）。返回与 run_pipeline 同构的 dict。
 
     B1 计算上 coze（b1_meta_analysis 默认 engine="coze"）；B2/B3/B4 为本地启发式
@@ -655,16 +913,41 @@ def run_block_b(studies, effect_measure="OR", nma=False, network_studies=None,
       （兼容单 dict 或 list 累积凭据）。
       未提供且 B4 闸触发 → done=False / await_human=True / gate="final_inclusion"。
     - pause_at：P3 软停靠集合（fullflow HITL）。默认 None = 现状行为（仅 B4 红线闸停）。
+    - claims_meta（2026-09-20）：B3 输入的**来源说明**（谁拼的这段被扫文本），由上层
+      （fullflow `_build_claims_text`）产出，透传进 B3 stage_result 供页面自证；
+      缺省 None 时页面显示「未提供来源说明」，不阻断检测。
     """
     env = build_block_b_env(studies, effect_measure)
     pid = env["pipeline_id"]
     stages = []
 
+    # 2026-09-19：B1 无数据（A3 强制进入 B 但未上传/提取）→ 以「待补数据」停靠，
+    # 不调用 coze 合并计算、不级联到 C；前端在 B1 内提供上传/录入入口，上传后就地重算。
+    if not studies:
+        s1 = _mk_stage(B1, 0, "await_human",
+                       {"pairwise": {"k": 0, "effect_measure": effect_measure,
+                                     "notes": ["B1 合并计算需要数据：请在下方上传/录入 2×2 数据后重算。"]},
+                        "nma": {"status": "skipped", "reason": "无数据"},
+                        "effect_measure": effect_measure},
+                       {"type": "review", "required": True, "gate": None,
+                        "await_data": True,
+                        "prompt": ("B1 合并计算需要数据：请上传或粘贴 2×2 数据"
+                                   "（首行表头 study, ai, bi, ci, di 或 te/sete），提交后就地重算。")})
+        return {"done": False, "await_human": True, "stages": [s1],
+                "attachments": [], "tool_card_outputs": [], "final": s1, "gate": None}
+
     # B1（coze 计算；engine="coze" 为唯一运行路径，绝不回退本地）
     b1 = b1_meta_analysis(studies, effect_measure, engine="coze", nma=nma,
                           network_studies=network_studies)
     s1 = _mk_stage(B1, 0, "completed", {"pairwise": b1["pairwise"], "nma": b1["nma"],
-                                         "effect_measure": effect_measure}, None)
+                                         "effect_measure": effect_measure,
+                                         "_interpretation": b1.get("_interpretation"),
+                                         "_quality_advice": b1.get("_quality_advice")},
+                   # 2026-09-17：B1 也会软停（DEFAULT_PAUSE_AT 含 B1.meta_analysis）——
+                   # 停靠时前端取 nha.prompt 作为提示语，故必须给出（此前为 None → 空提示）。
+                   {"type": "review", "required": True, "gate": "none",
+                    "prompt": ("合并计算完成：请核对下方合并效应量、95% CI 与异质性（I² / τ²）。"
+                               "确认后点「批准 / 放行」继续进入 GRADE 分级与质量门。")})
     stages.append(s1)
     _st = _soft_stop(env, pid, stages, s1, B1, pause_at, human_decision)
     if _st:
@@ -689,8 +972,52 @@ def run_block_b(studies, effect_measure="OR", nma=False, network_studies=None,
              "p_random": pw.get("p_random"), "p_fixed": pw.get("p_fixed"),
              "k": pw.get("k"), "I2": pw.get("I2")}
     overclaims = detect_overclaims(claims_text or "", stats)
-    s3 = _mk_stage(B3, 2, "completed", {"n_patterns": len(_OVERCLAIM_PATTERNS),
-                                        "n_hits": len(overclaims), "hits": overclaims}, None)
+    # 2026-09-20：B3 页面自描述字段（用途 / 原理 / 输入 / 去向）。
+    # 由 _OVERCLAIM_PATTERNS + _overclaim_context + claims_meta 派生 → 页面文案与判据同源，
+    # 不会出现「说明写一套、判定跑另一套」。旧字段 n_patterns / n_hits / hits 原样保留
+    # （B4、C2、保存的旧会话均按原名消费，零行为变更）。
+    _by_sev = {"high": 0, "medium": 0, "low": 0}
+    for _h in overclaims:
+        if _h.get("severity") in _by_sev:
+            _by_sev[_h["severity"]] += 1
+    _cm = claims_meta if isinstance(claims_meta, dict) else {}
+    _n_chars = len(claims_text or "")
+    _is_empty = not (claims_text or "").strip()
+    _n_stu = _cm.get("n_studies") or 0
+    _stu_total = _cm.get("studies_total")
+    if _is_empty:
+        _cov = "本次送检文本为空 —— 12 类文本模式全部无从触发。"
+        _note = ("⚠ 0 命中 ≠ 无风险：上游（A 块检索）没有产出可比对的标题/摘要，"
+                 "不是「扫了没发现」。")
+    else:
+        _cov = ("选题 + A2 检索结果前 %d 篇的标题/摘要" % _n_stu) if _n_stu else "未提供篇目构成"
+        if _stu_total and _stu_total > _n_stu:
+            _cov += "（A2 共 %d 篇，仅前 %d 篇进入比对）" % (_stu_total, _n_stu)
+        _note = "已比对 %d 字。" % _n_chars
+    s3 = _mk_stage(B3, 2, "completed", {
+        "n_patterns": len(_OVERCLAIM_PATTERNS),
+        "n_hits": len(overclaims),
+        "hits": overclaims,
+        # 分级计数同时给「嵌套」（供程序消费）与「平铺」（object 面板字段只认平铺键）
+        # 两套读法，均由同一个 _by_sev 派生 → 不会漂移。
+        "by_severity": _by_sev,
+        "n_high": _by_sev["high"], "n_medium": _by_sev["medium"], "n_low": _by_sev["low"],
+        "patterns": overclaim_pattern_legend(),
+        "scan": {
+            "source": _cm.get("source") or ("（未提供来源说明：直接调用 run_block_b 时无上层元信息）"),
+            "coverage": _cov,
+            "chars": _n_chars,
+            "n_studies": _n_stu,
+            "note": _note,
+            "preview": (claims_text or "")[:600],
+            "truncated": _n_chars > 600,
+        },
+        "stats_used": overclaim_stats_digest(stats),
+        "downstream": (
+            "命中 high → B4 质量门判 critical（必须人工显式放行，自动续跑被阻断）；"
+            "全部命中同时被 C2 AI 评审复用。"
+        ),
+    }, None)
     stages.append(s3)
     _st = _soft_stop(env, pid, stages, s3, B3, pause_at, human_decision)
     if _st:
@@ -698,7 +1025,11 @@ def run_block_b(studies, effect_measure="OR", nma=False, network_studies=None,
 
     # B4 — 🔴 红线闸
     b4_rep, nha4 = b4_quality_gate(grade_rep, overclaims)
-    s4 = _mk_stage(B4, 3, "await_human", b4_rep, nha4)
+    # 2026-09-17 修复「质量报告 null」：前端 B4 面板读 `editable.report`
+    # （EDITABLE_KEYS["B4.quality_gate"]=["report"]，_view 从 stage_result 同名键取），
+    # 而 b4_quality_gate 返回的是**平铺** dict（grade / n_overclaim / ...）→ 取不到。
+    # 此处同时提供平铺键与嵌套 report，两种读法都兼容。
+    s4 = _mk_stage(B4, 3, "await_human", {**b4_rep, "report": dict(b4_rep)}, nha4)
     stages.append(s4)
 
     base = {
@@ -714,3 +1045,104 @@ def run_block_b(studies, effect_measure="OR", nma=False, network_studies=None,
         return {**base, "done": False, "await_human": True, "gate": gate, "final": s4}
 
     return {**base, "done": True, "await_human": False, "gate": None, "final": s4}
+
+
+# ---------------------------------------------------------------------------
+# 演示用 Block B 信封（2026-09-22 用户要求）
+# ---------------------------------------------------------------------------
+#: 首页选「已备好 B 信封 → 跳至 C 撰稿」却**未提供任何信封**时，用这份示例继续流程，
+#: 作为 Block C（C1 初稿 → C2 AI 评审 → C3 参考核验 → C4 证据 QA）的演示输入。
+#:
+#: **结果不硬编码**：B1-B4 一律用本模块真实函数现算（b1_pairwise_python / b2_grade /
+#: detect_overclaims / b4_quality_gate），保证合并效应量、GRADE、过度声明、质量门
+#: 四者互相自洽 —— 改了示例研究，下游摘要跟着一起变，不会出现「OR 显著但 GRADE 说
+#: CI 跨零」这类自相矛盾的假数据。与 block_a.DEMO_RAW_CSV 同一思路：演示数据也是真算出来的。
+DEMO_B_STUDIES = [
+    {"study": "Study A", "ai": 26, "bi": 120, "ci": 48, "di": 118},
+    {"study": "Study B", "ai": 20, "bi": 96, "ci": 35, "di": 98},
+    {"study": "Study C", "ai": 16, "bi": 74, "ci": 29, "di": 76},
+    {"study": "Study D", "ai": 38, "bi": 150, "ci": 58, "di": 148},
+    {"study": "Study E", "ai": 11, "bi": 58, "ci": 21, "di": 60},
+    {"study": "Study F", "ai": 33, "bi": 90, "ci": 23, "di": 92},
+]
+
+#: 演示「被扫描的文本」（B3 的输入）。刻意含一处**会被命中的**措辞（亚组外推总体），
+#: 让 B3 有 1 条中危命中 → B4 显示 n_overclaim=1 但 critical=False（不阻断 C 流程），
+#: 同时给 C2 AI 评审一条可复用的线索。
+DEMO_B_CLAIMS_TEXT = (
+    "本系统评价共纳入 6 项随机对照试验（合计 902 名受试者），评估干预对主要结局的影响。"
+    "合并结果显示干预组主要结局发生风险低于对照组，各研究效应方向总体一致。"
+    "亚组分析提示在基线风险较高的人群中效应更为明显。"
+)
+
+#: 演示用**英文**题名（2026-09-22）。
+#: WHY：C1 初稿正文是英文，而演示信封的效应量/GRADE 是按下面这个主题（omega-3
+#: 补充 vs 成人抑郁症状）现算的。若调用方只传中文主题，英文句子里直接嵌中文会
+#: 造成中英混杂，故演示路径配套给一个英文题名。
+DEMO_TOPIC_EN = (
+    "Efficacy of omega-3 (DHA) supplementation on depressive symptoms in adults: "
+    "a systematic review and meta-analysis of randomized controlled trials"
+)
+
+
+def demo_b_env(effect_measure="OR"):
+    """构造演示用 Block B 信封（与 run_block_b 同构；done=True / await_human=False）。
+
+    每次返回**新建** dict，调用方可安全改写；构造失败返回 None，由调用方决定兜底
+    （演示数据不得抛异常打断启动流程）。
+    """
+    try:
+        pw = b1_pairwise_python(DEMO_B_STUDIES, effect_measure)
+        if not pw.get("k"):
+            return None
+        grade_rep = b2_grade(pw, risk_of_bias="moderate")
+        overclaims = detect_overclaims(DEMO_B_CLAIMS_TEXT, stats=pw)
+        b4_rep, _nha4 = b4_quality_gate(grade_rep, overclaims)
+        _by_sev = {"high": 0, "medium": 0, "low": 0}
+        for _h in overclaims:
+            if _h.get("severity") in _by_sev:
+                _by_sev[_h["severity"]] += 1
+        _n_chars = len(DEMO_B_CLAIMS_TEXT)
+    except Exception:  # noqa: BLE001 — 演示数据异常不得抛出，交给调用方兜底
+        return None
+
+    # 2026-09-22（一致性审计 P2-13）：演示信封此前不带 _interpretation / _quality_advice，
+    # 导致演示模式下 B1「结果解读」面板显示「（解读引擎未生成内容）」—— 而演示的数值是
+    # 现算的，解读引擎本可用。现补上，形状与 run_block_b 的 S1 对齐。
+    _interp_d, _qa_d = _interp_quality_from_stats(
+        _stats_from_pairwise(pw, effect_measure), "pairwise_meta", {"sm": effect_measure})
+    s1 = _mk_stage(B1, 0, "completed", {
+        "pairwise": pw, "effect_measure": effect_measure,
+        "nma": {"status": "skipped", "reason": "demonstration envelope: no network meta-analysis performed"},
+        "_interpretation": _interp_d,
+        "_quality_advice": _qa_d,
+    }, None)
+    s2 = _mk_stage(B2, 1, "completed", grade_rep, None)
+    s3 = _mk_stage(B3, 2, "completed", {
+        "n_patterns": len(_OVERCLAIM_PATTERNS),
+        "n_hits": len(overclaims), "hits": overclaims,
+        "by_severity": _by_sev,
+        "n_high": _by_sev["high"], "n_medium": _by_sev["medium"], "n_low": _by_sev["low"],
+        "patterns": overclaim_pattern_legend(),
+        "scan": {
+            "source": "演示信封（内置示例文本，非真实检索结果）",
+            "coverage": "内置示例文本 %d 字" % _n_chars,
+            "chars": _n_chars, "n_studies": len(DEMO_B_STUDIES),
+            "note": "已比对 %d 字（演示数据）。" % _n_chars,
+            "preview": DEMO_B_CLAIMS_TEXT[:600],
+            "truncated": _n_chars > 600,
+        },
+        "stats_used": overclaim_stats_digest(pw),
+        "downstream": ("命中 high → B4 质量门判 critical（必须人工显式放行，自动续跑被阻断）；"
+                       "全部命中同时被 C2 AI 评审复用。"),
+    }, None)
+    # 与 run_block_b 一致：B4 同时给平铺键与嵌套 report（前端 B4 面板读 editable.report）
+    s4 = _mk_stage(B4, 3, "completed", {**b4_rep, "report": dict(b4_rep)}, None)
+    return {
+        "pipeline_id": "demo-b-env", "pipeline": "B",
+        "stages": [s1, s2, s3, s4],
+        "attachments": [], "tool_card_outputs": [],
+        "done": True, "await_human": False, "gate": None, "final": s4,
+        "_demo": True,
+        "note": "内置示例 B 信封（演示）：数值由 Block B 本地函数现算，仅用于跑通 Block C 流程。",
+    }

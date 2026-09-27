@@ -4,6 +4,13 @@
 > 上游契约：`contracts/pipeline_stage/v1.0.0/SPEC.md`（per-stage 信封）
 > 设计原则（用户 2026-08-31 定）：**人-AI 协作，非全自动**——低准确度环节随时可打断、改人工介入。
 
+> ⚠️ **2026-09-10 事后变更（D21，A2/A3 合并）**：Block A 的阶段序列已由
+> `A1→A2→A3→A4` 改为 **`A1→A2(文献集)→A4`**——原独立 A3 初筛并入 A2（同节点内去重 +
+> 规则初筛，单节点单表）。本文中所有出现 `A3.screening` / 四阶段序列的示例均为**2026-08-31
+> 当时的冻结稿，保留作历史记录**；当前实现以 `adapters/block_a.py`（`BLOCK_A_SEQUENCE`）、
+> `adapters/fullflow.py`（`DEFAULT_PAUSE_AT` / `EDITABLE_KEYS`）与
+> `references/conversation_flow_menu.md` 为准。
+
 ---
 
 ## 0. 目标 / 非目标

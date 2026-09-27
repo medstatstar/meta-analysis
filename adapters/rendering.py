@@ -436,6 +436,7 @@ _I18N = {
         "group_bias": "发表偏倚",
         "group_quality": "质量评估",
         "group_summary": "分析概要",
+        "group_publish": "发表建议",
         "qgate_pass": "通过",
         "qgate_warn": "需注意",
         "qgate_fail": "不通过",
@@ -489,6 +490,7 @@ _I18N = {
         "group_bias": "Publication bias",
         "group_quality": "Quality assessment",
         "group_summary": "Analysis summary",
+        "group_publish": "Publication advice",
         "qgate_pass": "Pass",
         "qgate_warn": "Caution",
         "qgate_fail": "Fail",
@@ -600,6 +602,215 @@ def _render_subgroup_test(sgt, T: dict) -> str:
     return _group_card("亚组间差异检验", "🔬", badge + rows)
 
 
+def _publication_advice_card(pa, T: dict) -> str:
+    """论文撰写与发表建议卡（消费 advise_publication 结果，纯展示，零计算）。
+
+    含：期刊推荐表 / 优势 / 限制段要点 / 审稿人问题 / 讨论段模板（折叠）/
+    PRISMA 核查 / 报告规范出处（P2c 在线核验）/ S2 高引推荐（P2c）/ 数据可用性 /
+    证据接地（P2b）/ 参考核验（P2a 结构层 / P2b 在线）。
+    """
+    if not isinstance(pa, dict):
+        return ""
+    parts = []
+    field_used = pa.get("field_used") or "general"
+    source = pa.get("source") or "static_seed"
+    # 顶部：领域 + 数据来源（便于读者判断可信度）
+    meta_bits = []
+    if field_used:
+        _fs_map = {"corpus_topic": "语料主题", "corpus_concepts": "语料概念",
+                   "openalex": "OpenAlex 概念"}
+        _fs = pa.get("field_source")
+        _fs_suffix = ("（%s推断）" % _fs_map[_fs]) if _fs in _fs_map else ""
+        meta_bits.append("领域：%s%s" % (_html_escape(field_used), _fs_suffix))
+    if source:
+        _src_map = {"static_seed": "静态种子", "openalex": "OpenAlex 实时"}
+        meta_bits.append("来源：%s" % _src_map.get(source, _html_escape(source)))
+    if meta_bits:
+        parts.append('<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">%s</div>'
+                     % " · ".join(meta_bits))
+
+    # 期刊推荐表
+    recs = pa.get("recommended_journals") or []
+    if recs:
+        rows = []
+        for r in recs:
+            name = _html_escape(r.get("name") or "")
+            tier = _html_escape(r.get("tier") or "")
+            ifv = r.get("if")
+            if isinstance(ifv, (int, float)):
+                if_str = "≈%.0f%s" % (ifv, "*" if r.get("approx") else "")
+            else:
+                if_str = "—"
+            why = _html_escape(r.get("why") or "")
+            extra = ""
+            apc = r.get("apc_prices")
+            if apc is not None:
+                extra += " · APC %s" % _html_escape(str(apc))
+            oa = r.get("is_oa")
+            if oa is True:
+                extra += " · OA"
+            elif oa is False:
+                extra += " · 非 OA"
+            rows.append(
+                '<tr><td style="padding:4px 10px 4px 0;border-bottom:1px solid var(--border);font-weight:700;">%s</td>'
+                '<td style="text-align:right;padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap;">%s</td>'
+                '<td style="text-align:center;padding:4px 8px;border-bottom:1px solid var(--border);">%s</td>'
+                '<td style="padding:4px 0;border-bottom:1px solid var(--border);color:var(--muted);font-size:13px;">%s%s</td></tr>'
+                % (name, if_str, tier, why, extra)
+            )
+        journal_tbl = (
+            '<table style="border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums;margin-bottom:4px;">'
+            '<tr><th style="text-align:left;padding:4px 10px 4px 0;border-bottom:1px solid var(--border);">期刊</th>'
+            '<th style="text-align:right;padding:4px 8px;border-bottom:1px solid var(--border);">IF*</th>'
+            '<th style="text-align:center;padding:4px 8px;border-bottom:1px solid var(--border);">档位</th>'
+            '<th style="text-align:left;padding:4px 0;border-bottom:1px solid var(--border);">推荐理由</th></tr>'
+            + "".join(rows) + "</table>"
+        )
+        if source == "static_seed":
+            journal_tbl += ('<div class="fig-note" style="margin-top:2px;">⚠️ 期刊指标来自静态种子（IF 带 * 为近似值），'
+                            '仅作投稿方向参考。</div>')
+        elif source == "openalex":
+            journal_tbl += ('<div class="fig-note" style="margin-top:2px;">✅ 期刊指标来自 OpenAlex 实时'
+                            '（IF* 为 2yr_mean_citedness 代理；APC/OA 以出版方页为准）。</div>')
+        parts.append(journal_tbl)
+
+    # 优势
+    strengths = pa.get("strengths") or []
+    if strengths:
+        parts.append('<div class="interp-section"><div class="interp-label">✅ 优势</div><ul>' +
+                     "".join("<li>%s</li>" % _html_escape(s) for s in strengths) + "</ul></div>")
+    # 限制段要点
+    limitations = pa.get("limitations") or []
+    if limitations:
+        parts.append('<div class="interp-section"><div class="interp-label">⚠ 限制段要点</div><ul>' +
+                     "".join("<li>%s</li>" % _html_escape(l) for l in limitations) + "</ul></div>")
+    # 审稿人问题
+    rq = pa.get("reviewer_likely_questions") or []
+    if rq:
+        parts.append('<div class="interp-section"><div class="interp-label">🔍 审稿人可能问</div><ul>' +
+                     "".join("<li>%s</li>" % _html_escape(q) for q in rq) + "</ul></div>")
+    # 讨论段模板（折叠）
+    disc = pa.get("discussion_template")
+    if disc:
+        parts.append('<details class="repro" style="background:#f6f8fc;margin-top:4px;">'
+                     '<summary><span>讨论段模板（点击展开/复制）</span><span class="copy-btn">%s</span></summary>'
+                     '<div class="body"><pre style="white-space:pre-wrap;margin:0;">%s</pre></div></details>'
+                     % (_html_escape(T.get("repro_copy", "复制")), _html_escape(disc)))
+    # PRISMA 核查
+    prisma = pa.get("prisma_checklist") or []
+    if prisma:
+        parts.append('<div class="interp-section"><div class="interp-label">📑 PRISMA 核查</div><ul>' +
+                     "".join("<li>%s</li>" % _html_escape(p) for p in prisma) + "</ul></div>")
+
+    # 报告规范出处（P2c：在线核验规范出处 DOI，使清单可溯源/可引用）
+    standards = pa.get("reporting_standards") or []
+    if standards:
+        _st_lab = {"verified": "出处已核验", "static": "静态登记",
+                   "bot_blocked": "出版方拦截(DOI 已解析)", "unresolved": "未解析",
+                   "mismatch": "不匹配", "no_identifier": "无标识"}
+        st_rows = []
+        for st in standards:
+            status = st.get("status") or "static"
+            if st.get("resolved"):
+                cls = "ok"
+            elif status == "static":
+                cls = "neutral"
+            else:
+                cls = "warn"
+            nm = _html_escape(st.get("name") or "")
+            doi = _html_escape(st.get("doi") or "")
+            lab = _st_lab.get(status, _html_escape(status))
+            url = st.get("url") or ""
+            link = (' · <a href="%s" target="_blank" rel="noopener">EQUATOR ↗</a>'
+                    % _html_escape(url)) if url else ""
+            st_rows.append('<div class="k"><span class="cdot %s"></span>%s</div>'
+                           '<div class="v %s">%s · %s%s</div>' % (cls, nm, cls, doi, lab, link))
+        psrc = pa.get("prisma_source")
+        ps_note = ("规范出处已在 doi.org 在线解析核验（ok/bot_blocked 均视为 DOI 真实）；"
+                   "条目本体为静态权威清单（PRISMA 2020）。"
+                   if psrc == "verified_online" else
+                   "规范出处为静态登记（未联网核验）；条目本体为静态权威清单（PRISMA 2020）。")
+        parts.append('<div class="interp-section"><div class="interp-label">📚 报告规范出处</div>'
+                     '<div class="kv checks-kv">%s</div>'
+                     '<div style="font-size:12px;color:var(--muted);margin-top:4px;">%s</div></div>'
+                     % ("".join(st_rows), ps_note))
+    # Semantic Scholar 高引推荐（P2c：有 key 才用；无 key 明示跳过）
+    hc = pa.get("highly_cited") or []
+    s2_status = pa.get("s2_status")
+    if hc:
+        hc_rows = []
+        for h in hc:
+            bits = []
+            if h.get("year"):
+                bits.append(str(h["year"]))
+            if h.get("venue"):
+                bits.append(_html_escape(str(h["venue"])))
+            cit = h.get("citations")
+            if isinstance(cit, int):
+                bits.append("引用 %d" % cit)
+            hc_rows.append('<li>%s <span style="color:var(--muted);">（%s）</span></li>'
+                           % (_html_escape(h.get("title") or ""), " · ".join(bits)))
+        parts.append('<details class="repro" style="background:#f6f8fc;margin-top:4px;">'
+                     '<summary><span>🔥 领域高引推荐（Semantic Scholar · %d 篇）</span>'
+                     '<span class="copy-btn">↕</span></summary>'
+                     '<div class="body"><ul style="margin:0;">%s</ul></div></details>'
+                     % (len(hc), "".join(hc_rows)))
+    elif s2_status == "skipped_no_key":
+        parts.append('<div class="interp-qa" style="font-size:12px;color:var(--muted);margin-top:4px;">'
+                     '🔥 Semantic Scholar 高引推荐：未配置 SEMANTIC_SCHOLAR_API_KEY，已跳过。</div>')
+    # 报告规范 + 数据可用性（底部脚注式）
+    foot = []
+    rg = pa.get("reporting_checklist")
+    if rg:
+        foot.append("报告规范：%s" % _html_escape(rg))
+    da = pa.get("data_availability")
+    if da:
+        foot.append(_html_escape(da))
+    if foot:
+        parts.append('<div class="interp-qa" style="font-size:13px;color:var(--muted);margin-top:6px;">'
+                     + " · ".join(foot) + '</div>')
+    # 证据接地（P2b：复用 merged.json）
+    ev = pa.get("evidence_grounding")
+    if ev and ev.get("loaded"):
+        parts.append('<div class="interp-qa" style="font-size:13px;color:var(--muted);margin-top:4px;">'
+                     '🔎 证据接地（merged.json）：%s</div>' % _html_escape(ev.get("note", "")))
+    # 参考核验（P2a 结构层 / P2b 在线核验）
+    refs = pa.get("ref_verification") or []
+    if refs:
+        _ref_cls = {
+            "verified": "ok", "format_ok": "ok", "no_identifier": "neutral",
+            "bot_blocked": "warn", "suspicious": "bad", "mismatch": "bad",
+            "unresolved": "bad", "malformed": "bad",
+        }
+        _ref_label = {
+            "verified": "已核验", "format_ok": "格式合法", "no_identifier": "无标识",
+            "bot_blocked": "出版方拦截(疑似真实)", "suspicious": "可疑(格式异常)",
+            "mismatch": "不匹配(疑似错误/幻觉)", "unresolved": "未解析", "malformed": "格式异常",
+        }
+        ref_rows = []
+        for r in refs:
+            status = r.get("status") or "unresolved"
+            cls = _ref_cls.get(status, "bad")
+            doi = _html_escape(r.get("doi") or "—")
+            lab = _ref_label.get(status, status)
+            note = _html_escape(r.get("note") or "")
+            cons = r.get("consistency")
+            if cons is True:
+                lab += " · 一致性✓"
+            elif cons is False:
+                lab += " · 一致性✗"
+            detail = lab + ((" — " + note) if note else "")
+            ref_rows.append('<div class="k"><span class="cdot %s"></span>%s</div>'
+                            '<div class="v %s">%s</div>' % (cls, doi, cls, detail))
+        _ref_src = "在线核验（verify_citations：DOI/PMID/OpenAlex 三重解析 + 标题作者一致性）" \
+            if any(r.get("via") == "online" for r in refs) else "结构层核验（仅 DOI 格式）"
+        parts.append('<div class="interp-section"><div class="interp-label">🔗 参考核验</div>'
+                     '<div class="kv checks-kv">%s</div>'
+                     '<div style="font-size:12px;color:var(--muted);margin-top:4px;">%s</div></div>'
+                     % ("".join(ref_rows), _ref_src))
+    return _group_card(T.get("group_publish", "发表建议"), "📝", "".join(parts))
+
+
 def _render_hero(stats, task, T: dict) -> str:
     """顶部结论 Hero：合并效应量 + 95%CI + p + 显著性徽章（一眼看到核心结果）。"""
     pooled = stats.get("pooled") or {}
@@ -612,11 +823,12 @@ def _render_hero(stats, task, T: dict) -> str:
         est, lo, hi = pooled.get("estimate"), pooled.get("ci_low"), pooled.get("ci_high")
     if est is None:
         return ""
-    # 2026-09-08：NMA 的 pooled 是多对比向量（list），无单一"合并效应量"——
-    # 强行 f"{est:.3f}" 会 TypeError（此前 NMA HTML 报告渲染即崩于此）。
-    # 向量型跳过 hero 卡，各对比估计仍由 stats 分组区完整呈现。
+    # 2026-09-14：NMA/CNMA 的 pooled 是多对比向量（list），没有单一"合并效应量"。
+    # 旧实现直接 return ""（2026-09-08 的防御性早退）→ **网络 Meta 报告顶部整块留白**，
+    # 用户第一屏看不到任何结论。改为渲染「网络 Meta 摘要」（结构 + 可达估计数 +
+    # 显著性概况）；逐对比/成分明细仍由下方「合并效应」卡完整呈现，此处不重复列表。
     if isinstance(est, (list, tuple)):
-        return ""
+        return _render_hero_network(stats, T)
     p = pooled.get("p")
     if p is None:
         p = pooled.get("pval")
@@ -636,6 +848,98 @@ def _render_hero(stats, task, T: dict) -> str:
         f'<div class="est"><span class="sm">{sm}</span> {est_s}'
         f'<span class="ci">95% CI {ci_s}</span></div>'
         f'<div class="sub">{badge}<span>{p_txt}</span></div>'
+        f'</div>'
+    )
+
+
+# CINeMA 六域（网络 Meta 置信度）的中文标签与评级文案（2026-09-14）
+_CINEMA_DOMAIN_CN = {
+    "within_study_bias": "研究内偏倚",
+    "reporting_bias": "报告偏倚",
+    "indirectness": "间接性",
+    "imprecision": "不精确性",
+    "heterogeneity": "异质性",
+    "incoherence": "不一致性",
+}
+_CINEMA_RATING_CN = {
+    "no_concerns": "无关切",
+    "some_concerns": "一些关切",
+    "major_concerns": "重大关切",
+    "unclear": "数据不足",
+}
+
+
+def _render_hero_network(stats, T: dict) -> str:
+    """网络 Meta（NMA / CNMA）顶部摘要卡。
+
+    网络 Meta 没有单一的"合并效应量"，但也不该顶部留白——这里给结构 + 可达估计数 +
+    显著性概况。注意 log 尺度（netmeta 输出 TE = log OR/RR/HR）的无效值是 0（不是 1），
+    且 CNMA 的 pooled 含参考组自身占位项（est = lo = hi = 0），须跳过，否则会被
+    误计为"一个跨无效值的对比"。
+    """
+    pooled = stats.get("pooled") or {}
+    extra = stats.get("extra") or {}
+    net = extra.get("network") or {}
+    sm = _html_escape(str(stats.get("sm") or T["effect_label"]))
+    unit = str(pooled.get("unit") or "")
+    is_cnma = stats.get("n_comp") is not None or "components" in extra
+
+    # CNMA 的 pooled 是**组合效应**（各治疗在加性模型下的效应），成分效应才是它的核心产出
+    # —— hero 取 components 口径，否则会出现"标着成分、数着治疗"的口径错配
+    # （case47 实测：pooled 跳过参考组后 4 项 vs components 实为 2 项）。
+    src = (extra.get("components") or {}) if is_cnma else pooled
+    unit_word = "成分" if is_cnma else "对比"
+    est, lo, hi = src.get("estimate"), src.get("ci_low"), src.get("ci_high")
+    if not all(isinstance(v, (list, tuple)) for v in (est, lo, hi)):
+        return ""
+
+    ratio = str(stats.get("sm") or "").upper() in (
+        "OR", "RR", "HR", "PLO", "PLOGIT", "IRR", "RRR")
+    null = 0.0 if unit == "log" else (1.0 if ratio else 0.0)
+
+    def _f(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    tot = sig = 0
+    for i in range(min(len(est), len(lo), len(hi))):
+        e, l, h = _f(est[i]), _f(lo[i]), _f(hi[i])
+        if e is None or l is None or h is None:
+            continue
+        if unit == "log" and e == 0 and l == 0 and h == 0:
+            continue  # 参考组自身占位，不是有效估计
+        tot += 1
+        if not (l <= null <= h):
+            sig += 1
+
+    bits = []
+    k = stats.get("k")
+    if k is not None:
+        bits.append(f"{int(k)} 项研究")
+    nt = stats.get("n_treat") or net.get("n_interventions")
+    if nt is not None:
+        bits.append(f"{int(nt)} 种{'治疗' if is_cnma else '干预'}")
+    if is_cnma:
+        nc = stats.get("n_comp")
+        if nc is not None:
+            bits.append(f"{int(nc)} 个成分")
+    elif net.get("n_designs") and int(net["n_designs"]) > 1:
+        bits.append(f"{int(net['n_designs'])} 种设计")
+    struct = " · ".join(bits) or "网络结构信息缺失"
+
+    kind = "成分网络 Meta（CNMA）" if is_cnma else "网络 Meta 分析（NMA）"
+    return (
+        f'<div class="hero">'
+        f'<div class="lead">{kind}</div>'
+        f'<div class="est"><span class="sm">{struct}</span></div>'
+        f'<div class="sub">'
+        f'<span class="badge ok"><span class="dot"></span>'
+        f'{tot} 个{unit_word}可达估计</span>'
+        f'<span style="margin-left:10px;">其中 {sig} 个的 95% CI 不含无效值'
+        f'（{sm} 尺度）</span>'
+        f'</div>'
         f'</div>'
     )
 
@@ -867,6 +1171,15 @@ main>*{{animation:fade .35s ease both;}}
 .hero .est .ci{{font-size:19px;color:var(--muted);font-weight:700;margin-left:6px;}}
 .hero .est .sm{{font-size:17px;color:var(--accent);font-weight:700;}}
 .hero .sub{{margin-top:8px;font-size:15px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
+.interp-card{{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:var(--radius);padding:16px 20px;box-shadow:var(--shadow);}}
+.interp-header{{font-size:15px;font-weight:700;color:var(--text);margin-bottom:10px;}}
+.interp-conclusion{{font-size:15px;line-height:1.7;color:var(--text);margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border);}}
+.interp-section{{margin-top:8px;}}
+.interp-label{{font-size:13px;font-weight:700;color:var(--muted);margin-bottom:4px;}}
+.interp-section ul{{margin:0;padding-left:18px;list-style:disc;}}
+.interp-section li{{font-size:14px;line-height:1.6;color:var(--text);margin-bottom:3px;}}
+.interp-grade{{display:inline-block;padding:2px 8px;border-radius:4px;background:#eef6f4;color:#0d6e5a;font-weight:700;font-size:12px;margin-right:6px;}}
+.interp-overclaim{{display:inline-block;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:700;font-size:12px;margin-right:6px;}}
 .badge{{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;font-size:13px;font-weight:700;}}
 .badge.ok{{background:#dcfce7;color:#166534;}}
 .badge.warn{{background:#fef3c7;color:#92400e;}}
@@ -919,6 +1232,8 @@ footer{{text-align:center;color:var(--muted);font-size:12px;padding:18px;}}
 <main>
 {banner}
 {hero}
+{interp}
+{publication}
 {figures}
 {stats_groups}
 {repro}
@@ -1028,6 +1343,86 @@ def render_html_report(out, out_dir: str = ".", titles: list | None = None,
         )
 
     hero_html = _render_hero(stats, out.get("task"), T) if stats else ""
+
+    # 2026-09-13 结果解读卡（统计顾问层）：结论 + 警告 + 建议 + 审稿人问题
+    interp_html = ""
+    interp = out.get("_interpretation") if isinstance(out, dict) else None
+    qa = out.get("_quality_advice") if isinstance(out, dict) else None
+    if isinstance(interp, dict) and any(interp.values()):
+        interp_parts = []
+        if interp.get("conclusion"):
+            interp_parts.append(
+                '<div class="interp-conclusion">%s</div>' % _html_escape(interp["conclusion"])
+            )
+        caveats = interp.get("caveats") or []
+        if caveats:
+            interp_parts.append('<div class="interp-section"><div class="interp-label">⚠ 注意事项</div><ul>' +
+                                "".join("<li>%s</li>" % _html_escape(c) for c in caveats) +
+                                "</ul></div>")
+        suggestions = interp.get("suggestions") or []
+        if suggestions:
+            interp_parts.append('<div class="interp-section"><div class="interp-label">💡 建议</div><ul>' +
+                                "".join("<li>%s</li>" % _html_escape(s) for s in suggestions) +
+                                "</ul></div>")
+        rq = interp.get("reviewer_questions") or []
+        if rq:
+            interp_parts.append('<div class="interp-section"><div class="interp-label">🔍 审稿人可能问</div><ul>' +
+                                "".join("<li>%s</li>" % _html_escape(q) for q in rq) +
+                                "</ul></div>")
+        # 2026-09-13 质量评估摘要（GRADE + 过度声明）
+        # 2026-09-14：网络 Meta 改走 CINeMA 六域 → 徽章按 framework 标注，并展开各域明细
+        # （域评级 no/some/major_concerns + unclear，unclear 表示统计侧拿不到数据、须人工补）。
+        if isinstance(qa, dict) and qa.get("summary"):
+            qa_parts = []
+            g_obj = qa.get("grade") or {}
+            grade = g_obj.get("grade", "") if isinstance(g_obj, dict) else str(g_obj or "")
+            fw = qa.get("framework") or (g_obj.get("framework") if isinstance(g_obj, dict) else "")
+            is_cinema = fw == "CINeMA"
+            if grade:
+                if is_cinema:
+                    qa_parts.append('<span class="interp-grade">CINeMA: %s</span>'
+                                    % _html_escape(_CINEMA_RATING_CN.get(grade, grade)))
+                else:
+                    qa_parts.append('<span class="interp-grade">GRADE: %s</span>'
+                                    % _html_escape(grade))
+            n_overclaim = (qa.get("quality_gate") or {}).get("n_overclaim", 0)
+            if n_overclaim:
+                qa_parts.append('<span class="interp-overclaim">⚠ %d 条过度声明</span>' % n_overclaim)
+            detail = ""
+            cg = qa.get("cinema")
+            if is_cinema and isinstance(cg, dict) and cg.get("domains"):
+                rows = []
+                for name, d in cg["domains"].items():
+                    if not isinstance(d, dict):
+                        continue
+                    rows.append(
+                        '<div style="font-size:13px;line-height:1.65;margin-top:2px;">'
+                        '<b>%s</b>：%s —— <span style="color:var(--muted);">%s</span></div>'
+                        % (_html_escape(_CINEMA_DOMAIN_CN.get(name, name)),
+                           _html_escape(_CINEMA_RATING_CN.get(d.get("rating", ""),
+                                                              str(d.get("rating") or ""))),
+                           _html_escape(str(d.get("reason") or ""))))
+                detail = "".join(rows)
+            if qa_parts or detail:
+                summary_html = ('<div style="margin-top:4px;font-size:13px;color:var(--muted);">%s</div>'
+                                % _html_escape(qa["summary"]))
+                interp_parts.append(
+                    '<div class="interp-section"><div class="interp-label">📋 质量评估</div>'
+                    '<div class="interp-qa">' + " ".join(qa_parts) + summary_html + detail
+                    + "</div></div>"
+                )
+        if interp_parts:
+            interp_html = (
+                '<div class="interp-card"><div class="interp-header">📊 结果解读</div>' +
+                "".join(interp_parts) + "</div>"
+            )
+
+    # 2026-09-14 发表建议卡（writing_advisor）：期刊推荐 / 限制 / 讨论模板 / 审稿人问题 / 参考核验
+    pub_html = ""
+    pa = out.get("_publication_advice") if isinstance(out, dict) else None
+    if isinstance(pa, dict) and any(pa.values()):
+        pub_html = _publication_advice_card(pa, T)
+
     stats_html = _render_stats_groups(stats, T) if stats is not None else ""
 
     repro_html = ""
@@ -1086,7 +1481,8 @@ def render_html_report(out, out_dir: str = ".", titles: list | None = None,
         result_report=T["result_report"], generated=T["generated"],
         footer_txt=T["footer"], copied_txt=T["copied"],
         banner=trunc_banner + drift_banner + endpoint_banner, hero=hero_html, figures=figures_html,
-        stats_groups=stats_html, repro=repro_html,
+        interp=interp_html,
+        stats_groups=stats_html, repro=repro_html, publication=pub_html,
     )
 
     try:

@@ -13,6 +13,7 @@ pdf_extractor.extract 验证 A4 输入形状。
 import os
 import sys
 import json
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -21,7 +22,9 @@ import block_a          # A2 检索委派（本地 ct-literature）；A3 摘要�
 import pdf_extractor   # A4 抓取（本地 pdf_extractor）
 import pdf_fetch       # OA PDF 下载（DOI/PMID → Unpaywall/PMC）
 
-SEAM_DIR = r"C:/Users/WintoneFileSrv/WorkBuddy/2026-08-30-19-37-44/meta_analysis_case/seam_test"
+# 临时输出目录：优先 env(META_SEAM_DIR)，否则系统临时目录（不落任何固定本机路径）
+SEAM_DIR = os.environ.get("META_SEAM_DIR") or os.path.join(tempfile.gettempdir(), "meta_analysis_seam_test")
+os.makedirs(SEAM_DIR, exist_ok=True)
 # 统一到 block_a 的 A4 缓存目录（绝对路径、不依赖 cwd），与工作台/上传端点共享，
 # 落盘命名用 _pdf_stem，且下载前查 _a4_cached_pdf —— 杜绝 docN 覆盖式命名与重复下载。
 PDF_DIR = block_a.A4_PDF_CACHE_DIR

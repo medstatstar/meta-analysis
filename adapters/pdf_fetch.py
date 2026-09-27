@@ -68,6 +68,112 @@ def _get(url: str, timeout: int = 30, retries: int = 2) -> bytes:
     raise RuntimeError(str(last))
 
 
+# ---------------------------------------------------------------------------
+# 下载前类型探测（规律 R1 前移）：在发起 PDF 下载**之前**就读到 review/guideline
+# 判定，直接终止下载链路（省下载 + 抽取 + 垃圾行全流程）。
+# 双通道：① Europe PMC REST pubType（权威元数据，pmid/doi 均可查）；
+#        ② 出版商条目页 article-type 徽标 / citation meta（URL 非直链 PDF 时）。
+# ---------------------------------------------------------------------------
+_EPMC_SEARCH = ("https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+                "?query={q}&format=json&resultType=core")
+
+# 页面/元数据上的类型标签（严格短语，避免被参考文献列表污染）
+_PAGE_TYPE_REVIEW = re.compile(
+    r"review article|systematic review|meta[- ]?analysis|scoping review|"
+    r"umbrella review|narrative review|literature review", re.I)
+_PAGE_TYPE_GUIDELINE = re.compile(
+    r"clinical practice guideline|practice guidelines?\b|guidelines? (statement|document)|"
+    r"consensus (statement|conference|report|guidelines)|position statement|"
+    r"presidential advisory|expert (consensus|panel)", re.I)
+_PAGE_TYPE_META = re.compile(
+    r"""name=["']citation_article_type["'][^>]*content=["']([^"']+)["']|"""
+    r"""content=["']([^"']+)["'][^>]*name=["']citation_article_type["']""", re.I)
+
+
+def epmc_pubtypes(pmid=None, doi=None):
+    """查 Europe PMC REST 权威 pubType 列表（文章类型元数据，下载前零成本）。"""
+    q = None
+    if pmid:
+        q = f"EXT_ID:{pmid}%20SRC:MED"
+    elif doi:
+        q = f'DOI:"{urllib.parse.quote(str(doi))}"'
+    if not q:
+        return []
+    try:
+        data = json.loads(_get(_EPMC_SEARCH.format(q=q), timeout=12, retries=1))
+        hits = (data.get("resultList") or {}).get("result") or []
+        for hit in hits:
+            ptl = hit.get("pubTypeList") or {}
+            pts = ptl.get("pubType") or []
+            if isinstance(pts, str):
+                pts = [pts]
+            if pts:
+                return [str(p) for p in pts]
+    except Exception:  # noqa: BLE001 — 探测失败绝不阻断下载
+        pass
+    return []
+
+
+def landing_type_text(url, timeout=10):
+    """抓条目页 HTML（跳过直链 PDF），返回裁剪后的可见文本 + meta 区。"""
+    if not url or not isinstance(url, str):
+        return ""
+    u = url.strip()
+    if u.lower().endswith(".pdf") or "/pdf/" in u.lower() or "pdf" in u.lower().split("?")[0][-8:]:
+        return ""
+    try:
+        raw = _get(u, timeout=timeout, retries=0)
+        text = raw.decode("utf-8", errors="ignore")
+    except Exception:  # noqa: BLE001
+        return ""
+    # meta 标签区 + head 区（徽标在正文前部）
+    metas = " ".join(m.group(0) for m in _PAGE_TYPE_META.finditer(text))
+    body = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", text)
+    body = re.sub(r"<[^>]+>", " ", body)
+    body = re.sub(r"\s+", " ", body)
+    return metas + " " + body[:6000]
+
+
+def screen_page_type(study):
+    """下载前类型探测。返回 (excluded, reason, source) —— excluded 才终止下载。
+
+    ① Europe PMC pubType（权威）；② 条目页徽标 / citation_article_type。
+    任一命中 review/guideline 即排除；两通道皆失败 → 不排除（照常下载，
+    由 PDF 层 classify_pdf 强制甄别兜底）。
+    """
+    if not isinstance(study, dict):
+        return False, None, ""
+    pmid = study.get("pmid")
+    doi = study.get("doi")
+    # ① pubType 元数据
+    pts = epmc_pubtypes(pmid=pmid, doi=doi)
+    for pt in pts:
+        if re.search(r"review|meta[- ]?analysis", pt, re.I):
+            return True, f"Europe PMC pubType 标注综述：{pt}", "epmc_pubtype"
+        if re.search(r"guideline|consensus|position statement|advisory", pt, re.I):
+            return True, f"Europe PMC pubType 标注指南/共识：{pt}", "epmc_pubtype"
+    # ② 条目页徽标
+    for u in (study.get("url"), study.get("open_access_url")):
+        page = landing_type_text(u)
+        if not page:
+            continue
+        m = _PAGE_TYPE_META.search(page)
+        if m:
+            val = (m.group(1) or m.group(2) or "").strip()
+            if re.search(r"review|meta[- ]?analysis", val, re.I):
+                return True, f"条目页 citation_article_type={val}", "page_meta"
+            if re.search(r"guideline|consensus", val, re.I):
+                return True, f"条目页 citation_article_type={val}", "page_meta"
+        if _PAGE_TYPE_REVIEW.search(page):
+            return True, ("条目页文章类型徽标："
+                          + _PAGE_TYPE_REVIEW.search(page).group(0)), "page_badge"
+        if _PAGE_TYPE_GUIDELINE.search(page):
+            return True, ("条目页文章类型徽标："
+                          + _PAGE_TYPE_GUIDELINE.search(page).group(0)), "page_badge"
+        break  # 只试第一个有效页面，避免拖慢
+    return False, None, ""
+
+
 def doi_to_pdf(doi: str, email: str) -> str | None:
     """Unpaywall：返回可下载 PDF URL；无 OA 副本 / 查询失败均返回 None（不抛异常）。"""
     url = f"https://api.unpaywall.org/v2/{urllib.parse.quote(doi)}?email={urllib.parse.quote(email)}"

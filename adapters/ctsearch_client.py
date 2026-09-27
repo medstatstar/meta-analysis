@@ -20,12 +20,14 @@ source="publisher_pdf"，与 nmpa_pv 同源（仅浏览器抓取、无详情接�
 若日后端点返回 UNSUPPORTED_SOURCE（未部署/已下线），本客户端 graceful 返回 {ok:False, error:...}。
 """
 import base64
+import copy
 import hashlib
 import json
 import os
 import re
 import socket
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -44,6 +46,125 @@ CT_REGISTRY_SKILL = os.path.expanduser("~/.workbuddy/skills/ct-registry")
 MAX_BATCH_ITEMS = 50
 # sub-batch 之间强制间隔（秒），避免触发 coze 端限流（与 ct-literature 同款设定）。
 COZE_BATCH_INTERVAL = 5
+
+
+# ---------------------------------------------------------------------------
+# 请求级去重闸门（防「同参重复 coze 调用」刷屏，对齐 coze_client._DEDUP_CACHE）
+# 根因（2026-09-15 飞书 searchlog 复盘）：选题门控「简单分析」路径下，调用方
+# （agent 重试 / 工作台重跑）把偶发失败或空返回误判为「没查到」，于是原样重发
+# 同一 querystr → coze 每次真跑一次检索，飞书表同一请求重复落库（实测 2 查询 ×
+# 4 轮、~2 分钟一轮）。这道闸门：窗口内命中同参请求 → 直接回放缓存，不再出站。
+#
+# 设计要点：
+#   1. 跨进程生效——发布沙箱里每次 CLI 调用是独立进程，纯内存缓存拦不住，故落盘
+#      （文件缓存 + 进程内 dict 双写）。缓存目录 env CT_SEARCH_DEDUP_DIR 覆盖。
+#   2. 只缓存成功（works 非空且 error 为空）——偶发失败不入缓存，否则毒化窗口内
+#      后续真实重试（与 coze_client._dedup_store 同一红线）。
+#   3. 窗口默认 300s（env CT_SEARCH_DEDUP_WINDOW 覆盖，<=0 关闭）——选题探针是秒级
+#      幂等只读，5 分钟内同参重复调用视为同一意图，直接复用。
+#   4. 键含全部影响结果的入参（source/keyword/year_from/year_to/max_results），
+#      任一不同即视为不同请求，绝不串味。
+# ---------------------------------------------------------------------------
+_DEDUP_LOCK = threading.Lock()
+_DEDUP_MEM = {}  # fp -> (ts, result_dict)，进程内快路径
+
+
+def _dedup_dir() -> str:
+    d = os.environ.get("CT_SEARCH_DEDUP_DIR")
+    if not d:
+        d = os.path.join(tempfile.gettempdir(), "ct_search_dedup")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        return ""
+    return d
+
+
+def _dedup_window() -> int:
+    try:
+        return int(os.environ.get("CT_SEARCH_DEDUP_WINDOW", "300"))
+    except ValueError:
+        return 300
+
+
+def _dedup_key(source, keyword, year_from, year_to, max_results) -> str:
+    payload = "|".join([
+        "literature_search", str(source or ""), str(keyword or "").strip().lower(),
+        "" if year_from is None else str(year_from),
+        "" if year_to is None else str(year_to),
+        str(max_results),
+    ])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _dedup_load(fp: str):
+    """返回缓存的 result dict（命中且未过期），否则 None。"""
+    win = _dedup_window()
+    if win <= 0:
+        return None
+    now = time.time()
+    with _DEDUP_LOCK:
+        hit = _DEDUP_MEM.get(fp)
+        if hit and (now - hit[0]) <= win:
+            return copy.deepcopy(hit[1])
+        # 内存未命中 → 查磁盘（跨进程）
+        d = _dedup_dir()
+        if d:
+            p = os.path.join(d, fp + ".json")
+            try:
+                if os.path.isfile(p) and (now - os.path.getmtime(p)) <= win:
+                    with open(p, encoding="utf-8") as f:
+                        res = json.load(f)
+                    _DEDUP_MEM[fp] = (os.path.getmtime(p), res)
+                    return copy.deepcopy(res)
+            except Exception:
+                pass
+    return None
+
+
+def _dedup_save(fp: str, result: dict) -> None:
+    """仅缓存成功结果（works 非空且无 error）。失败不入，避免毒化窗口内真实重试。"""
+    if _dedup_window() <= 0:
+        return
+    if not isinstance(result, dict) or result.get("error") or not result.get("works"):
+        return
+    now = time.time()
+    with _DEDUP_LOCK:
+        _DEDUP_MEM[fp] = (now, copy.deepcopy(result))
+        d = _dedup_dir()
+        if d:
+            p = os.path.join(d, fp + ".json")
+            tmp = p + ".%d.tmp" % os.getpid()
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(result, f, ensure_ascii=False)
+                os.replace(tmp, p)
+            except Exception:
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+
+
+def _dedup_evict() -> None:
+    """清理过期磁盘缓存，防临时目录无限增长（低频、best-effort）。"""
+    d = _dedup_dir()
+    win = _dedup_window()
+    if not d or win <= 0:
+        return
+    now = time.time()
+    try:
+        for name in os.listdir(d):
+            if not name.endswith(".json"):
+                continue
+            p = os.path.join(d, name)
+            try:
+                if now - os.path.getmtime(p) > win * 4:
+                    os.remove(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def _resolve_token() -> str:
@@ -342,13 +463,31 @@ def search_literature(source: str = "europepmc", keyword: str = None,
       openalex / europepmc / biorxiv / medrxiv / semantic_scholar / arxiv
     选题去重默认 europepmc（命中数 + 前几篇标题，直接喂 Stage 4 新颖性维度 + R7）。
 
+    窗口内同参重复调用直接回放缓存（跨进程，见 _dedup_*），不再重复出站——防
+    调用方「误判为空→重试」把同一 querystr 反复打到 coze/飞书日志（2026-09-15 复盘）。
+
     Returns:
-        dict: {source, works:[...], total_count:N, error:str|None}
+        dict: {source, works:[...], total_count:N, error:str|None, from_cache:bool}
         works 为空且 error 非空 → 调用方降级到 in-skill literature_probe.py。
     """
     if not keyword:
         return {"source": source, "works": [], "total_count": 0,
                 "error": "keyword 为空"}
+    fp = _dedup_key(source, keyword, year_from, year_to, max_results)
+    cached = _dedup_load(fp)
+    if cached is not None:
+        cached = dict(cached)
+        cached["from_cache"] = True
+        return cached
+    result = _search_literature_uncached(
+        source, keyword, year_from, year_to, max_results, timeout)
+    _dedup_save(fp, result)
+    _dedup_evict()
+    return result
+
+
+def _search_literature_uncached(source, keyword, year_from, year_to,
+                                max_results, timeout) -> dict:
     payload = {
         "source": source,
         "mode": "search",
@@ -387,7 +526,11 @@ def search_literature(source: str = "europepmc", keyword: str = None,
                                      headers=_headers(), method="POST")
         with urllib.request.urlopen(req, timeout=timeout) as r:
             projects = _parse_coze_stream(r, lambda m: None)
-        if projects is not None:
+        # 注意：_parse_coze_stream 解析失败返回 []（而非 None）——若直接接受，
+        # 「解析失败」会伪装成「检索无结果」，上游据此误判重试 → 同参重复出站
+        # （2026-09-15 飞书 searchlog 实测 2 查询×4 轮 burst 的成因之一）。
+        # 空列表视同失败，继续走 /run 回退拿真实结果。
+        if projects:
             return {"source": source, "works": projects,
                     "total_count": len(projects), "error": None}
     except Exception as e:

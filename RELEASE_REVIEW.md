@@ -53,6 +53,11 @@
 
 ### 2.1 人工审核闸现状（HITL · 2026-09-02 补齐 A2/A3）
 
+> ⚠️ **2026-09-10 事后变更（D21）**：下表的 **A3 初筛** 已并入 **A2「文献集」**
+> （`A2.literature_search`），A 阶段序列为 `A1→A2→A4`，`DEFAULT_PAUSE_AT` 不再含
+> `A3.screening`。本节保留 2026-09-02 当时的评审记录作历史；当前以
+> `references/conversation_flow_menu.md` / `references/HANDOFF_2026-09-10.md §3` 为准。
+
 | 闸 | 阶段 id | 类型 | 触发 / 展示 | 可跳过 | 状态 |
 |---|---|---|---|---|---|
 | A2 检索策略确认 | `A2.literature_search` | 🟡 软停 | `DEFAULT_PAUSE_AT` 含；展示各库条数(by_source)/检索状态/撤稿数/查询式，防沉默漏检 | 可 | ✅ 本轮**启用 + 覆盖 payload** |

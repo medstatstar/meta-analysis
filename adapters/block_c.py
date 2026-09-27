@@ -53,6 +53,29 @@ _SECTION_PAIRS = [("背景", "Background"), ("方法", "Methods"), ("结果", "R
 # 中英合一的必含章节清单（由 _SECTION_PAIRS 派生，避免两处清单漂移）
 _REQUIRED_SECTIONS = [s for _pair in _SECTION_PAIRS for s in _pair]
 
+# LLM 系统 prompt 模板
+_SYSTEM_PROMPT_ZH = """你是一位循证医学与流行病学写作专家。你的任务是基于给定的 meta 分析统计结果和研究数据，撰写一篇系统评价/meta 分析的初稿章节。
+
+要求：
+1. 严格基于提供的统计结果和研究数据，不虚构数字或结论
+2. 与 GRADE 证据质量评级保持一致
+3. 讨论段须提及 B3 检测出的潜在过度声明（已标注）
+4. 结论须与 CI 跨零情况和效应方向一致
+5. 学术、严谨、简洁
+6. 每节 2-5 段落，勿过长
+7. 引用格式：作者（年份）"""
+
+_SYSTEM_PROMPT_EN = """You are an evidence-based medicine and epidemiology writer. Your task is to draft sections of a systematic review / meta-analysis based on the provided statistical results and study data.
+
+Requirements:
+1. Strictly base all content on the provided statistics and study data — do not fabricate numbers or conclusions
+2. Be consistent with the GRADE evidence quality rating
+3. Mention potential overclaims detected by B3 (flagged) in the discussion section
+4. Conclusions must align with CI crossing-null status and effect direction
+5. Academic, rigorous, concise
+6. 2-5 paragraphs per section, not excessively long
+7. Citation format: Author (Year)"""
+
 
 def _n(n, one, many):
     """单数/复数选择（英文）。"""
@@ -1061,7 +1084,19 @@ def build_narrative_prompt(topic, scaffold, b_summary, studies_list=None,
     stats_line = (f"合并效应 {_em_np}={_te_np_txt} "
                   f"(95%CI {_ci_np_txt}); I2={_i2_np_txt}; "
                   f"GRADE={b_summary.get('grade', {}).get('grade')}")
-    studies_ctx = "\n".join(_study_cite(s) for s in (studies_list or [])[:10]) or "（无文献集）"
+    # 包含摘要/主要发现（2026-09-25 修复）：让 LLM 能基于真实研究内容讨论，而非仅引用书目事实。
+    def _study_ctx(s):
+        """每条研究的叙述上下文：引用 + 摘要 + 主要发现/结局（如有）"""
+        cite = _study_cite(s)
+        abstract = (s.get("abstract") or "").strip()
+        findings = (s.get("findings") or s.get("key_findings") or "").strip()
+        parts = [cite]
+        if abstract:
+            parts.append(f"  Abstract: {abstract[:600]}")
+        if findings:
+            parts.append(f"  Key findings: {findings[:300]}")
+        return "\n".join(parts)
+    studies_ctx = "\n\n".join(_study_ctx(s) for s in (studies_list or [])[:10]) or "（无文献集）"
 
     ref_block = ""
     if ref_sections:
@@ -1098,16 +1133,107 @@ def build_narrative_prompt(topic, scaffold, b_summary, studies_list=None,
     )
 
 
-def c1_expand_narrative(scaffold, prompt, llm=None):
-    """用 LLM 扩写叙述；llm(callable[str]->str) 缺失时原样返回 (scaffold, False)。
+def c1_expand_narrative(c1, topic, b_summary, studies=None, references=None,
+                        picos=None, language="zh"):
+    """C1 scaffold → 完整叙述（LLM 驱动，降级安全）。
 
-    编排层（agent / fullflow）持有 LLM 能力时注入 llm，使 C1 产出完整初稿；
-    本地单测不注入 llm，保持确定性、不破坏契约。
+    修改 c1["manuscript"] 原地替换，更新 char_count。
+    返回 {manuscript, expanded: bool, provider: str}。
     """
-    if llm is None:
-        return scaffold, False
-    expanded = llm(prompt)
-    return (expanded, bool(expanded and expanded != scaffold))
+    try:
+        from llm_client import expand as _llm_expand
+    except ImportError:
+        _llm_expand = None
+
+    # 构建 prompt
+    ref_sections = None
+    if references and isinstance(references, list):
+        ref_sections = []
+        for r in references[:15]:
+            if isinstance(r, dict):
+                parts = []
+                if r.get("verified_first_author") or r.get("first_author"):
+                    parts.append(r.get("verified_first_author", r.get("first_author", "")))
+                if r.get("year"):
+                    parts.append(f"({r['year']})")
+                if r.get("verified_title") or r.get("title"):
+                    parts.append(r.get("verified_title", r.get("title", "")))
+                if r.get("journal"):
+                    parts.append(f"*{r['journal']}*")
+                if r.get("doi"):
+                    parts.append(f"doi:{r['doi']}")
+                if parts:
+                    ref_sections.append(", ".join(parts))
+
+    prompt = build_narrative_prompt(
+        topic, c1["manuscript"], b_summary,
+        studies_list=studies, ref_sections=ref_sections,
+    )
+
+    # 调用 LLM（候选梯队自动降级）
+    raw = _llm_expand(prompt, timeout=120, system=_SYSTEM_PROMPT_EN if language == "en" else _SYSTEM_PROMPT_ZH)
+
+    if raw and isinstance(raw, str) and raw.strip() and raw != c1["manuscript"]:
+        # 基本质量检查：包含至少 3 个章节标记
+        section_count = len(re.findall(r"^##\s+", raw, re.MULTILINE))
+        if section_count >= 3:
+            c1["manuscript"] = raw
+            c1["char_count"] = len(raw)
+            c1["expanded"] = True
+            return c1
+
+    # 降级：保持 scaffold
+    c1["expanded"] = False
+    return c1
+
+
+# ---------------------------------------------------------------------------
+# 参考文献格式化（C3 核验后自动填充初稿）
+# ---------------------------------------------------------------------------
+def format_references(c3_report, language="zh"):
+    """从 C3 核验结果生成格式化引用列表 Markdown。
+
+    仅使用已核验的真实元数据（verified_title / verified_first_author / year / journal），
+    不虚构引用信息。
+    """
+    verifications = c3_report.get("ref_verifications") or []
+    if not verifications:
+        return ""
+
+    is_zh = (language != "en")
+    lines = []
+    for i, rv in enumerate(verifications):
+        if rv.get("status") not in ("ok", None):
+            continue
+        parts = []
+        # 作者
+        author = rv.get("verified_first_author") or rv.get("first_author")
+        if author:
+            parts.append(author)
+        # 年份
+        year = rv.get("year")
+        if year:
+            parts.append(f"({year})")
+        # 标题
+        title = rv.get("verified_title") or rv.get("title")
+        if title:
+            parts.append(title)
+        # 期刊
+        journal = rv.get("journal")
+        if journal:
+            parts.append(f"*{journal}*")
+        # DOI
+        doi = rv.get("doi")
+        if doi:
+            parts.append(f"doi:{doi}")
+        if parts:
+            lines.append(f"{i+1}. " + ". ".join(parts))
+
+    if not lines:
+        return ""
+
+    header = "参考文献" if is_zh else "References"
+    return f"## {header}\n\n" + "\n\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1325,7 +1451,8 @@ def run_block_c(topic=None, studies=None, b_env=None, analysis=None, references=
                 human_decision=None, pause_at=None,
                 studies_list=None, prisma_flow=None, picos=None,
                 search_info=None, rob_summary=None, merged_json=None,
-                ref_sections=None, topic_en=None, evidence=None, evidence_error=None):
+                ref_sections=None, topic_en=None, evidence=None, evidence_error=None,
+                language="zh", expand=True):
     """本地优先 Block C 驱动器。返回与 run_pipeline 同构的 dict。
 
     - 消费 B 阶段结果：优先 b_env（run_block_b 输出信封），否则 analysis（归一 dict）。
@@ -1334,6 +1461,8 @@ def run_block_c(topic=None, studies=None, b_env=None, analysis=None, references=
     - human_decision：单个 {"stage_id": C3|C4, "action": "approved"}，或多个批准的 list
       （生产 coze 流中跨阶段累积的批准凭据，一次性传入；本地单轮即可放行多闸）。
     - pause_at：P3 软停靠集合（fullflow HITL）。默认 None = 现状行为（仅 C3/C4 红线闸停）。
+    - language：zh（默认）或 en，控制输出语言。
+    - expand：True 时调 LLM 扩写叙述段（降级安全：失败则保持 scaffold）。
     """
     b_summary = _extract_b_summary(b_env if b_env is not None else analysis)
     env = build_block_c_env(topic)
@@ -1347,6 +1476,30 @@ def run_block_c(topic=None, studies=None, b_env=None, analysis=None, references=
                   search_info=search_info, rob_summary=rob_summary, merged_json=merged_json,
                   ref_sections=ref_sections, topic_en=topic_en, evidence=evidence,
                   evidence_error=evidence_error)
+    # 叙述扩展（2026-09-25）：注入 LongCat-2.0 等后台大模型，将 scaffold 扩写为
+    # 完整英文初稿（背景/讨论/结论/摘要不再留模板占位符）。任何失败回退到 scaffold。
+    try:
+        import topic_translate as _tt
+        _cands = _tt._candidates()
+        if _cands:
+            _prompt = build_narrative_prompt(topic, c1["manuscript"], b_summary,
+                                             studies_list=studies_list,
+                                             ref_sections=ref_sections)
+            # 叙述扩展：用后台大模型（LongCat-2.0 等）将 scaffold 扩写为完整初稿
+            # raw=True 模式给 8000 token 预算，足够产出完整论文叙述段
+            for _base, _k, _model in _cands:
+                try:
+                    _raw = _tt._call(_base, _k, _model, _prompt, timeout=120,
+                                     system="You are an evidence-based medicine / epidemiology writer. Write a submission-ready ENGLISH manuscript narrative strictly based on the provided data. Do not fabricate statistics or references.",
+                                     raw=True)
+                except Exception:
+                    continue
+                if _raw and _raw != c1["manuscript"]:
+                    c1["manuscript"] = _raw
+                    c1["char_count"] = len(_raw)
+                    break
+    except Exception:
+        pass  # LLM 不可用时回退到 scaffold（已含真实数据与引用）
     s1 = _mk_stage(C1, 0, "completed",
                    {"manuscript": c1["manuscript"], "sections": c1["sections"],
                     "char_count": c1["char_count"],
@@ -1374,6 +1527,15 @@ def run_block_c(topic=None, studies=None, b_env=None, analysis=None, references=
     if _refs is None and studies_list:
         _refs = [{"doi": s["doi"]} for s in studies_list if isinstance(s, dict) and s.get("doi")]
     c3 = c3_reference_verify(c1["manuscript"], c1["sections"], _refs)
+
+    # C3 后：自动格式化参考文献，填充初稿「## 参考文献」章节
+    ref_text = format_references(c3, language=language)
+    if ref_text and "待补充" in c1["manuscript"]:
+        c1["manuscript"] = c1["manuscript"].replace(
+            "（待补充：由 C3 参考完整性核验后生成。）",
+            "\n\n" + ref_text
+        )
+        c1["sections"] = re.findall(r"^##\s+(.+)$", c1["manuscript"], re.MULTILINE)
     nha3 = {
         "type": "approve",
         "prompt": (f"参考完整性核验：{c3['n_references']} 条参考、"

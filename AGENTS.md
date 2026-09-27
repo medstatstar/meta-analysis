@@ -48,7 +48,20 @@ Numeric judgment is always R-computed on the coze side, never read by the LLM.
 - **R engine (single source of truth)**: the canonical R engine + `run_task.R` dispatcher lives in the coze project (`src/r_engine/`) and is mirrored at `adapters/coze/src/r_engine/` (maintenance/dev-reference only; NOT a runtime fallback, NOT published). Developer R-engine maintenance commands live in `adapters/coze/DEV.md` (git/clawhub-ignored, not published). There is no local-R reference code: the historical `adapters/_dev/local_engine.py` was deleted on 2026-09-01 per the architecture end-state principle (coze is the sole compute source of truth).
 - **Directory layout**: `scripts/` = pure-local Python; `adapters/` = compute exit layer; `adapters/coze/src/r_engine/` = coze-project R engine mirror (maintenance/dev-reference only; git/clawhub-ignored); `adapters/_dev/` = dev-only reference code (git/clawhub-ignored, not published).
 
-### 6. Interactive Menu / Navigation / 交互菜单
+### 6. Published Application (WorkBuddy Sites)
+
+The workbench is published as a WorkBuddy online app. **When re-publishing, always reuse the existing `appId` to keep the share link stable — never create a new app.**
+
+| Item | Value |
+|---|---|
+| Share link | `https://meta.app.workbuddy.link/` (alias: `https://meta.app.workbuddy.host/`) |
+| domainPrefix | `meta` |
+| appId | `wbapp_hNZl928SI6wByvJt2COtcC` |
+| sandboxId | `a3c70e48be8f45019845b76383334bfc` |
+| Runtime | Python (`pip install -r requirements.txt` + `python main.py`) |
+| Deploy directory | `meta-workbench-app/` (23 files: `main.py` + `adapters/` + `requirements.txt`) |
+
+### 7. Interactive Menu / Navigation / 交互菜单
 - **Triage**: classify user's first message as Simple / Complex / Vague.
   - **Simple**: single, specific intent (e.g., "pool OR from these 5 studies", "convert d to logOR") → skip menu, go directly to analysis.
   - **Complex**: multi-decision / multi-parameter (e.g., "design a network meta with 3 interventions, subgroup by region, check inconsistency") → present level-1 menu with "need more explanation" entry.
@@ -120,7 +133,9 @@ meta-analysis/
 ├── adapters/                      # Compute exit layer (§16.9): coze-only
 │   ├── run_analysis.py            # Unified front door (coze only)
 │   ├── coze_client.py             # Coze /run client (sole path)
-│   ├── _dev/                      # Dev-only reference dir (git/clawhub-ignored, not published; historical local-R engine removed 2026-09-01)
+│   ├── pdf_extractor.py           # PDF data extraction (v0.4.1, table + narrative templates)
+│   ├── literature_probe.py        # In-skill Europe PMC dedup probe (zero deps)
+│   ├── _dev/                      # Dev-only reference dir (git/clawhub-ignored, not published)
 │   └── README.md                  # Adapter docs
 ├── adapters/coze/          # Coze project R engine mirror (maintenance/dev-reference only; not published)
 │   ├── run_task.R                 # Dispatcher (task → stats + SVG), single source with coze
@@ -170,12 +185,12 @@ meta-analysis/
   - ① Topic-direction judgment → `references/topic-selection.md` + `adapters/literature_probe.py` (in-skill Europe PMC probe); comprehensive retrieval delegated to **ct-literature**.
   - ② Literature retrieval/dedup → **ct-literature** (`ct_literature.py`, 6-source merge+dedup); meta-analysis only orchestrates.
   - ③ Screening/cleaning → `ct-literature` `screen_prisma.py` (machine) + agent-layer title/abstract judgment (`review_workflow.md §2`); PRISMA via `scripts/prisma_bridge.py`.
-  - ④ **Data extraction (new)** → `scripts/extract_assist.py` (scaffold/validate/stamp) + `scripts/extraction_guard.py`.
+  - ④ **Data extraction (new)** → `scripts/extract_assist.py` (scaffold/validate/stamp) + `scripts/extraction_guard.py` + `adapters/pdf_extractor.py` (table + narrative templates, v0.4.1).
   - ⑤ Compute → existing `scripts/run_meta.py` (coze-only).
 - **Extraction assistant (human-in-the-loop, never auto-feed)**: `extract_assist.py` writes a clean Type 1/2/3 CSV plus a sidecar `<csv>.provenance.json` with `verified_by_human=NO`. The agent/LLM reads full texts (OA or user-uploaded PDF→md) and proposes rows; `validate` checks schema/numeric sanity/NR markers; `stamp --confirm` sets `verified_by_human=YES` only after human review (source page/table recorded). Any unreported value → `NR`, never fabricated.
 - **Extraction guard (red line)**: `extraction_guard.check_verified(data_path)` is called at the top of `run_meta.py` (before `build`). If a companion `.provenance.json` exists with `verified_by_human=False` → blocks with `META_STATUS=unverified_extraction` (exit 3). No companion → treated as a trusted hand-made CSV (allowed, with a note). `run_meta --trust-data` bypasses the guard (explicit user responsibility, only for confirmed-valid legacy/curated CSVs).
 - **Seam trap (do not automate)**: `ct-literature`'s `included_records` (machine screen pass) ≠ `included` (human final). `prisma_bridge.py` forces `included`/`assessed`/`excluded_elig` as `[MANUAL]`; never map machine screen counts directly into the compute track.
-- **Full-text / accuracy are human responsibility**: PDF bulk-fetch is not automated (paywalls; review_workflow §0.2 `PDF_download` 404); extraction precision requires double-extraction + arbitration per systematic-review standards.
+- **PDF data extraction** (`adapters/pdf_extractor.py` v0.4.1, 2026-09-14): table + narrative templates for extracting meta-analysis data from PDFs. Templates: T_DICHOT, T_CONTINUOUS, T_EFFECT_TABLE, T_CONT_TABLE, T_FOREST_TABLE, T_META_TABLE, T_POOLED_EFFECT, T_SUBGROUP_EFFECT, T_OR_CI, T_HR_CI, T_RR_CI. Benchmarked on 78 real PDFs from `adapters/pdf_cache`. Human-in-the-loop review gate via `extract_assist.py`.
 - **Full-flow mode entry (`@skill` trigger)**: when the user invokes meta-analysis with a full-flow intent (`系统综述全流程` / `systematic review workflow` / `从检索到meta分析` / etc., see SKILL.md `triggers`), follow `references/systematic_review_fullflow.md` — a 5-stage playbook (Stage 0 launch gate → ① topic → ② ct-literature retrieval → ③ screening+PRISMA → ④ extraction → ⑤ compute) with two non-skippable human gates (Stage 3 final `included` count, Stage 4 `stamp --confirm`). It does NOT add a new `classify.py` task class; it sequences the existing topic + compute tracks.
 
 ## Changelog Sync / 变更日志同步

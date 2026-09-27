@@ -126,7 +126,7 @@ def g3_envelope():
     with mock.patch.object(ba, "a1_registry_check", return_value=fake_probe):
         a_env = ba.run_block_a("Osimertinib in NSCLC", max_results=20)
     problems += _check_envelope(a_env, ["A1.topic_selection", "A2.literature_search",
-                                        "A3.screening", "A4.data_extraction"],
+                                        "A4.data_extraction"],
                                 "extraction_review", "A")
 
     # ---- Block B（本地 R，无网络）----

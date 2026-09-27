@@ -1,0 +1,30 @@
+{
+  "generated_by": "ct-base/scripts/publish_inject.py",
+  "ct_base": "C:\\Users\\WintoneFileSrv\\.workbuddy\\skills\\ct-base",
+  "files": [
+    "scripts/i18n.py",
+    "scripts/kw_localize.py",
+    "scripts/kw_lexicon.json",
+    "scripts/r_libs.py",
+    "scripts/drug_name_resolver.py",
+    "scripts/excel_style.py",
+    "scripts/office_to_md.py",
+    "scripts/keyword_breadth.py",
+    "scripts/source_guard.py",
+    "references/term_map.json",
+    "references/drug_name_map.json",
+    "scripts/merge_spec.py"
+  ],
+  "backups": [
+    ".\\scripts/i18n.py.ctbase_bak_20260927-105516",
+    ".\\scripts/drug_name_resolver.py.ctbase_bak_20260927-105516",
+    ".\\scripts/excel_style.py.ctbase_bak_20260927-105516",
+    ".\\scripts/office_to_md.py.ctbase_bak_20260927-105516",
+    ".\\scripts/keyword_breadth.py.ctbase_bak_20260927-105516",
+    ".\\scripts/source_guard.py.ctbase_bak_20260927-105517",
+    ".\\references/term_map.json.ctbase_bak_20260927-105517",
+    ".\\references/drug_name_map.json.ctbase_bak_20260927-105517",
+    ".\\scripts/merge_spec.py.ctbase_bak_20260927-105517"
+  ],
+  "timestamp": "2026-09-27T10:55:17.219558"
+}

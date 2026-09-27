@@ -6,8 +6,25 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ## [Unreleased]
 
+## [2.17.0] — 2026-09-27 — 屏蔽收口 + 发布前检查整改：A4 旁路闸门、CCM 停用、工作台四项修复
+
+### Changed
+
+- **发布前检查整改（§16.8）**：`publish_inject.py` 重新注入共享件——`scripts/i18n.py` 修复**陈旧快照缺陷**（meta 旧副本缺 `resolve_user_language` / `detect_text_language`，而 `coze_client.py` / `build_request.py` 的出站语言判定已上移依赖它们），同步 `office_to_md.py`（+xlsx 支持）与 `drug_name_resolver` / `excel_style` / `keyword_breadth` / `source_guard` / `merge_spec` / term_map / drug_name_map；`shared_sync_check` 由 4 漂移 → **全部一致 ✓**。已知豁免 2 项：`r_libs`（.venv 内 cffi `get_other_libs` 子串误报，零真实引用）、`kw_localize`（block_a 设计为运行时回落 ct-base 权威；本次注入后自带 bundled 副本）。`i18n_messages` 缺失的 39 键全为 `hub.*`（Hub 导航，meta 零引用）——合法裁剪。
+
+- **CCM 对话上下文菜单全面停用（2026-09-27，用户裁定）**：技能执行面收敛为两种——① 网页应用（meta.app，菜单式引导）② 上下文对话（agent 自然语言叙述阶段状态 + 开放提问）。A/B/C 所有节点的人工闸**不再在聊天中渲染 flow_menu 菜单 / L0 导航条 / flow_menu_widget 可点卡片**。`flow_menu.py` / `flow_menu_widget.py` 降级为开发者 CLI 工具，fullflow 状态机、红线闸、审计留痕全部不变。改动面：SKILL.md §2.4 顶部加 DISABLED 横幅（含替代行为规范：到达人工闸时以散文陈述进度并直接提问，或引导至网页应用），原 CCM 实现段标 [ARCHIVED]、widget 子条目就地标 ⛔ disabled；`references/conversation_flow_menu.md` 头部加停用横幅（保留作设计归档，供日后重新启用）。解冻 = 撤两处横幅（本文 + SKILL.md）。
+- **A4 自动数值提取全面屏蔽——旁路收口（2026-09-27，用户指令）**：主开关 `features.a4_extraction=False`（2026-09-17 裁定）已让 A4 节点降级为纯 PDF 下载、`_a4_extract_pdf` 短路，但排查发现 **3 处直连 `pdf_extractor.extract()` 的后端旁路不受开关控制**：`POST /api/upload_pdf`、`POST /api/upload_pdf_auto`（补传 PDF 即时抽 2×2 表）、`POST /api/start_data data_mode="pdf"`（PDF 快速通道；前端入口 `fastpath_pdf` 虽已隐藏，但直接打 API 仍可触发抽取）。三处统一加 `features.a4_extraction_enabled()` 闸门（关闭时 409 + 指引改用「自备原始数据」通道）；TestClient 实测三条全返 409。解冻 = 把 `FEATURES["a4_extraction"]` 改回 True（或 `CT_FEATURE_A4_EXTRACTION=1`），旁路自动恢复。`features.py` 注释同步收口说明。
+- **工作台（meta.app）2026-09-27 六项改动，同日多次覆盖发布（appId 不变、链接 `https://meta.app.workbuddy.host/`）**：
+  - 顶栏「审计」按钮冻结——去 onclick、加 `disabled`，面板恒收起（保留 localStorage 恢复语句为注释，解冻一行还原）。
+  - 「反馈」对话框携带上下文（参考 ct-samplesize §20.3.5）：`wbBugDiag` 补 lang/backend/url/ts；`wbOpenBug` 把【上下文（发送前可删改）】预填进描述框；server `/api/bug-report` 借白名单内 `engine_status`（截 600 字符）携带 diagnostics（此前整字段丢弃）；`bug_report.SKILL_VERSION` 改为运行时读 SKILL.md frontmatter（原硬编码 1.0.0 漂移）；`build_publish.py` 白名单 + REQUIRED 纳入 `SKILL.md`。
+  - 「反馈」按钮加 bug SVG 图标（`svg.wb-ico`，同审计按钮规格）；`data-i18n` 从按钮移到内层 span，防 `wbLocalize()` textContent 赋值抹掉图标。
+  - 选题可行性速览 TDZ 修复（见 Fixed）。
+  - 快速通道主题改**选填**（用户裁定方案 A）：raw_csv / draft 空主题放行（Block B 计算零依赖主题，Block C 有 no_topic 警告条兜底）；server 校验按 data_mode 分支（standard/pdf 仍必填）+ `topic: Form("")`（否则 FastAPI 先 422）；前端 `doStart()` 必填拦截限定 standard，模式切换显示 `#topic-opt-hint` 提示行。
+  - 选题速览面板加「ℹ️ 简化分析说明」提示条：明示网页应用提供简化分析（命中数探针 + 本地确定性评分），完整评估（PICO / R1–R6 / PROSPERO 查重 / AMSTAR-2 / 11 节报告）需安装技能在对话中进行。
+
 ### Fixed
 
+- **选题可行性速览 JS TDZ 崩溃（2026-09-27，线上报障）**：`Cannot access 'radarHtml' before initialization`——09-24 加雷达图时 `const radarHtml` 声明在 `scoreHtml` IIFE **之后**，而 IIFE 模板字符串引用它，求值即抛；仅当 A1 探针返回 `topic_analysis.scores` 时触发。修复：声明提前至 `scoreHtml` 之前、删除后部重复声明（全文恰 1 处），留警示注释。线上验证首页 MD5 一致。
 - **发布版接入 ct-base §12 后台大模型 LongCat-2.0 + 修复「后端未连接」误报（2026-09-25）**：
   - **背景**：云端 sandbox 无 `~/.workbuddy/models.json` 与 LLM 环境变量 → `topic_translate._candidates()` 为空 → 中文主题自动翻译在发布版上**静默失效**（境外库 0 命中老坑的另一种形态）。按 ct-base `references/workbench_ui.md` §12（家族统一 LongCat-2.0，2026-09-25 起）接入：新增 `adapters/llm_loader.py`（ct-base 拷贝）+ `config/llm_key.py`（XOR 混淆公用 key，不落明文），`_candidates()` 末尾追加 LongCat-2.0 兜底候选（`LONGCAT_API_KEY` 环境变量 > 混淆文件；本地 models.json 命中更快源时行为不变）。两文件入 `WHITELIST_FILES` + `REQUIRED_IN_PAYLOAD` 自检（漏发=静默丢功能类）。验证：载荷级模拟 sandbox（`WORKBUDDY_MODELS_JSON=/nonexistent`）起服，`/api/topic_help` 返回 LongCat 翻译的英文检索式；线上中文主题实测 `semaglutide cardiovascular outcomes…` ✓。
   - **「后端未连接」误报**：sandbox 冷启动首请求 >2s，而前端 `wbProbeBackend` 是**单次 2s 超时探测**、失败后永不再试 → 页面永显离线（`/health` 实测热态 0.45s、服务本身正常）。修复：探测改为带退避的多次重试（2s→3s→5s→8s，间隔 400ms，任一成功即「后端就绪」），并给状态 pill 加「点击重新探测」兜底。线上回归：新逻辑已在首页、`/health`、`/api/features`、翻译链路全绿。
@@ -102,7 +119,7 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
       `app.config.json` → 备份在 `2026-09-20-10-18-57/_deleted_snapshots_meta_20260922/`（7 KB）。
     - **踩坑（值得记）**：删除失败两次都不是权限问题 —— ① `rm -rf` 被 safe-delete 垫片接管并
       fail-closed；② 直接调 `genie-trash` 仍报 `0x80070002 系统找不到指定的文件`。根因是
-      **`~/.workbuddy/skills/meta-analysis` 是指向网络共享 `//filesrv/c$/...` 的符号链接**，
+      **`~/.workbuddy/skills/meta-analysis` 是指向内网文件共享 `//<内网文件服务器>/c$/...` 的符号链接**，
       而 **Windows 回收站对网络路径不存在**，故该盘符下任何 trash 调用必然失败。
       绕法：先 `mv` 到本地 workspace（`C:\Users\Wintone\WorkBuddy\...`，本地盘，回收站可用）再 trash。
       另注：`genie-trash` 只接受**反斜杠 Windows 绝对路径**，传 POSIX `/c/...` 会静默失败。
@@ -329,7 +346,7 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 - **性能专项：把「每一步都慢」从管道层根治（2026-09-20，用户裁定「12345都做」）**：
   前一轮已定位「慢的是管道不是计算」——skill 目录挂在 **SMB 网络盘**（软链接 →
-  `\\filesrv\c$\...`），后端 venv 也在网络盘，会话文件含 50% 纯冗余副本，且单进程 GIL
+  `\\<内网文件服务器>\c$\...`），后端 venv 也在网络盘，会话文件含 50% 纯冗余副本，且单进程 GIL
   让并发请求串行放大。本轮按①~⑤全部落地。**实测：冷启动 60–90 s → 7.3–8.3 s；单次
   `save()` 258.9 ms → 13.5 ms（19×）；会话 2382 KB → 715 KB（-70%）；A2 节点 `#center`
   340 KB → 110 KB、DOM 节点 6550 → 2392；`/api/session` ver 命中 1 MB → **56 B**；
@@ -467,7 +484,7 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
   而是两处纯浪费；与回退目标无关的固定开销约占 8~13 s，回退到 B/C 另加 ~1~2.5 min 重复劳动。
   - **① `FullflowSession.save()` token 级写出（6x）**：`json.dump(obj, f, indent=2)` 是 token 级
     写出——一份 2.3 MB 会话（A2 含 104 篇 studies + abstracts）触发 **110,356 次 `write()`**。
-    本机 skill 目录经 UNC 挂载（`\\filesrv\c$\...\.workbuddy\skills\`），存在 I/O 拦截：
+    本机 skill 目录经 UNC 挂载（`\\<内网文件服务器>\c$\...\.workbuddy\skills\`），存在 I/O 拦截：
     单次写 1 MB ≈ 200 ms（系统 temp 仅 1.1 ms），故 `save()` 实测 **2,394 ms/次**；
     而一次打回需落盘 **3~5 次**（`rewind` → `invalidate_decisions` → 各阶段推进 → 审计留痕），
     纯 I/O 就吃掉 8~13 s。改为 `json.dumps` 后单次 `f.write`：实测 **382 ms/次（6.3x）**，

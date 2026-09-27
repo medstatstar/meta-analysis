@@ -82,7 +82,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `id` | string | ✅（新流程） | 阶段 ID，命名规范 `^[ABC]\d\..+`：`A1.topic_selection` / `B3.overclaim_detect` / `C2.manuscript_review`。 |
+| `id` | string | ✅（新流程） | 阶段 ID，命名规范 `^[ABC]\d\..+`：`A1.topic_selection` / `B3.overclaim` / `C2.ai_review`（完整清单见 §9）。 |
 | `index` | integer≥0 | ✅（新流程） | 阶段序号（从 0 起）。 |
 | `total` | integer≥1 | ❌ | 预计总阶段数（coze 可动态调整，仅供参考）。 |
 | `intent` | enum | ❌ | `run`（正常推进）/ `resume`（携带 `stage_context` 续跑）/ `retry`（本阶段重试）/ `human_callback`（人工闸回调，携带 `stage_context.human_decisions`）。 |
@@ -186,19 +186,22 @@ Block A 方向确定与文献/数据准备
   A3.screening            AI 筛选草稿 + 人工闸
   A4.data_extraction      提取 AI 草稿 + 🔴extraction_review 人工核验闸
 
-Block B 分析结果产出
-  B1.compute              R 引擎计算（pairwise / nma / metareg）
-  B2.result_synthesis     结果整理（森林图/漏斗/亚组/元回归/双范式 NMA）
-  B3.grade                🔴 半自动 GRADE（人工确认）
-  B4.overclaim_detect     过度声明检测（12 模式）
-  B5.quality_gate         🔴 质量门收口（GRADE+过度声明+人工闸）
+Block B 分析结果产出（本地实现：block_b.BLOCK_B_SEQUENCE）
+  B1.meta_analysis        R 引擎计算（pairwise / nma / metareg）
+  B2.grade                半自动 GRADE（结果整理：森林图/漏斗/亚组/元回归）
+  B3.overclaim            过度声明检测（12 模式）
+  B4.quality_gate         🔴 质量门收口（GRADE+过度声明+人工闸 / final_inclusion）
 
-Block C 论文撰写与修改
+Block C 论文撰写与修改（本地实现：block_c.BLOCK_C_SEQUENCE）
   C1.draft                初稿生成（IMRaD + PRISMA）
-  C2.manuscript_review     AI 评审 / 过度声明检测（复用 B4）
-  C3.ref_verification      🔴 参考完整性核验（DOI/PMID）
-  C4.grade_table_ev        GRADE 证据表 + 🔴 manuscript_approval + 投稿前 QA
+  C2.ai_review            AI 评审 / 过度声明检测（复用 B3 detect_overclaims）
+  C3.ref_verify           🔴 参考完整性核验（DOI/PMID / reference_verification）
+  C4.evidence_qa          GRADE 证据表 + 🔴 manuscript_approval + 投稿前 QA
 ```
+
+> 上表与本地实现（`adapters/block_[abc].py` 的 `BLOCK_*_SEQUENCE` 常量）逐字对齐；
+> `id` 仍须满足 §3 命名规范 `^[ABC]\d\..+`。改动阶段 ID 须同步
+> `adapters/fullflow.py` 的 `GATE_TO_STAGE` / `DEFAULT_PAUSE_AT` / `EDITABLE_KEYS`。
 
 ---
 

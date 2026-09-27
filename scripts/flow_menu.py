@@ -615,7 +615,9 @@ def a1_feasibility_probe(sess, max_results=10):
         raise MenuError(f"无法加载 block_a（可行性速览依赖）：{type(e).__name__}: {e}")
     probe = block_a.a1_registry_check(topic, max_results=max_results)
     # 仅取 registry_probe + feasibility（feasibility 阈值计算复用 block_a 单一真源）
-    rep, _ = block_a.a1_topic_selection(topic, registry_probe=probe)
+    # 2026-09-25：PROSPERO 手动核查链接须用英文检索词，优先取 session 中已翻译的 topic_en
+    topic_en = sr.get("topic_en") or sess.data.get("topic_en") or None
+    rep, _ = block_a.a1_topic_selection(topic, registry_probe=probe, topic_en=topic_en)
     sr["registry_probe"] = rep.get("registry_probe", probe)
     sr["feasibility"] = rep.get("feasibility",
                                 {"crowding": "unknown", "expected_studies": None,

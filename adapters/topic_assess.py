@@ -226,7 +226,7 @@ def _compliance():
 # Public API
 # ---------------------------------------------------------------------------
 def assess(topic, picos=None, missing=None, dedup=None, registry=None,
-           clinical_override=None, prospero=None, curation=None):
+           clinical_override=None, prospero=None, curation=None, topic_en=None):
     """Build the full local topic assessment.
 
     Args:
@@ -241,6 +241,8 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
                clinical is NOT flagged needs_human (tag="coze") and rationale kept.
         curation: optional dict {"recommend":bool,"reason":str} from coze topic
                curation; rendered as a separate panel in the web UI.
+        topic_en: optional English search term; PROSPERO probe uses this
+                  for the manual-check URL instead of the raw Chinese topic.
 
     Returns: assessment dict aligned with generate_topic_report schema.
     """
@@ -260,12 +262,13 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
     cross_checks = _cross_checks(picos, missing, pubmed_hits, cochrane_hits, nov_label)
 
     # PROSPERO 自动检索（真实尝试 + 优雅降级；上游故障时不编造数据）
+    # 2026-09-25：优先用英文检索词（PROSPERO 是英文注册库，中文 topic 检索≈0 命中）
     if isinstance(prospero, dict) and prospero.get("status") in ("available", "unavailable"):
         _prospero = prospero
     else:
         try:
             import prospero_probe
-            _prospero = prospero_probe.probe(topic)
+            _prospero = prospero_probe.probe(topic_en or topic)
         except Exception as _pe:  # noqa: BLE001
             _prospero = {"status": "unavailable", "hit_count": None, "sample": [],
                          "error": "probe import failed: %s" % _pe,

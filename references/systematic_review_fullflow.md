@@ -102,8 +102,21 @@ screening. (No human gate blocks here, but surface the number.)
 Goal: turn the candidate set into a *human-confirmed* final included list + PRISMA diagram.
 
 1. **Machine pre-screen**: `ct-literature screen_prisma.py` (title/abstract rules).
-2. **Human judgment**: agent walks the list entry-by-entry (`references/review_workflow.md §2`),
-   tagging `Include` / `Exclude` / `Maybe`.
+2. **Human judgment — via file hand-off (2026-09-10 decision)**: the agent **does not walk the
+   list entry-by-entry in conversation**. Instead it exports the decision table, the human edits
+   it, and the table comes back:
+   ```bash
+   # export: ct-literature template + 规则裁决(预填) + 文献类型确认(规则预填)
+   #         + DOI 列（回传匹配键）
+   #   block_a.export_screening_xlsx(session_path, out_path)
+   # human edits in Excel → upload back
+   #   block_a.parse_screening_xlsx(xlsx_path, current_decisions)
+   ```
+   The uploaded table is the **authoritative included list AND the authoritative document type**.
+   Rejection rules (do not advance on failure): missing columns / non-alignable rows / illegal
+   `decision` value / `exclude` without `reason` / unexpected new rows / **zero rows matched**.
+   The merged node (A2「文献集」, the former A3 folded in on 2026-09-10) has **no in-conversation
+   per-record edit path** — editing happens in the spreadsheet.
 3. **PRISMA bridge**:
    ```bash
    python scripts/prisma_bridge.py \
@@ -134,11 +147,32 @@ Goal: turn the candidate set into a *human-confirmed* final included list + PRIS
 **Checkpoint (HUMAN GATE #1)**: user confirms the final `included` count **and the included
 study list** + the PRISMA diagram before any extraction. Do not advance on `included_records`.
 
+> **Document type is confirmed here (2026-09-10).** The uploaded decision table carries a
+> 「文献类型确认」column: rule-prefilled by `ct-literature classify_record()` (single source of
+> truth), then confirmed / overridden / left blank by the human. On upload it becomes the
+> **authoritative `doc_type`** for that record, with audit fields `doc_type_source`
+> (`human`/`rule`), `doc_type_changed`, `doc_type_rule`.
+> **After this point, no layer judges type again** — see Stage 4. To change a type, re-upload
+> the A2「文献集」merged table; there is no in-pipeline override path.
+
 ---
 
 ## 5. Stage 4 — Data extraction / 数据提取（抽取助手，红线）
 
 Goal: build the Type 1/2/3 CSV that feeds the compute track — with a human verification gate.
+
+> **A4 downloads by the A2 list, 100% (2026-09-10).** Every record in the confirmed A2「文献集」node's list is
+> downloaded; **no pre-download type screening**, no re-classification, no silent skipping.
+> `pdf_extractor.extract()`'s former "rule R1" short-circuit is removed and
+> `review_summary.excluded` is always `False`.
+>
+> **Type is read-only here.** A4 reads the human-confirmed `doc_type` from the A2 decision row
+> (formerly the A3 decision table; A3 was merged into A2 on 2026-09-10).
+> The extractor's own detection is demoted to `doc_type_detected` and **only raises a notice when
+> it disagrees** with the confirmed value — it never changes the verdict. `type_notice` /
+> `review_note` are advisory text only (e.g. "looks like a review; 0 extracted rows is normal"),
+> surfaced at the 🔴 gate for a human to act on.
+> To change a type → go back to ③ and re-upload the decision table.
 
 ```bash
 # 1) scaffold blank extraction table + companion provenance (verified_by_human=NO)

@@ -22,7 +22,7 @@ API 端点（公共，无需密钥；CrossRef 有速率限制但 generous，适�
 
 返回 dict：
   {
-    "status": "ok" | "not_found" | "mismatch" | "retracted" | "error",
+    "status": "ok" | "not_found" | "mismatch" | "retracted" | "unverified_offline" | "error",
     "doi": "...", "pmid": "...",
     "verified_title": "...",        # 来自 API 的真实标题（小写归一化后比较）
     "verified_first_author": "...", # 第一作者姓
@@ -34,7 +34,12 @@ API 端点（公共，无需密钥；CrossRef 有速率限制但 generous，适�
     "message": "...",
   }
 
-零第三方依赖（纯 urllib + json）。网络失败时 status="error"，不阻塞主流程。
+零第三方依赖（纯 urllib + json）。网络失败时 status="error"/"unverified_offline"，不阻塞主流程。
+
+状态语义（重要，防止红线误杀）：
+  - not_found           = API 明确未收录（HTTP 404）→ 才可怀疑虚构引用
+  - unverified_offline  = 网络/接口不可达 → **不得**判虚构，须联网重试
+  - retracted           = API 判定，或上游/人工 is_retracted 标注
 """
 
 from __future__ import annotations
@@ -53,19 +58,36 @@ _UA = "meta-analysis-ref-verify/1.0 (mailto:meta-analysis@example.com)"  # Cross
 
 
 def _get(url: str, timeout: int = 20) -> dict | None:
-    """GET JSON dict on success, None on failure (any HTTP/parse/network error)."""
+    """兼容包装：GET JSON dict，任何失败返回 None（不区分失败原因）。
+
+    内部统一走 `_get2`；需要区分「明确未收录(404)」与「网络不可达」时请直接用 `_get2`
+    （`_get` 无法区分，误用会把断网当成文献不存在）。
+    """
+    return _get2(url, timeout)[0]
+
+
+def _get2(url: str, timeout: int = 20):
+    """GET 并区分状态：返回 (data|None, state)，state ∈ "ok" | "not_found" | "error"。
+
+    区分「API 明确未收录（HTTP 404）」与「网络/接口不可达」——只有前者才可怀疑虚构；
+    后者必须降级为「未能核验」，否则断网时真实文献会被误判为虚构（C3 红线误杀）。
+    """
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": _UA,
             "Accept": "application/json",
         })
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
+            return json.loads(r.read().decode("utf-8")), "ok"
+    except urllib.error.HTTPError as e:
+        if getattr(e, "code", None) == 404:
+            return None, "not_found"
+        return None, "error"            # 429/5xx 等可重试错误
+    except (urllib.error.URLError, TimeoutError, OSError,
             json.JSONDecodeError, UnicodeDecodeError):
-        return None
+        return None, "error"
     except Exception:
-        return None
+        return None, "error"
 
 
 # ---------------------------------------------------------------------------
@@ -95,16 +117,16 @@ def _first_author_lastname(author_str: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 # CrossRef API
 # ---------------------------------------------------------------------------
-def _crossref_verify(doi: str) -> dict | None:
-    """CrossRef API 解析 DOI。失败返回 None。"""
+def _crossref_verify(doi: str):
+    """CrossRef API 解析 DOI。返回 (payload|None, state)；state ∈ ok|not_found|error。"""
     bare = doi.split("doi.org/")[-1] if "doi.org/" in doi else doi
     url = f"https://api.crossref.org/works/{urllib.parse.quote(bare, safe='/:')}"
-    data = _get(url)
-    if not data:
-        return None
+    data, state = _get2(url)
+    if state != "ok" or not data:
+        return None, state
     msg = data.get("message") or {}
     if not msg:
-        return None
+        return None, "not_found"
 
     title_list = msg.get("title") or []
     verified_title = title_list[0] if title_list else None
@@ -150,28 +172,28 @@ def _crossref_verify(doi: str) -> dict | None:
         "journal": journal,
         "type": rtype,
         "is_retracted": is_retracted,
-    }
+    }, "ok"
 
 
 # ---------------------------------------------------------------------------
 # PubMed E-utilities API
 # ---------------------------------------------------------------------------
-def _pubmed_verify(pmid: str) -> dict | None:
-    """PubMed esummary + efetch 解析 PMID。失败返回 None。"""
+def _pubmed_verify(pmid: str):
+    """PubMed esummary 解析 PMID。返回 (payload|None, state)；state ∈ ok|not_found|error。"""
     if not pmid or not re.match(r"^\d+$", str(pmid).strip()):
-        return None
+        return None, "not_found"        # PMID 格式非法 → 该库不可能收录
     pmid = str(pmid).strip()
 
     # 1) esummary — 基础元数据
     url = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
            f"?db=pubmed&id={pmid}&retmode=json")
-    data = _get(url)
-    if not data or "result" not in data:
-        return None
+    data, state = _get2(url)
+    if state != "ok" or not data or "result" not in data:
+        return None, state
 
     rec = (data["result"].get(pmid) or {})
     if not rec or rec.get("error"):
-        return None
+        return None, "not_found"
 
     # 标题
     verified_title = rec.get("title")
@@ -212,7 +234,7 @@ def _pubmed_verify(pmid: str) -> dict | None:
         "type": ",".join(pubtypes) if pubtypes else None,
         "is_retracted": is_retracted,
         "doi_from_pubmed": pmid_doi,
-    }
+    }, "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -248,11 +270,14 @@ def verify_reference(doi: str | None = None, pmid: str | None = None,
 
     crossref = None
     pubmed = None
+    states = []
 
     if doi:
-        crossref = _crossref_verify(doi)
+        crossref, cs = _crossref_verify(doi)
+        states.append(cs)
     if pmid:
-        pubmed = _pubmed_verify(pmid)
+        pubmed, ps = _pubmed_verify(pmid)
+        states.append(ps)
 
     # 双侧交叉验证
     if crossref and pubmed:
@@ -307,8 +332,13 @@ def verify_reference(doi: str | None = None, pmid: str | None = None,
             result["doi"] = pubmed["doi_from_pubmed"]
 
     else:
-        result["status"] = "not_found"
-        result["message"] = "CrossRef / PubMed 均未查到该记录"
+        if states and all(s == "error" for s in states):
+            # 网络/接口不可达：不得判「疑似虚构」，降级为「未能核验」
+            result["status"] = "unverified_offline"
+            result["message"] = "网络/接口不可达，未能核验（请联网重试；非缺失证据）"
+        else:
+            result["status"] = "not_found"
+            result["message"] = "CrossRef / PubMed 均未查到该记录"
         return result
 
     # 标题/作者交叉比较（传入值 vs 真实值）
@@ -348,17 +378,21 @@ def verify_references(references: list, delay: float = 0.25) -> list:
     """逐条核验引用列表，返回 [{...}, ...]。delay 控制速率（CrossRef polite pool）。"""
     results = []
     seen_keys = set()
-    for r in references or []:
+    for idx, r in enumerate(references or []):
         if not isinstance(r, dict):
             results.append({"status": "error", "message": "非法引用格式"})
             continue
         doi = r.get("doi")
         pmid = r.get("pmid")
-        # 去重：同一 DOI+PMID 只查一次
-        key = f"{doi or ''}|{pmid or ''}"
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
+        # 去重只对「有标识」条目按 DOI+PMID 生效；无标识条目用下标唯一化，
+        # 避免多条无 DOI/PMID 的参考被静默丢弃（同一 key "|" 全被去重跳过）。
+        if doi or pmid:
+            key = f"{doi or ''}|{pmid or ''}"
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+        else:
+            key = f"no-id#{idx}"
 
         vr = verify_reference(
             doi=doi, pmid=pmid,
@@ -367,7 +401,16 @@ def verify_references(references: list, delay: float = 0.25) -> list:
             year=r.get("year"),
             journal=r.get("journal"),
         )
+        # 采纳上游/人工标注的撤稿提示：无 DOI/PMID 时 API 无法判定，必须以此兜底，
+        # 否则已知撤稿文献会绕过 C3 reference_verification 红线。
+        if r.get("is_retracted") and vr.get("status") != "retracted":
+            vr["is_retracted"] = True
+            vr["status"] = "retracted"
+            _base = vr.get("message") or ""
+            vr["message"] = ("⚠️ 该文献已被标记为撤稿/撤回（依据上游/人工标注）"
+                             + ("：" + _base if _base else ""))
         vr["key"] = key
+        vr["input_index"] = idx
         results.append(vr)
         if delay and (doi or pmid):
             time.sleep(delay)  # polite rate-limit

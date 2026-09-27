@@ -150,6 +150,9 @@ DEFAULT_PLOTS = {
     # —— NMA ——
     "nma": ["netgraph", "netleague"],
     "nma_rank": [],                                             # coze 自动渲染 SUCRA/P-score 图
+    # 2026-09-14 新增：成分网络 Meta。coze 端空 plots 亦默认出 forest + netgraph，
+    # 此处显式声明以对齐 coze_contract.md §3（两处口径一致，避免"契约说 default 但客户端不发"）。
+    "cnma": ["forest", "netgraph"],
     # —— 其他结局 ——
     "survival_meta": ["forest", "funnel", "radial"],            # 2026-08-28 增补漏斗图 + Radial（rma 对象引擎支持）
     "diagnostic_meta": ["sroc", "sens_forest", "spec_forest"],   # 2026-08-28 增补敏感度/特异度森林图
@@ -225,7 +228,7 @@ NON_NUMERIC_KEYS = {"treatment"}  # nma 臂标签列
 # 不消费 params.sm 的 task（写入 sm 属噪音字段且会误导用户以为能换尺度）
 # - diagnostic_meta：合成灵敏度/特异度（SROC 曲线），非 OR 类效应量
 # - survival_meta：固定合并 logHR→HR，HR 即尺度，sm 不参与
-# 注：nma 仍消费 sm（netmeta sm 参数，二分类默认 OR / 连续型须显式 MD|SMD），不可剔除。
+# 注：nma / cnma 仍消费 sm（netmeta sm 参数，二分类默认 OR / 连续型须显式 MD|SMD），不可剔除。
 NON_SM_TASKS = {"diagnostic_meta", "survival_meta"}
 
 

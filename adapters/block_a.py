@@ -249,7 +249,7 @@ def _llm_clinical_fallback(topic, picos, missing, draft):
         return None
 
 
-def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_assessment=True):
+def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_assessment=True, topic_en=None):
     picos, missing = _infer_picos(topic)
     # 范围预警：过短/过长或缺失维度过多 → 提示收窄
     scope_warning = None
@@ -275,8 +275,9 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
             registry_probe = {"status": "error", "total": None, "returned": None,
                               "sample": [], "note": f"本地 registry 探针失败: {_e}"}
     # 2026-09-24：PROSPERO 自动检索探针（真实尝试 + 优雅降级，上游故障时标 unavailable）
+    # 2026-09-25：优先用英文检索词（PROSPERO 是英文注册库，中文 topic 检索≈0 命中）
     try:
-        _prospero = _prospero_probe.probe(topic)
+        _prospero = _prospero_probe.probe(topic_en or topic)
     except Exception as _pe:  # noqa: BLE001
         _prospero = {"status": "unavailable", "hit_count": None, "sample": [],
                      "error": f"PROSPERO 探针失败: {_pe}", "manual_url": None, "note": ""}
@@ -307,6 +308,7 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
             _assess = topic_assess.assess(
                 topic=topic, picos=picos, missing=missing,
                 dedup=dedup_probe, registry=registry_probe, prospero=_prospero,
+                topic_en=topic_en,
             )
             # 2026-09-24：coze 临床价值判断 + 选题策展（P1 结构就位，默认关；
             # META_TOPIC_COZE=1 且 coze 节点就绪后启用；失败自动降级默认中值）

@@ -16,6 +16,7 @@ CLI:
 """
 import os
 import sys
+import json
 import argparse
 import tempfile
 
@@ -103,6 +104,14 @@ def main():
         print("META_HTML_REPORT=" + os.path.abspath(hp))
     elif out.get("status") == "error":
         print("META_STATUS=error | " + str(out.get("notes") or "")[:200])
+        # 2026-09-13：转印结构化诊断（信封拦截 / coze error），让 agent 直接 relay 给用户
+        ea = out.get("_error_analysis") or {}
+        guidance = out.get("_error_guidance")
+        if guidance:
+            print("---- META_ERROR_GUIDANCE ----")
+            print(guidance)
+        elif ea:
+            print("META_ERROR_ANALYSIS=" + json.dumps(ea, ensure_ascii=False)[:600])
     else:
         print("META_STATUS=" + str(out.get("status", "unknown")))
 
