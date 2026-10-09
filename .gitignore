@@ -129,3 +129,15 @@ adapters/DEV_POLICY.json.disabled-*
 # 属过程性材料而非技能资产 → 不进版本库、不进发布包。
 # 若某份交接文档需要随 git 传递，请单独 git add -f 或移出本目录。
 .workbuddy/
+
+# ── F15 发布集禁含 .yaml：coze 本地 venv 整体排除（不进 VCS/发布包）──
+adapters/coze/.venv/
+
+# ── F15 二段：任意层级的 .venv（gitignore 语义双写，确保发布集排除）──
+**/.venv/
+
+# ── venv 目录（发布集排除，2026-10-09 检查补齐）──
+.venv/
+# publish_inject 注入清单（本地元信息，不入库）
+.ctbase_injected.json
+adapters/wb_http_probe.py

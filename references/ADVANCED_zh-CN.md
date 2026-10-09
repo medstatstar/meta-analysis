@@ -128,6 +128,8 @@ y_i ~ Normal(θ_i, σ_i²)
 | `R package not found` | 缺少 R 包 | `install.packages("pkg")` |
 | `Stan model compilation failed` | 缺少 C++ 工具链 | 安装 Rtools (Windows) 或 Xcode (macOS) |
 | `MCMC did not converge` | 迭代次数不足或链混合差 | 增加 `iter`，检查 `Rhat > 1.01` |
+| `Fisher scoring algorithm did not converge` | 稀疏数据或极端效应量；REMLE 无法收敛 | **数据问题，非引擎 bug**。尝试改用 `method="ML"` 或 `method="EB"`、剔除离群研究、用亚组降低异质性，或 k<5 时直接用固定效应模型 |
+| 客户端输入校验类错误（`invalid 'pos'`、`NULL cov`、列长不匹配、`mean=NULL`） | 输入校验缺失：subset 位置越界、协变量为空、列长不等、缺少必填 `mean` | 检查输入：pos ≤ 研究数；协变量列必须在数据中；公式涉及列等长；必填参数补齐 |
 | `I² = 0%` 但可见异质性 | 检测异质性功效低 | 用 Q 检验 p 值，考虑随机效应 |
 | `Funnel plot asymmetry` | 真实发表偏倚或异质性 | 用 Egger 检验，考虑选择模型 |
 | `netmeta inconsistency` | 违反可传递性假设 | 检查 node-split，考虑 meta-regression |

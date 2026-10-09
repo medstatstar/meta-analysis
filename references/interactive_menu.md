@@ -249,6 +249,23 @@ A: 说 **"帮我把 SPSS/Excel 数据转成 CSV"**，助手会推荐安装 `@ski
 
 ---
 
+## 3.5 常见错误提示 / Common Error Messages
+
+| 错误信息 | 含义 | 建议操作 |
+|---|---|---|
+| `Fisher scoring algorithm did not converge` | 稀疏数据或极端效应量导致 REML 无法收敛到稳定 τ² 估计 | 尝试改用 `method="ML"` 或 `method="EB"`；剔除离群研究；用亚组降低异质性；k<5 时直接用固定效应模型 |
+| `invalid 'pos' value` | subset 位置参数越界（如 pos=5 但只有 4 项研究） | 检查 pos 值 ≤ 研究总数 |
+| `invalid type (NULL) for variable 'cov'` | 指定的协变量列在数据中不存在或为空 | 确认协变量列名拼写正确，且该列有非空值 |
+| `numbers of columns of arguments do not match` | 公式中各列长度不一致 | 检查数据中涉及列是否有缺失值导致行数不等 |
+| `'x' and 'y' lengths differ` | 效应量与标准误/方差列长度不匹配 | 确保 yi 与 sei（或 vi）列行数相等 |
+| `Argument 'mean' is NULL` | 缺少必填参数 mean | 提供效应量均值列 |
+| `Missing column 'te' (role=te)` | 缺少效应量列 | 指定效应量列（te / yi） |
+| `Missing effect-size SE: provide sete column or ci_low/ci_high columns` | 缺少标准误 | 提供 SE 列或 CI 上下限列 |
+
+> ⚠️ 上表前 6 条为**客户端输入校验错误**（数据 schema 不合规），后 2 条为 R 引擎返回的错误。如遇"算出数值但结论不合理"的情况，务必核对 §6 的回显块列映射（yi / sei / slab）是否正确——列映射错配是"静默算错"的首要原因。
+
+---
+
 ## 4. Execution Model (执行机制)
 
 - **自动执行：** 你描述分析需求后，技能**自动完成分析**并返回真实数字与图形——无需额外的触发词或确认。计算默认在云端 coze R 引擎完成。

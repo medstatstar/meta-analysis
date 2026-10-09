@@ -1000,6 +1000,8 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
     下载 → 抽取 2×2 表草稿）。live 路径默认开启 auto_fetch，使「检索→A4→B1」
     真正贯通：A4 产出的 extracted_rows 经 handoff.studies_for_b 直接喂给 B1。
     """
+    # 入口标识：标记本次调用来自工作台 web 应用（2026-10-07）
+    cc.set_entry_point("workbench")
     if pause_at is None:
         pause_at = DEFAULT_PAUSE_AT
     cfg = {"max_results": max_results, "year_from": year_from,
@@ -1263,6 +1265,8 @@ def _auto_export_on_approve(sess, decision):
 def resume_fullflow(session_path: str, decision: dict, *, debug: bool = False,
                     on_line=None, on_a4_event=None) -> dict:
     """带人工决策续跑。自动判断该进下一阶段 / 下一块 / 结束。返回同 run_fullflow。"""
+    # 入口标识：标记本次调用来自工作台 web 应用（2026-10-07）
+    cc.set_entry_point("workbench")
     sess = FullflowSession.load(session_path)
     err = _validate_decision(sess, decision)
     if err:

@@ -6,7 +6,7 @@
   <img src="assets/icon.svg" width="240" height="240" alt="meta-analysis logo"/>
 </div>
 
-> **No install needed for the basics:** if you don't want to install this skill and just want to try its core features quickly, use the web app directly at **https://meta.medstatstar.com**.
+> **Works without installation:** If you'd rather not install and just want to quickly use this skill's basic features, you can also visit the ct-series unified web portal **https://ct.medstatstar.com** directly.
 
 > **Easy-to-use R-based Meta-Analysis for Clinical Researchers**
 >
@@ -148,7 +148,6 @@ Categories are grouped by **workflow stage first, then analysis purpose** (7 bel
 | PDF batch download | "Batch download full texts from a DOI list (needs confirmation)" |
 | Graph digitize | "Extract data from a scatter plot" |
 | Missing value imputation | "Impute missing standard deviations" |
-| Full-flow web workbench | "Open the meta workbench" (guided browser-based full pipeline with clickable human gates) |
 
 ### ② Pairwise Meta-Analysis
 | Scenario | Try saying in chat |
@@ -344,7 +343,7 @@ CLI examples, bidirectional solving, curve mode, core formulas, system requireme
 
 ---
 
-**Version**: v2.9.16 | **License**: MIT | **Authors**: medstatstar, phoe-zip
+**Version**: v2.20.1 | **License**: MIT | **Authors**: medstatstar, phoe-zip
 
 For feature requests, bug reports, or other feedback, please contact the author directly at medstatstar@gmail.com (Wintone Zhang / 张文彤).
 

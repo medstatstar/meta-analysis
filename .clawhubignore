@@ -101,3 +101,21 @@ adapters/workbench/workbench_server.log
 RELEASE_REVIEW.md
 pytest_cache/
 .pytest_cache/
+
+# ── F12 对齐补齐（2026-09-29 周检发布前检查）──
+# 与 .gitignore 同集：ClawHub 包此前会漏排这两项（spec_lint F12 ERROR）
+.workbuddy/
+adapters/DEV_POLICY.json.disabled-*
+
+# ── F15 发布集禁含 .yaml：coze 本地 venv 整体排除（与 .gitignore 对齐）──
+adapters/coze/.venv/
+
+# ── F20 对齐补齐（2026-10-06 周检）：与 .gitignore 同集 ──
+.ctbase_injected.json
+
+# ── F15 二段：任意层级的 .venv（gitignore 语义双写，确保发布集排除）──
+**/.venv/
+
+# ── venv 目录（发布集排除，2026-10-09 检查补齐）──
+.venv/
+adapters/wb_http_probe.py

@@ -1,4 +1,4 @@
-# AGENTS.md — meta-analysis v2.1.1 (R-based Meta-Analysis Skill)
+# AGENTS.md — meta-analysis v2.20.1 (R-based Meta-Analysis Skill)
 
 > This skill is a published skill (A-tier equivalent). Its AGENTS.md is **English-only** (SKILL.md body + references + AGENTS.md are English-only for published skills). Compute is delegated to a coze workflow (coze-only); no local R engine is shipped or advertised.
 

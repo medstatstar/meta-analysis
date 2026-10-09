@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# §16.9 exempt: shared infrastructure (publish_inject), translation API must stay local.
+# §16.9 exempt — keyword localization calls the translation API and must stay local
+# (infra-shared exemption per §16.9); not a retrieval/website call subject to adapters/.
 """
 kw_localize.py -- search-keyword language localization for the ct- clinical-trial
 library (shared standard; lives in ct-base/scripts and is consumed by ct-registry,
@@ -202,6 +203,23 @@ def _load():
         _en2zh.setdefault(ben.lower(), bzh)     # Tagrisso -> 泰瑞沙
         _en2zh.setdefault(gen.lower(), gzh)     # osimertinib -> 奥希替尼
         _en2zh.setdefault(gzh.lower(), gen)     # 奥希替尼 -> osimertinib (zh->en back)
+    # Merge drug_name_map.json (Chinese drug name -> INN/English generic) so
+    # localize() can resolve common drug names (e.g. 坎地沙坦 -> candesartan)
+    # without falling back to the online translation API.
+    _DRUG_MAP_PATH = os.path.join(HERE, "..", "references", "drug_name_map.json")
+    try:
+        with open(_DRUG_MAP_PATH, encoding="utf-8") as _f:
+            _drug_data = json.load(_f)
+        for _zh, _en_list in _drug_data.items():
+            if not isinstance(_en_list, list) or not _en_list:
+                continue
+            _en_first = _en_list[0].strip()
+            if not _en_first:
+                continue
+            _zh2en.setdefault(_zh, _en_first)           # 坎地沙坦 -> candesartan
+            _en2zh.setdefault(_en_first.lower(), _zh)   # candesartan -> 坎地沙坦
+    except Exception:
+        pass
     _loaded = True
 
 
@@ -287,52 +305,68 @@ _CT_TRANSLATE_ONLINE = os.environ.get("CT_TRANSLATE_ONLINE", "1").strip().lower(
     not in ("0", "false", "no", "off")
 
 
-def online_translate(text, target_lang="en", timeout=8):
+def online_translate(text, target_lang="en", timeout=6):
     """Best-effort keyless online translation — last-resort fallback.
 
     Primary endpoint: MyMemory (api.mymemory.translated.net, free, no key,
     per-IP daily quota); fallback: Google gtx public endpoint (unreachable in
-    CN networks, kept as backup). Returns the translated string, or None when
-    disabled / on any failure (network, timeout, malformed payload). Never
-    raises. Only call after the local lexicon has missed.
+    CN networks, kept as backup).
+
+    Retry policy (P1 2026-10-08):
+      - MyMemory: 2 attempts, ``timeout`` seconds each (CN-reachable primary).
+      - Google gtx: 1 attempt, min(timeout, 3) seconds (likely blocked in CN;
+        short timeout avoids long hangs). Skip entirely when env
+        ``CT_TRANSLATE_GOOGLE=0``.
+      - 0.3 s backoff between retries (avoids per-IP throttling on MyMemory).
+
+    Returns the translated string, or None when disabled / on any failure
+    (network, timeout, malformed payload). Never raises. Only call after the
+    local lexicon has missed.
     """
     if not _CT_TRANSLATE_ONLINE or not text:
         return None
     if detect_lang(text) == target_lang:
         return None
+    import time
     import urllib.parse
     import urllib.request
     sl, tl = ("zh-CN", "en") if target_lang == "en" else ("en", "zh-CN")
     q = urllib.parse.quote(text)
 
-    def _get(url):
+    def _get(url, t):
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=t) as r:
             return json.loads(r.read().decode("utf-8"))
 
-    # 1) MyMemory (primary, CN-reachable, free & keyless)
-    try:
-        data = _get("https://api.mymemory.translated.net/get?q=%s&langpair=%s|%s"
-                    % (q, sl, tl))
-        if data.get("responseStatus") == 200:
-            out = (data.get("responseData") or {}).get("translatedText") or ""
-            out = out.strip()
-            if out and out.lower() != text.lower():
+    # 1) MyMemory (primary, CN-reachable, free & keyless) — 2 retries
+    for attempt in range(2):
+        try:
+            data = _get("https://api.mymemory.translated.net/get?q=%s&langpair=%s|%s"
+                        % (q, sl, tl), timeout)
+            if data.get("responseStatus") == 200:
+                out = (data.get("responseData") or {}).get("translatedText") or ""
+                out = out.strip()
+                if out and out.lower() != text.lower():
+                    return out
+        except Exception:  # noqa: BLE001
+            pass
+        if attempt == 0:
+            time.sleep(0.3)  # short backoff before retry
+
+    # 2) Google gtx (backup; likely blocked in CN — short timeout, 1 attempt)
+    if os.environ.get("CT_TRANSLATE_GOOGLE", "1").strip().lower() not in ("0", "false", "no", "off"):
+        try:
+            gtx_timeout = min(timeout, 3)
+            data = _get("https://translate.googleapis.com/translate_a/single"
+                        "?client=gtx&dt=t&sl=%s&tl=%s&q=%s" % (sl, tl, q), gtx_timeout)
+            seg = data[0] if isinstance(data, list) and data else None
+            parts = [s[0] for s in seg if isinstance(s, list) and s and s[0]] \
+                if isinstance(seg, list) else []
+            out = "".join(parts).strip()
+            if out:
                 return out
-    except Exception:  # noqa: BLE001
-        pass
-    # 2) Google gtx (backup; may time out in CN networks)
-    try:
-        data = _get("https://translate.googleapis.com/translate_a/single"
-                    "?client=gtx&dt=t&sl=%s&tl=%s&q=%s" % (sl, tl, q))
-        seg = data[0] if isinstance(data, list) and data else None
-        parts = [s[0] for s in seg if isinstance(s, list) and s and s[0]] \
-            if isinstance(seg, list) else []
-        out = "".join(parts).strip()
-        if out:
-            return out
-    except Exception:  # noqa: BLE001  (fallback must never raise)
-        pass
+        except Exception:  # noqa: BLE001  (fallback must never raise)
+            pass
     return None
 
 

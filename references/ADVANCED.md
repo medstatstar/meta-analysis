@@ -129,6 +129,8 @@ y_i ~ Normal(θ_i, σ_i²)
 | `R package not found` | Missing R package | `install.packages("pkg")` |
 | `Stan model compilation failed` | C++ toolchain missing | Install Rtools (Windows) or Xcode (macOS) |
 | `MCMC did not converge` | Too few iterations or poor chain mixing | Increase `iter`, check `Rhat > 1.01` |
+| `Fisher scoring algorithm did not converge` | Sparse data or extreme effect sizes; REML cannot find a stable τ² estimate | **Data issue, not an engine bug.** Try `method="ML"` or `method="EB"`, check for outliers, reduce heterogeneity via subgroups, or use fixed-effect model when k<5 |
+| Client-side input validation errors (`invalid 'pos'`, `NULL cov`, column length mismatch, `mean=NULL`) | Missing input validation — subset position out of bounds, NULL covariates, mismatched column lengths, or missing required `mean` parameter | Check input schema: pos ≤ study count; covariates must exist in data; columns used in formula must have equal length; provide required `mean` |
 | `I² = 0%` but visible heterogeneity | Low power to detect heterogeneity | Use Q-test p-value, consider random-effects regardless |
 | `Funnel plot asymmetry` | True publication bias or heterogeneity | Use Egger test, consider selection models |
 | `netmeta inconsistency` | Violated transitivity assumption | Check node-split, consider meta-regression |

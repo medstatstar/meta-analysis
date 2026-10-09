@@ -135,7 +135,8 @@ def resolve(drug, event=None, auto=False):
     Args:
         drug: 原始药物名
         event: 关联事件名（仅用于提示）
-        auto: 如果 True，非 ASCII 名有唯一候选时直接翻译（不询问）
+        auto: 如果 True，非 ASCII 名有唯一候选时直接翻译（不询问）；
+              如果 False，多候选时弹 CLI 编号菜单让用户确认（仅 CLI 环境使用）。
 
     Returns:
         tuple[str, bool]: (英文名, 是否来自翻译)
@@ -148,3 +149,25 @@ def resolve(drug, event=None, auto=False):
             return (candidates[0], True)
         return (drug, False)
     return suggest(drug, event)
+
+
+def resolve_for_dialog(drug, event=None):
+    """对话环境专用解析器（WorkBuddy / 非阻塞）。
+
+    对齐 ct-base §6.2 Triage 四级交互策略：
+    - Simple / Middle 路径：始终自动翻译，不弹菜单、不阻塞 input()
+    - 仅当 auto=True 时才返回第一个候选，不做任何交互
+
+    Args:
+        drug: 原始药物名
+        event: 关联事件名（仅用于日志）
+
+    Returns:
+        tuple[str, bool]: (英文名, 是否来自翻译)
+    """
+    if not drug or not is_non_ascii(drug):
+        return (drug, False)
+    candidates = lookup(drug)
+    if candidates:
+        return (candidates[0], True)
+    return (drug, False)

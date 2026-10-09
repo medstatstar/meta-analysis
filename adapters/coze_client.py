@@ -271,6 +271,19 @@ def _default_query_origin(debug: bool = False) -> str:
     return ("debug:sha256:" if debug else "sha256:") + digest
 
 
+# 入口标识（entry_point）— 2026-10-07 新增
+# 区分调用来源：技能本身（"skill"） vs 工作台 web 应用（"workbench"）。
+# 透传写入飞书 entry_point 列，供后台按来源筛选/统计。
+# 默认 "skill"；工作台进程在 fullflow 入口调用 set_entry_point("workbench") 覆盖。
+_ENTRY_POINT = "skill"
+
+
+def set_entry_point(value: str) -> None:
+    """覆盖进程级入口标识（工作台调用以标记 workbench）。"""
+    global _ENTRY_POINT
+    _ENTRY_POINT = value or "skill"
+
+
 # --------------------------------------------------------------------------
 # ct-base coze_io_contract：skill_version（顶层） + user_language（params 内）
 # — 2026-09-11 补齐（此前 meta-analysis 出站信封缺这两个字段）
@@ -842,6 +855,7 @@ def _post_run_with_fallback(run_url: str, body: bytes, headers: dict, timeout: i
 
 def run_meta(task: str, data: dict, params: dict | None = None,
              figure: dict | None = None, query_origin: str | None = None,
+             entry_point: str | None = None,
              debug: bool = False, user_language: str | None = None,
              timeout: int | None = None) -> dict:
     """调用 coze 元分析工作流，返回解析后的结果 dict。
@@ -880,6 +894,7 @@ def run_meta(task: str, data: dict, params: dict | None = None,
         params = {**params, "subgroup": params.pop("byvar")}
     # 归因标识（2026-08-29）：未显式传入时自动生成 —— 任何调用路径都不再产生空归因。
     origin = query_origin or _default_query_origin(debug=debug)
+    entry_point = entry_point or _ENTRY_POINT  # 入口标识：skill/workbench（2026-10-07）
     # 请求追踪 ID（2026-08-29）：飞书两条相邻记录无法区分"两次独立调用"还是
     # "一次调用的重放"，现每次调用带 UUID，随结果一并返回，便于事后对账。
     request_id = str(uuid.uuid4())
@@ -890,6 +905,7 @@ def run_meta(task: str, data: dict, params: dict | None = None,
         "params": _with_user_language(params, user_language),
         "figure": fig,
         "query_origin": origin,
+        "entry_point": entry_point,  # 调用入口标识（2026-10-07）：skill/workbench
         "request_id": request_id,
         # ct-base §1.2：skill_version 为**顶层**信封字段，不得嵌套进 params
         "skill_version": _skill_version(),
@@ -1083,6 +1099,8 @@ def build_stage_payload(env: dict, debug: bool = False,
     if "request_id" not in env:
         env["request_id"] = str(uuid.uuid4())
     env["query_origin"] = env.get("query_origin") or _default_query_origin(debug=debug)
+    # 入口标识（2026-10-07）：skill/workbench，透传飞书 entry_point 列
+    env["entry_point"] = env.get("entry_point") or _ENTRY_POINT
     # ct-base §1.1/§1.2：语言仅落 params、版本仅落顶层；调用方已给有效值则不覆盖。
     env["params"] = _with_user_language(env.get("params"), user_language)
     if not env.get("skill_version"):
@@ -1114,7 +1132,8 @@ def run_stage(env: dict, debug: bool = False, transport=None,
     if _is_legacy_envelope(env):
         return run_meta(
             env.get("task"), env.get("data"), env.get("params"),
-            env.get("figure"), query_origin=env.get("query_origin"), debug=debug,
+            env.get("figure"), query_origin=env.get("query_origin"),
+            entry_point=env.get("entry_point"), debug=debug,
             user_language=user_language,
         )
     payload = build_stage_payload(env, debug=debug, user_language=user_language)

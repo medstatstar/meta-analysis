@@ -4,7 +4,11 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
-## [Unreleased]
+## [2.20.1] — 2026-10-09 — 工作台快速通道 504 根治 + skillname 落库口径统一
+
+### Archived — 架构整理（2026-10-08）
+
+- 根目录 `RELEASE_REVIEW.md`（2026-09-01 发布评审清单，一次性用途，零引用）归档至 `_archive/`。
 
 ### Fixed — 工作台快速通道 504（流程C「启动失败：<!DOCTYPE html>…」）
 
@@ -22,6 +26,21 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
   初稿产出；raw_csv：0.81s → 22.3s done → 停 B1.meta_analysis。pdf 模式不经后台推进，行为不变。
 - 落点：`adapters/fullflow.py` + 工作台 `server.py`/`workbench.html`（工作台前端不进技能
   发布包，随线上应用更新）。**线上 meta.app 需重新发布后生效（等确认）。**
+
+### Changed — `skillname` 落库口径统一为 `meta-analysis`（2026-10-05）
+
+- **标准（用户裁定）**：coze 端写飞书日志表的 `skillname` 恒等于技能的 `name` / `slug` =
+  **`meta-analysis`**，**不得简写为 `meta`**。
+- **修正**：`adapters/coze/src/graphs/nodes/feishu_write_node.py` 文件头注释（原写 `'meta'`）
+  与 `adapters/coze/coze_contract.md` 飞书写入段（原写 `` `skillname`（`meta`，2026-08-19 由
+  samplesize 更正） ``）已统一为 `meta-analysis`。代码常量 `SKILL_NAME = "meta-analysis"` 本就
+  正确，**无逻辑改动**，仅消除文档 / 注释漂移。
+- **`meta` 的两处合法残留**（均与技能名无关）：① WorkBuddy 应用 `domainPrefix`（已登记白名单
+  特例，`https://meta.app.workbuddy.host/`）；② R 包名 `meta`。
+- **生效条件**：`adapters/coze/` 为远端镜像（目录级排除、不进发布包、不受 git 跟踪），本地修正
+  **不会自动上线**——需人工重新部署 coze 镜像后，线上 `skillname` 才确定落 `meta-analysis`。
+- **统计口径提示**：CHANGELOG 早期条目中按 `skillname=meta` 统计的 322 条属旧口径，按技能名
+  统计调用量时需与 `meta-analysis` 记录归并。
 
 ## [2.20.0] — 2026-09-27 — 全流程支持：从选题到投稿的端到端 Meta 分析
 
@@ -4235,7 +4254,7 @@ R 引擎各自独立分支只渲染一种图。本次**直接改 coze 端 R 代�
 
 ---
 
-## [Unreleased] — 2026-08-15（遗留未发版条目，定版时与上方 A 档一并处理）
+## [Archived] — 2026-08-15 遗留条目（所列功能：r_engine/ 架构重组、Quality Gate、Topic Selection 模块——已验证全部实际落地并随后续 2.9–2.11 期间版本发布，此处仅存档，不再定版；2026-10-09 发布前检查时归档）
 
 ### Changed / 变更
 - **Architecture restructure (ct-base §16.9 / future Coze workflow prep)**: all R-software-invoking code moved out of `scripts/` into a dedicated **`r_engine/`** folder (templates `r_*.py` + generated `*.R` + `r_libs.py` + `check_integrity.sh`). `scripts/` now holds only pure-local Python (`i18n.py`, `generate_topic_report.py`, example JSON). A reserved **`adapters/`** folder documents the future unified Coze workflow call layer (see `adapters/README.md`; `ct-samplesize`-style backend selection planned). All references updated: `SKILL.md`, `AGENTS.md`, `references/*.md` (`source("r_engine/*.R")`), `tests/*.R`, `.gitignore` (`r_engine/*.R`). `r_libs.py` gained a sys.path bootstrap to keep importing `scripts/i18n.py`. `check_integrity.sh` multi-line `_msg` quoting fixed (pre-existing latent bug, surfaced by bash strict mode).
