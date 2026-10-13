@@ -7,6 +7,10 @@ Provides:
   - is_chinese_os(): detect if the OS locale is Chinese
   - t(key, **kwargs): translate a message key to the current locale
   - set_lang(locale): manually override the locale (for testing)
+  - set_lang_session(locale) / set_lang_permanent(locale): persist language
+    (session file data/.lang_session / config.json `language`)
+  - detect_text_language(text) / resolve_user_language(query, override):
+    content-level language detection for user input (decoupled from OS locale)
 
 Rules (per ~/.workbuddy/MEMORY.md "双语语言策略"):
   - Default: English
@@ -19,6 +23,7 @@ Usage:
   print(t("info.result_saved", path="/tmp/x.json"))
 """
 
+import json
 import os
 import sys
 
@@ -89,9 +94,176 @@ def is_chinese_os():
     return False
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Session/config language persistence / 语言持久化（session 文件 + config.json）
+# ═══════════════════════════════════════════════════════════════════════════
+# Consumers: scripts/switch_lang.py（--session 写 data/.lang_session，
+# --permanent 写 config.json `language`）。_current_lang() 按完整链解析：
+# process override → session file → config.json → OS locale。
+
+_SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SESSION_FILE = os.path.join(_SKILL_ROOT, "data", ".lang_session")
+_CONFIG_PATH = os.path.join(_SKILL_ROOT, "config.json")
+
+
+def _normalize_lang_code(locale):
+    """Map switch_lang.py input (zh-CN/en/...) → internal 'zh'/'en'."""
+    return "zh" if str(locale).lower().startswith("zh") else "en"
+
+
+def _read_session_lang():
+    """Read session-scope language from data/.lang_session (this conversation)."""
+    try:
+        with open(_SESSION_FILE, encoding="utf-8") as _f:
+            val = _f.read().strip()
+        return val if val in ("zh", "en") else None
+    except OSError:
+        return None
+
+
+def _read_config_lang():
+    """Read persistent language from config.json `language` (cross-session)."""
+    try:
+        with open(_CONFIG_PATH, encoding="utf-8") as _f:
+            data = json.load(_f)
+        val = data.get("language")
+        return val if val in ("zh", "en") else None
+    except (OSError, ValueError):
+        return None
+
+
+def set_lang_session(locale):
+    """Persist language for the current conversation only (session scope).
+
+    Writes `data/.lang_session`; pass None to clear. Does not touch the
+    process override (_OVERRIDE_LANG) — that stays the highest-priority layer.
+    """
+    try:
+        if locale is None:
+            if os.path.exists(_SESSION_FILE):
+                os.remove(_SESSION_FILE)
+            return
+        norm = _normalize_lang_code(locale)
+        os.makedirs(os.path.dirname(_SESSION_FILE), exist_ok=True)
+        with open(_SESSION_FILE, "w", encoding="utf-8") as _f:
+            _f.write(norm)
+    except OSError:
+        pass
+
+
+def set_lang_permanent(locale):
+    """Persist language across sessions by writing config.json `language`.
+
+    Invoked by the user via `scripts/switch_lang.py --permanent`; this module
+    only performs the file write (does not hand-edit config.json elsewhere).
+    """
+    norm = _normalize_lang_code(locale)
+    try:
+        data = {}
+        if os.path.exists(_CONFIG_PATH):
+            with open(_CONFIG_PATH, encoding="utf-8") as _f:
+                data = json.load(_f)
+        data["language"] = norm
+        with open(_CONFIG_PATH, "w", encoding="utf-8") as _f:
+            json.dump(data, _f, ensure_ascii=False, indent=2)
+            _f.write("\n")
+    except (OSError, ValueError):
+        pass
+
+
 def _current_lang():
-    """Return 'zh' or 'en'."""
+    """Return 'zh' or 'en' via resolution chain:
+    process override → session file → config.json `language` → OS locale.
+    """
+    if _OVERRIDE_LANG is not None:
+        return "zh" if _OVERRIDE_LANG == "zh" else "en"
+    s = _read_session_lang()
+    if s:
+        return s
+    c = _read_config_lang()
+    if c:
+        return c
     return "zh" if is_chinese_os() else "en"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Content-level language detection / 内容级语言检测（用户【输入文本】，非系统 locale）
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 痛点：is_chinese_os() / _current_lang() 只检测【系统语言】，中文系统恒返 zh。
+# 当用户在中文系统里输入【英文 query】（如 "BCG vaccine meta analysis"）时，若按系统
+# locale 决定 coze 端报告语言，会误判为 zh —— 这是"中文环境 + 英文输入"的判定盲区。
+# 解决：对【用户输入文本】做内容级检测（含中文→zh，纯英文→en），与系统 locale 解耦。
+# 与 is_chinese_os() 职责分离：本组函数决定"coze 计算端报告/图表语言"，前者决定"本地
+# 运行期 UI 提示语言"（仍遵循 language_policy.md 的"默认英文、中文环境自动切中文"）。
+#
+# 注：v5.8.0 误删本组函数导致 samplesize_power.py 的 `from i18n import
+#     resolve_user_language` 报 ImportError（CLI 阻断）；v5.9.0 自 v5.7.26 恢复。
+
+import re as _re
+
+# CJK 扫描范围：基本汉字(4E00-9FFF) + 扩展 A(3400-4DBF) + 兼容汉字(F900-FAFF)
+#              + CJK 标点(3000-303F) + 全角字符(FF00-FFEF)
+_CJK_RE = _re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3000-\u303f\uff00-\uffef]")
+
+# 语言多写法归一化表：中文语境→zh，英文→en，未知值原样小写透传（coze 可据自身逻辑解释）
+_LANG_ALIASES = {
+    "zh": "zh", "chinese": "zh", "中文": "zh", "cn": "zh", "zh-cn": "zh",
+    "zh_cn": "zh", "zh-tw": "zh", "zh_tw": "zh", "zh-hk": "zh", "zh_hk": "zh",
+    "en": "en", "english": "en", "英语": "en", "eng": "en",
+}
+
+
+def _normalize_language(value):
+    """User language → normalized code.
+
+    - None/空 → 回退 i18n._current_lang()（系统 locale）。
+    - 已知别名（中文/英语/chinese/cn…） → zh / en。
+    - 未知值 → 原样小写透传（coze 可据自身逻辑解释，保证可扩展）。
+    """
+    if not value:
+        return _current_lang()
+    key = (value or "").strip().lower()
+    return _LANG_ALIASES.get(key, key)
+
+
+def detect_text_language(text):
+    """按【输入文本内容】判定语言（内容级），而非系统 locale。
+
+    Returns 'zh' / 'en' / None。
+      - 无 CJK 字符 → 'en'
+      - 含 CJK（中文占比≥5% 或中文字符≥2） → 'zh'
+      - 空文本 → None（调用方回退到系统 locale）
+    """
+    if not text or not text.strip():
+        return None
+    letters = _re.sub(r"\s+", "", text)
+    if not letters:
+        return None
+    cjk = len(_CJK_RE.findall(text))
+    if cjk == 0:
+        return "en"
+    ratio = cjk / len(letters)
+    return "zh" if (ratio >= 0.05 or cjk >= 2) else "en"
+
+
+def resolve_user_language(query="", override=None):
+    """构造 coze 计算端请求用的 `user_language` 备用入参（归一化 zh/en）。
+
+    三级优先级：
+      1. 显式 `override`（如 `--language en`）—— 最高；
+      2. 否则按【输入 query 文本】做内容级检测（中文系统+英文输入→'en'，
+         不被系统 locale 误判 zh）；
+      3. query 为空时回退系统 locale（i18n._current_lang()）。
+
+    返回归一化 'zh' / 'en'。这是【备用提示】供 coze 端决定报告/图表文案语言，
+    coze 可忽略；不覆盖 i18n 的运行期 UI 提示（后者仍按库策略走系统 locale）。
+    """
+    if override:
+        return _normalize_language(override)
+    text_lang = detect_text_language(query if query else "")
+    return text_lang if text_lang else _normalize_language(None)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -115,6 +287,10 @@ _MESSAGES = {
     "info.r_code_shown_default": {
         "en": "[INFO] R code is shown by default in preview mode. Re-run with --show-code while using --yes to also display it during execution.",
         "zh": "[提示] 预览模式默认展示 R 代码。执行时追加 --show-code 可同时查看代码。]",
+    },
+    "info.r_code_unavailable": {
+        "en": "[NOTICE] This is an advanced method. The R code is not provided in the free skill — please contact the author to resolve this.",
+        "zh": "[提示] 该分析方法属于高级功能，免费技能不提供对应的 R 代码，请联系作者解决此问题。",
     },
     "info.result_saved": {
         "en": "Result JSON saved to: {path}",
@@ -566,3 +742,23 @@ _MESSAGES.update({
     "kw_gate.intent_drug_class": {"en": "Drug class", "zh": "药物类别"},
     "kw_gate.intent_auto": {"en": "Auto-detect", "zh": "自动识别"},
 })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# External dictionary merge / 外部词典合并（2026-10-13 机制统一）
+# ═══════════════════════════════════════════════════════════════════════════
+# 内嵌词典仅作离线兜底；三级外部 json（存在则覆盖内嵌同名键并扩展新键）：
+#   i18n_messages.json        主词典（底座统一维护，§16.8 扩展一致件）
+#   i18n_r_messages.json      可选 R 扩展消息（真调 R 的技能才 vendor）
+#   i18n_skill_messages.json  可选技能专属词条（叶子私有文案的正确去处，
+#                             不上移底座以免污染共享词典）
+# 新增/修改文案一律在 json 中操作，勿再改内嵌段。文件缺失/损坏静默跳过
+# （离线兜底，不让模块崩溃——与 ct-literature 生产验证过的实现同型）。
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _MSG_NAME in ("i18n_messages.json", "i18n_r_messages.json", "i18n_skill_messages.json"):
+    try:
+        with open(os.path.join(_HERE, _MSG_NAME), encoding="utf-8") as _f:
+            _MESSAGES.update(json.load(_f))
+    except (OSError, ValueError):
+        pass
