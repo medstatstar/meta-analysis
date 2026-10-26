@@ -43,16 +43,19 @@ import urllib.request
 DEFAULT_EMAIL = "meta-analysis@example.com"  # Unpaywall 要求合法 email，可 --email 覆盖
 
 
-def _get(url: str, timeout: int = 30, retries: int = 2) -> bytes:
-    """GET 带重试（跳过系统代理残留：Windows ProxyError → 直连）。"""
+def _get(url: str, timeout: int = 30, retries: int = 2, ua: str = None, skip_proxy: bool = True) -> bytes:
+    """GET 带重试。
+    skip_proxy=True（默认）：跳过系统代理（避免 SSE 流被系统代理杀掉）；
+    skip_proxy=False：走系统代理（PDF 下载等场景，本机需代理访问外网）。"""
     last = None
+    _ua = ua or "meta-analysis-skill/1.10"
     for _ in range(retries + 1):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "meta-analysis-skill/1.10"})
-            # 强制跳过代理：系统代理（如 WorkBuddy 本机代理 63226）会杀死长连接或拦截
-            # localhost 流量，导致 SSE 流断开、PDF 下载超时。no_proxy 环境变量未必生效
-            #（urllib 仅在代理非空时读 no_proxy），故直接装一个空 ProxyHandler 绕过所有代理。
-            proxy_handler = urllib.request.ProxyHandler({})
+            req = urllib.request.Request(url, headers={"User-Agent": _ua})
+            if skip_proxy:
+                proxy_handler = urllib.request.ProxyHandler({})
+            else:
+                proxy_handler = urllib.request.ProxyHandler()
             opener = urllib.request.build_opener(proxy_handler)
             with opener.open(req, timeout=timeout) as r:
                 return r.read()
@@ -235,9 +238,9 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^\w.-]+", "_", name)[:80] or "download"
 
 
-def download(url: str, out_path: str) -> bool:
+def download(url: str, out_path: str, ua: str = None, skip_proxy: bool = True) -> bool:
     try:
-        data = _get(url, timeout=60)
+        data = _get(url, timeout=60, ua=ua, skip_proxy=skip_proxy)
         with open(out_path, "wb") as f:
             f.write(data)
         return len(data) > 1000  # 粗略校验：PDF 至少 ~1KB
@@ -342,6 +345,9 @@ def nature_pdf_url(doi: str) -> str | None:
 #   委托 ct-search.coze.site/run 的 source=publisher_pdf（服务端 Playwright 真实浏览器）。
 _ANTI_SCRAPE_HOSTS = ("mdpi.com", "mdpi-res.com", "mdpi-resilience.com")
 
+# DOI suffix 解析（MDPI 专用）：10.3390/biomedicines11020279 → journal/biomedicines, v=11, iss=02, page=279
+_DOI_MDPI_RE = re.compile(r'^(\D+)(\d{2})(\d{2})(\d+)$')
+
 
 def _is_anti_scrape(url: str) -> bool:
     """识别对无头客户端做反爬的出版商（命中且本地下载失败 → 委托 coze 服务端浏览器）。"""
@@ -350,6 +356,24 @@ def _is_anti_scrape(url: str) -> bool:
     except Exception:
         return False
     return any(host == h or host.endswith("." + h) for h in _ANTI_SCRAPE_HOSTS)
+
+
+def _mdpi_res_url(doi: str) -> str | None:
+    """构造 MDPI 资源 CDN 直链（绕过 mdpi.com Akamai 反爬）。
+
+    规律（5 篇不同期刊实测验证）：
+      https://mdpi-res.com/d_attachment/<journal>/<journal>-<volume>/article_deploy/<journal>-<volume>-<page>.pdf
+    DOI suffix 形如 <journal><vol 2dig><iss 2dig><page>，URL 只取 volume + page（page 零填充 5 位）。
+    10.3390/biomedicines11020279 → journal=biomedicines, v=11, iss=02(丢弃), page=00279
+    """
+    suffix = doi.split('/', 1)[-1]
+    m = _DOI_MDPI_RE.match(suffix or '')
+    if not m:
+        return None
+    journal, v, _iss, page = m.groups()
+    page = page.zfill(5)
+    return (f"https://mdpi-res.com/d_attachment/{journal}/{journal}-{v}"
+            f"/article_deploy/{journal}-{v}-{page}.pdf")
 
 
 def _coze_pdf_download(doi: str, out_path: str) -> dict | None:
@@ -748,7 +772,8 @@ def fetch_pdf(doi: str, study=None, out_path=None, email: str = DEFAULT_EMAIL,
          作者级同篇校验) + 可选浏览器 B（默认关）；
       2) coze 不可用（未配置/未升级/调用失败）→ 本地降级：open_access_url /
          Unpaywall / Europe PMC PMC-OA 直下（原本地解析保留为离线降级通道）；
-      3) 本地 PPR/arXiv 预印本回退已停用（能力上移服务端补充链，本地不再实现）。
+      3) 本地仍失败且 DOI 为 MDPI → _mdpi_res_url（资源 CDN 直链）兜底，绕过 Akamai 反爬；
+      4) 本地 PPR/arXiv 预印本回退已停用（能力上移服务端补充链，本地不再实现）。
     主路径仍失败（付费墙 / 确实无法下载）→ 如实返回失败。
 
     Args:
@@ -781,7 +806,13 @@ def fetch_pdf(doi: str, study=None, out_path=None, email: str = DEFAULT_EMAIL,
         main_via, main_err = "no_coze", "coze 委托关闭"
         if url and consent_aware_download(url, out_path):
             return True, {"src": src, "via": "local"}
-    # ── 3) 本地 PPR/arXiv 预印本回退已停用（能力上移服务端补充链）；付费墙/无法下载如实失败 ──
+    # ── 3) DOI 含 MDPI → _mdpi_res_url（资源 CDN 直链）兜底，绕过 Akamai 反爬 ──
+    #    注：mdpi-res.com 对非浏览器 UA 返回 404，必须用浏览器 UA 才能拿到 PDF
+    if doi and _mdpi_res_url(doi):
+        murl = _mdpi_res_url(doi)
+        if download(murl, out_path, ua=_BROWSER_UA, skip_proxy=False):
+            return True, {"src": "mdpi_res_cdn", "via": "mdpi_res_fallback"}
+    # ── 4) 本地 PPR/arXiv 预印本回退已停用（能力上移服务端补充链）；付费墙/无法下载如实失败 ──
     if preprint:
         main_err = f"{main_err}（preprint 开关已并入服务端补充链，本地不再另行回退）"
     return False, {"src": src, "via": main_via, "error": main_err}
