@@ -134,7 +134,8 @@ def _evidence_grade(k: float | None, i2: float | None,
         reasons.append(f"中等异质性（I² = {i2:.0f}%）")
         if grade == "High":
             grade = "Moderate"
-    if not _is_significant(ci_lo, ci_hi, sm):
+    # sm 未知时不做显著性降级：_NULL_VALUE 默认 0 会把比值类 CI（如 0.5–2）误判为显著
+    if sm in _ALL_KNOWN_SM and not _is_significant(ci_lo, ci_hi, sm):
         reasons.append("95% CI 跨无效值（合并效应未达统计学显著）")
         if grade == "High":
             grade = "Moderate"
