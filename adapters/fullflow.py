@@ -93,7 +93,7 @@ STAGE_TO_GATE = {v: k for k, v in GATE_TO_STAGE.items()}
 #       （C3 是 ref_verifications / refs_verified，C4 是 qa / evidence_table）。
 #   C1 保留 sections（stage_result 真实存在，可事后补丁）。
 EDITABLE_KEYS = {
-    "A1.topic_selection": ["report", "include_reviews", "sources"],
+    "A1.topic_selection": ["report", "include_reviews"],
     "A2.literature_search": ["query", "screened"],
     "A3.pdf_download": ["pdf_dir", "extracted_rows"],
     "A4.data_extraction": ["extracted_rows", "pdf_dir"],
@@ -522,7 +522,7 @@ class FullflowSession:
 # ---------------------------------------------------------------------------
 # 块运行（控制器 → 三块驱动器；复用既有闸语义，不重造）
 # ---------------------------------------------------------------------------
-def _run_block(letter, sess, debug, on_line=None, on_a4_event=None):
+def _run_block(letter, sess, debug, on_line=None, on_a4_event=None, start_stage=None):
     cfg = sess.data["cfg"]
     creds = sess.decisions_for_block(letter) or None
     pause = sess.effective_pause_at() or None
@@ -540,27 +540,38 @@ def _run_block(letter, sess, debug, on_line=None, on_a4_event=None):
         a3_rev = revs.get("A3.screening") or {}
         if not a2_rev.get("screened") and a3_rev.get("screened"):
             a2_rev = {**a2_rev, "screened": a3_rev.get("screened")}
-        # A1 页面「纳入综述」开关随批准提交（action=approved + revision），
-        # 覆盖启动配置的 include_reviews —— A1 是选题闸，此处是检索前最后可改点。
+        # 2026-10-26（用户裁定·区分开）：检索范围（是否纳入综述）由「文献准备」首页的
+        # inclrev 决定（写入 cfg["include_reviews"]），与 A1 选题评估的「纳入综述」解耦 ——
+        # A1 仅用于选题阶段「查重 / 可行性」展示（默认纳入，便于发现是否已存在类似综述），
+        # 不再覆盖 A2 实际检索口径。故此处只读 cfg，不再读 a1_rev。
         a1_rev = sess.latest_revision("A1.topic_selection") or {}
-        include_reviews = a1_rev.get("include_reviews", cfg.get("include_reviews", False))
-        if not isinstance(include_reviews, bool):
-            include_reviews = bool(include_reviews)
-        # A1 页面「检索数据源」随批准提交，覆盖启动配置的 sources（选题阶段
-        # 用户增减的源子集；None/空 → 用核心源 CORE_SOURCES 全量）。
-        _src = a1_rev.get("sources", cfg.get("sources")) or list(block_a.CORE_SOURCES)
+        include_reviews = bool(cfg.get("include_reviews", False))
+        # 检索数据源（库）入口 2026-10-25 从 A1 迁至 A2（搜索真正发生处）：
+        # 优先读 A2 的修订，其次兼容旧会话（曾在 A1 设置过），再回退启动配置 /
+        # 默认检索集 DEFAULT_SOURCES（2026-10-25 起含 Cochrane，见 block_a 定义）。
+        _src = (a2_rev.get("sources") or a1_rev.get("sources") or cfg.get("sources")
+                or list(block_a.DEFAULT_SOURCES))
         sources = [str(s) for s in _src if str(s).strip()]
         # 合并节点已批准且无任何 A2/A3 修订 → 仅跑 A4，复用缓存的 A1/A2，避免整块重跑。
         # 修掉「批准即重跑检索」（2026-09-10）：原实现只在 **A3 已批准**时才复用，
         # 故批准 A2 会整块重算（含全库检索），既耗时 ~2.5 分钟又作废人工的 Excel 复核。
         cached_env = sess.data["blocks"]["A"].get("envelope")
+        # 2026-10-22 修：这里传的是短码 "A2"，而 _decision_approves 做的是**全等比较**
+        # （decision["stage_id"] == stage_id），凭据里存的却是全名 "A2.literature_search"
+        # → 永远不匹配 → a2_approved 恒 False → 下面「A2 已批准则直接跑 A3、复用缓存」
+        # 这条优化从未生效过。后果：批准 A2 会整块重跑（含全库检索 + 规则初筛）。
+        # 「文献准备」改为从 A2 起步后该缺陷被放大成可见回归 —— A2 是首个停靠点，
+        # 批准它之后流程竟倒退回 A1（而 A1 按用户裁定只应出现在「选题评估」）。
+        # 其余所有调用点传的都是全名（block_a/b/c 的 _any_approve 传 sid），只有这里传短码。
         a2_approved = bool(creds) and any(
-            block_a._decision_approves(d, "A2") for d in
+            block_a._decision_approves(d, block_a.A2) for d in
             (creds if isinstance(creds, list) else [creds]))
         # A2 已批准且无 A2 修订 → 复用缓存信封，直接跑 A3（PDF 下载）/ A4（提取），
         # 避免重复全库检索（~2.5 min）并保住人工在 Excel 上的复核。
-        start_stage = ("A3" if (a2_approved and not a2_rev and cached_env)
-                       else None)
+        # 显式 start_stage（「文献准备」从 A2 起步）优先；否则沿用既有 A3 复用逻辑
+        # （A2 已批准且无修订 → 直接跑 A3/A4，复用缓存 A1/A2）。
+        start_stage = start_stage or ("A3" if (a2_approved and not a2_rev and cached_env)
+                                      else None)
         # 本地 PDF 路径（修订键 pdf_dir，或启动配置 cfg.pdf_dir）→ 注入 run_block_a
         # 作为 PDF 缓存目录，优先消费本地 PDF。A3（下载）与 A4（提取）两个节点都可登记。
         a3_rev = revs.get("A3.pdf_download") or {}
@@ -821,6 +832,14 @@ def _a1_report_search_override(sess):
     避免只点批准未改内容也覆盖原始主题。抽不到可检索值返回 None（回落原始 topic）。
     优先级：A2 手改检索式（query revision）> 此覆盖 > 原始 topic。
     """
+    # 2026-10-25：工作台「选题评估」人工确认的 PICOS 优先于 A1 revision。
+    # 原因：「文献准备」从 A2 起步、A1 不跑，人工确认的 PICOS 原本没有任何通道
+    # 进入检索 —— 用户填了却只影响那一次速览，属于假入口。这里直接转检索主题串。
+    _pk = (sess.data.get("cfg") or {}).get("picos")
+    if isinstance(_pk, dict):
+        _q = block_a.picos_dict_to_query(_pk)
+        if _q:
+            return _q
     rev = sess.latest_revision("A1.topic_selection") or {}
     rep = rev.get("report")
     if not isinstance(rep, str) or not rep.strip():
@@ -938,6 +957,15 @@ def _view(sess, env):
             options = ["approved", "revised", "skipped", "rejected"]  # 软停可 skip
         editable = {k: (stage.get("stage_result") or {}).get(k)
                     for k in EDITABLE_KEYS.get(sid, []) if k in (stage.get("stage_result") or {})}
+        # 2026-10-26（用户裁定）：A1「纳入综述」默认勾选 —— 选题阶段用于查重 / 可行性评估，
+        # 默认纳入便于发现「是否已存在类似综述」。该键仅影响选题评估展示，不再覆盖 A2 检索。
+        # 尊重用户在 A1 已提交的修订；无修订时回落默认 True。
+        if sid == "A1.topic_selection":
+            _a1rev = sess.latest_revision("A1.topic_selection") or {}
+            if "include_reviews" in _a1rev:
+                editable["include_reviews"] = bool(_a1rev["include_reviews"])
+            elif "include_reviews" not in editable:
+                editable["include_reviews"] = True
         ff["await"] = {"kind": kind, "gate": gate, "stage_id": sid,
                        "prompt": nha.get("prompt"), "options": options,
                        "editable_payload": editable,
@@ -992,8 +1020,8 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
                  pause_at=None, extraction_table=None,
                  session_dir: str = ".", debug: bool = False,
                  pdf_email: str = None, max_attempts: int = 12,
-                 include_reviews: bool = False,
-                 on_line=None, on_a4_event=None) -> dict:
+                 include_reviews: bool = False, picos=None, sources=None,
+                 on_line=None, on_a4_event=None, start_stage: str = None) -> dict:
     """启动 fullflow：跑 Block A，遇停靠点即停。返回 = 块信封 + fullflow 视图。
 
     pdf_email / max_attempts 透传给 Block A 的 A4 自动落盘（文献集门控 → OA PDF
@@ -1008,9 +1036,18 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
            "effect_measure": effect_measure, "nma": nma,
            "pause_at": sorted(pause_at), "extraction_table": extraction_table,
            "session_dir": session_dir, "pdf_email": pdf_email,
-           "max_attempts": max_attempts, "include_reviews": include_reviews}
+           "max_attempts": max_attempts, "include_reviews": include_reviews,
+           # 2026-10-25：工作台「选题评估」人工确认的 PICOS（{"P":…,"I":…}）。
+           # 存入 cfg 而非 sess.data 顶层 —— 会话重建（load/save）时随 cfg 一起持久化，
+           # 由 _a1_report_search_override() 转成 A2 检索主题。
+           "picos": picos if isinstance(picos, dict) else None,
+           # 2026-10-26：检索数据源（要检索的数据库清单）随启动请求下发，存入 cfg。
+           # A2 检索时 _src 优先读 cfg["sources"]；为 None 时回落 block_a.DEFAULT_SOURCES。
+           "sources": [str(s) for s in sources]
+                      if isinstance(sources, (list, tuple)) and sources else None}
     sess = FullflowSession.new(topic, cfg, session_dir)
-    return _advance(sess, debug=debug, on_line=on_line, on_a4_event=on_a4_event)
+    return _advance(sess, debug=debug, on_line=on_line, on_a4_event=on_a4_event,
+                    start_stage=start_stage)
 
 
 def run_fastpath(topic: str, data_mode: str, *, rows=None, a4_result=None,
@@ -1372,7 +1409,7 @@ def _validate_decision(sess, decision):
     return None
 
 
-def _advance(sess, debug=False, on_line=None, on_a4_event=None):
+def _advance(sess, debug=False, on_line=None, on_a4_event=None, start_stage=None):
     """推进：跑 cursor 所指块（含 revision 补丁），遇停即存即返。"""
     letter = sess.cursor["block"]
     if letter == "done":
@@ -1403,7 +1440,7 @@ def _advance(sess, debug=False, on_line=None, on_a4_event=None):
                                  "handoff_preview": None}}
 
     try:
-        env = _run_block(letter, sess, debug, on_line=on_line, on_a4_event=on_a4_event)
+        env = _run_block(letter, sess, debug, on_line=on_line, on_a4_event=on_a4_event, start_stage=start_stage)
     except Exception as e:  # noqa: BLE001 — coze 失败/网络异常返回结构化错误，不推进
         sess.cursor["await_kind"] = sess.cursor.get("await_kind") or "error"
         sess.save()

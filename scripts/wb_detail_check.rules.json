@@ -1,0 +1,15 @@
+{
+  "_comment": "meta-analysis 的 C-detail-* 叶子特定扩展。引擎本体在 ct-base/scripts/wb_detail_check.py（随包副本，与 ct-base 字节一致）；本文件只注入叶子专属配置，零引擎改动即可复用通用检查。详见 ct-base workbench_ui.md §21。",
+  "scope": {
+    "selectors": [".picos-in"],
+    "values": ["seed", "result"]
+  },
+  "dupctl": {
+    "pairs": [["重新评估", "确认 PICOS 并重新评估"]],
+    "generic_similarity": false
+  },
+  "enable": {
+    "scope": true,
+    "dupctl": false
+  }
+}

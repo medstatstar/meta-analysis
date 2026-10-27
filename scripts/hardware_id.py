@@ -5,8 +5,11 @@
 
 本模块读取真实硬件令牌，按回退链取第一个可用的，再 sha256：
 
-  Windows:  SMBIOS UUID (Win32_ComputerSystemProduct.UUID，主板级，
-            换 Windows 账号 / 改主机名 / 重装系统都不变) → 注册表 MachineGuid
+  Windows:  SMBIOS UUID (ctypes 调 kernel32!GetSystemFirmwareTable('RSMB')
+            解析 Type 1 结构，纯进程内零子进程，输出与 CIM
+            Win32_ComputerSystemProduct.UUID 逐字节一致——本机 2026-10-15
+            实证；主板级，换账号 / 改主机名 / 重装系统都不变)
+            → 注册表 MachineGuid
   macOS:    IOPlatformUUID (ioreg)
   Linux:    /etc/machine-id (或 /var/lib/dbus/machine-id)
   兜底:     主机名（仅当上述全部失败，保证永不崩）
@@ -27,23 +30,100 @@ import socket
 import subprocess
 import sys
 
+# ── Windows 子进程无控制台窗口（2026-10-15）─────────────────────────────────
+# Windows 上 ioreg（macOS）之外的任何控制台子系统子程序，在父进程无控制台时
+# （WorkBuddy 桌面端宿主、pythonw 等 GUI 场景）直接 spawn 会让 Windows 新建
+# 控制台 → 屏幕闪出前台弹窗。CREATE_NO_WINDOW（+ STARTF_USESHOWWINDOW /
+# SW_HIDE 双保险）令子进程完全后台运行；stdout/stderr 管道捕获不受影响。
+# 注：Windows SMBIOS UUID 已改用纯进程内 ctypes 读取（见 _smbios_uuid），
+# 本 helper 现仅服务 macOS ioreg（非 Windows 返回 {}，空操作）。
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+
+def _hidden_kwargs() -> dict:
+    """返回抑制控制台弹窗的 subprocess 关键字参数（非 Windows 平台返回 {}）。"""
+    if not sys.platform.startswith("win"):
+        return {}
+    kw = {"creationflags": _CREATE_NO_WINDOW}
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        kw["startupinfo"] = si
+    except Exception:
+        pass
+    return kw
+
+
+def _smbios_uuid() -> str | None:
+    """纯进程内读取 SMBIOS System Information (Type 1) 的 UUID（零子进程）。
+
+    走 kernel32!GetSystemFirmwareTable('RSMB') 取原始 SMBIOS 表，遍历结构
+    定位 Type 1，读 offset 0x08 起 16 字节 UUID，按 WMI/CIM 口径格式化
+    （time_low / time_mid / time_hi_version 三组按小端反转，输出大写
+    8-4-4-4-12）——与 ``(Get-CimInstance Win32_ComputerSystemProduct).UUID``
+    逐字节一致（本机 2026-10-15 三方交叉实证），故 hardware_id 输出值不变。
+    任何环节失败返回 None，由调用方回退下一级来源（保证永不崩）。
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except Exception:
+        return None
+    try:
+        get_fw_tbl = ctypes.windll.kernel32.GetSystemFirmwareTable
+        get_fw_tbl.argtypes = [wintypes.DWORD, wintypes.DWORD,
+                               ctypes.c_void_p, wintypes.DWORD]
+        get_fw_tbl.restype = wintypes.DWORD
+        RSMB = 0x52534D42  # 'RSMB' — Raw SMBIOS provider
+        size = get_fw_tbl(RSMB, 0, None, 0)
+        if not size:
+            return None
+        buf = ctypes.create_string_buffer(size)
+        if get_fw_tbl(RSMB, 0, buf, size) != size:
+            return None
+        data = buf.raw[:size]
+        if len(data) < 9:
+            return None
+        off = 8  # RawSMBIOSData 头 8 字节（Used20CallingMethod/Major/Minor/
+        #         DmiRevision/Length）之后即 SMBIOS 表数据
+        while off + 4 <= len(data):
+            stype, slen = data[off], data[off + 1]
+            if slen < 4 or off + slen > len(data):
+                return None
+            if stype == 1 and slen >= 0x19:  # Type 1，SMBIOS 2.6+ 含 16B UUID
+                u = data[off + 0x08: off + 0x18]
+                if len(u) == 16:
+                    b = bytes([u[3], u[2], u[1], u[0],
+                               u[5], u[4], u[7], u[6]]) + u[8:16]
+                    s = "%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%s" % (
+                        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                        b[8], b[9], b[10:16].hex().upper())
+                    if s not in ("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",
+                                 "00000000-0000-0000-0000-000000000000"):
+                        return "win:smbios:" + s
+                return None
+            # 跳到下一结构：formatted 区之后是 NUL 结尾字符串区（双 NUL 收尾）
+            p = off + slen
+            while p + 1 < len(data) and not (data[p] == 0 and data[p + 1] == 0):
+                p += 1
+            off = p + 2
+    except Exception:
+        return None
+    return None
+
 
 def _raw_hw_token() -> str:
     """返回未哈希的硬件令牌字符串；任一来源失败即回退到下一项，最后兜底主机名。"""
     # Windows
     if sys.platform.startswith("win"):
         # 1) SMBIOS UUID（最硬，主板级，跨账号 / 主机名 / 重装都不变）
-        try:
-            out = subprocess.check_output(
-                [r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
-                 "-NoProfile", "-Command",
-                 "(Get-CimInstance Win32_ComputerSystemProduct).UUID"],
-                stderr=subprocess.DEVNULL, text=True, timeout=10)
-            s = out.strip()
-            if s and s.upper() not in ("UUID", "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"):
-                return "win:smbios:" + s
-        except Exception:
-            pass
+        #    纯进程内 ctypes 读取（2026-10-15 起零子进程）——原 powershell.exe
+        #    方案在无控制台父进程下闪弹窗；输出与 CIM 逐字节一致（本机实证），
+        #    无理由再起外部进程。失败（极老系统 / 无 SMBIOS）自动回退下一级。
+        s = _smbios_uuid()
+        if s:
+            return s
         # 2) 注册表 MachineGuid（跨账号 / 主机名稳定，仅重装系统变）
         try:
             import winreg
@@ -59,7 +139,8 @@ def _raw_hw_token() -> str:
         try:
             out = subprocess.check_output(
                 ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
-                stderr=subprocess.DEVNULL, text=True, timeout=10)
+                stderr=subprocess.DEVNULL, text=True, timeout=10,
+                **_hidden_kwargs())
             for line in out.splitlines():
                 if "IOPlatformUUID" in line:
                     # 形如:   "IOPlatformUUID" = "XXXXXXXX-XXXX-..."

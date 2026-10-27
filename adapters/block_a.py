@@ -163,8 +163,10 @@ def _try_coze_topic_assessment(topic, picos, missing, assess_draft, registry_pro
                 "compliance": assess_draft.get("compliance"),
             },
         }
-        res = cc.run_meta("topic_assessment", data=data,
-                          params={"user_language": "zh"}, timeout=45)
+        # ct-base §1.1：user_language 走共享 i18n 三级解析（显式 > 内容级 > 系统
+        # locale），不再硬编码 zh——英文选题请求应得英文评估（2026-10-20，审计 P1-2）。
+        res = cc.run_meta("topic_assessment", data=data, timeout=45,
+                          query="%s %s" % (topic or "", picos or ""))
         if not isinstance(res, dict) or res.get("status") != "ok":
             return None
         clin = res.get("clinical") or {}
@@ -249,8 +251,19 @@ def _llm_clinical_fallback(topic, picos, missing, draft):
         return None
 
 
-def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_assessment=True, topic_en=None):
+def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_assessment=True, topic_en=None, picos_override=None):
     picos, missing = _infer_picos(topic)
+    # 2026-10-25：人工确认的 PICOS 覆盖启发式推断（工作台「PICOS 推断」面板可编辑后回传）。
+    # 只接受非空字符串；未提供/空白的维度保留推断值，缺失维度按合并结果重算。
+    # 这解决「界面提示须人工补全、却没有入口」——补全后的值真正进入四维评分与 A2 检索主题。
+    if isinstance(picos_override, dict):
+        for _k in ("P", "I", "C", "O", "S"):
+            _v = picos_override.get(_k)
+            if isinstance(_v, str):
+                _v = _v.strip()
+                if _v and _v not in ("（待填）", "(to fill)", "(to be filled)"):
+                    picos[_k] = _v
+        missing = [k for k, v in picos.items() if not v]
     # 范围预警：过短/过长或缺失维度过多 → 提示收窄
     scope_warning = None
     if len(topic or "") < 6:
@@ -270,7 +283,11 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
     # 2026-09-24：registry_probe 为 None 时本地直连 ClinicalTrials.gov 取真实注册数
     if registry_probe is None:
         try:
-            registry_probe = _registry_probe.probe_local(topic)
+            # 2026-10-25 修（用户报「结论自相矛盾」）：此前用原始 topic（多为中文）查
+            # ClinicalTrials.gov —— 英文库遇中文检索词恒 0 命中，于是「文献库 778 篇同类
+            # SR/MA（已饱和）」和「注册库 0 项，属空白/新兴方向」同时出现在结论里。
+            # 与 PROSPERO 探针保持一致：优先用英文检索词。
+            registry_probe = _registry_probe.probe_local(topic_en or topic)
         except Exception as _e:  # noqa: BLE001
             registry_probe = {"status": "error", "total": None, "returned": None,
                               "sample": [], "note": f"本地 registry 探针失败: {_e}"}
@@ -285,8 +302,29 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
     if registry_probe:
         report["registry_probe"] = registry_probe
         total = registry_probe.get("total")
+        # 2026-10-25：用文献库命中数交叉校验注册库结论。
+        # 「注册库 0 命中」有两种含义：真的没有注册试验，或探针没打中（检索词/语言不匹配）。
+        # 后者在中文主题上很常见。若文献库已有大量同类 SR/MA，却判定「空白方向」，
+        # 两段结论会直接打脸（用户实际反馈的就是这个）。故此处优先判「探针未命中」。
+        try:
+            _co_n, _pm_n = topic_assess._extract_dedup_counts(dedup_probe)
+        except Exception:  # noqa: BLE001
+            _co_n, _pm_n = None, None
+        _sr_total = (_co_n or 0) + (_pm_n or 0)
         if total is not None:
-            if total == 0:
+            if total == 0 and _sr_total >= 20:
+                # 矛盾态：不以注册库计数推断空白，改为「未知」并把矛盾写进 risk_alert
+                report["feasibility"]["crowding"] = "unknown"
+                report["feasibility"]["expected_studies"] = None
+                report["feasibility"]["risk_alert"] = (
+                    "⚠️ 注册库探针 0 命中，但文献库已有 %d 篇同类 SR/MA —— "
+                    "两者矛盾，按「探针未命中」处理（多为检索词/语言与注册库不匹配），"
+                    "不据此判定为空白方向；原始研究数建议人工核查。" % _sr_total)
+                report["registry_probe"] = dict(registry_probe, note=(
+                    (registry_probe.get("note") or "")
+                    + " ⚠ 与文献库命中数矛盾（同类 SR/MA %d 篇），本次结论不以注册库计数为准。"
+                    % _sr_total))
+            elif total == 0:
                 report["scope_warning"] = (report["scope_warning"] or "") + " 注册库未检索到相关试验，属空白/新兴方向。"
                 report["feasibility"]["crowding"] = "empty"
                 report["feasibility"]["risk_alert"] = "⚠️ 方向空白，可能原始研究极少，预期可纳入研究数量不足（meta 至少 k≥2）。"
@@ -3007,6 +3045,27 @@ def _picos_report_to_query(text):
     return " ".join(parts)[:400]
 
 
+def picos_dict_to_query(picos):
+    """PICOS dict → A2 检索主题串（2026-10-25）。
+
+    背景：工作台「选题评估」支持人工确认 PICOS，但「文献准备」从 A2 起步、A1 不跑，
+    人工确认的值原本到不了检索环节 —— 填了等于白填。这里把 dict 拼成与
+    `_picos_report_to_query` 同格式的 markdown 表格再复用其清理/去重规则，
+    保证两条入口（A1 编辑版报告 / 工作台确认的 PICOS）产出一致的检索主题。
+    空值、占位符（待填/疑似）由 `_picos_report_to_query` 统一跳过。
+    """
+    if not isinstance(picos, dict):
+        return None
+    rows = []
+    for _k in ("P", "I", "C", "O", "S"):
+        _v = picos.get(_k)
+        if isinstance(_v, str) and _v.strip():
+            rows.append("| %s | %s |" % (_k, _v.strip().replace("|", "/")))
+    if not rows:
+        return None
+    return _picos_report_to_query("\n".join(rows))
+
+
 def _translate_topic_authoritative(text):
     """A2 检索式翻译（关联 ct-base 权威 kw_localize，不重复造轮子）。
 
@@ -3070,6 +3129,13 @@ def _translate_topic_authoritative(text):
 #: 不再把整体降级为 error，也不触发菜单告警——它们的缺位属已知常态噪声。
 CORE_SOURCES = ("OpenAlex", "EuropePMC")
 
+#: 用户未显式指定时的**默认检索集**（2026-10-26 用户裁定：Cochrane 默认不选中）。
+#: 与 CORE_SOURCES 的区别：CORE_SOURCES 是 search_status 的判定口径（核心二源齐 → ok），
+#: 不随默认值漂移；DEFAULT_SOURCES 只是「没配置时查哪些库」。文献检索默认只查原始研究，
+#: 故默认两源 OpenAlex + EuropePMC；Cochrane（纯综述库）需用户在「文献准备」首页显式勾选，
+#: 勾选时 _normalize_sources_for_search 会自动补 EuropePMC 并强制纳入综述类型。
+DEFAULT_SOURCES = ("OpenAlex", "EuropePMC")
+
 # A1 选题阶段「检索数据源」可选池（规范化名）。
 # 单一真源 = ct-literature `adapters/fetch_coze_unified._SOURCE_DISPLAY`（6 个走 Coze/
 # 本地 fetch 的源）；此处保持一致（flow_menu.expected_sources 有同步断言）。
@@ -3082,6 +3148,32 @@ CORE_SOURCES = ("OpenAlex", "EuropePMC")
 # Guidelines（`--with-guidelines`，需预构建本地语料库）。
 AVAILABLE_SOURCES = ("OpenAlex", "EuropePMC", "bioRxiv", "medRxiv",
                      "SemanticScholar", "arXiv")
+
+
+def _normalize_sources_for_search(sources, include_reviews):
+    """Cochrane 约束修正（2026-10-25 用户裁定：Cochrane 是 Meta 分析必备源）。
+
+    Cochrane 在 ct-literature 里**不是独立库**，而是 Europe PMC 的 journal-filter
+    子模式（`--cochrane`）：查询串追加 `JOURNAL:"Cochrane Database of Systematic
+    Reviews"`，合并后再丢掉非 Cochrane 命中（clean Cochrane-only set）。由此两个
+    硬约束，不处理就会「勾了 Cochrane → 0 结果」：
+
+    1) **必须同选 EuropePMC** —— journal filter 作用于 EPMC leg；只勾 Cochrane 而
+       未勾 EuropePMC 时该 leg 根本不跑。此处自动补入 EuropePMC。
+    2) **必须放开综述** —— Cochrane 库内容 PUBLICATION_TYPE 全是 "Systematic
+       Review" / "Meta-Analysis"，与 include_reviews=False 追加的
+       `NOT (PUBLICATION_TYPE:"Review" OR "Systematic Review" OR "Meta-Analysis")`
+       查询条件直接互斥。勾选 Cochrane 即表明用户要综述证据 → 强制 True。
+
+    返回 (sources_normalized, include_reviews_effective)；sources 原样返回
+    （None 保持 None = 默认核心源），仅在含 Cochrane 时改写。
+    """
+    srcs = [str(s) for s in (sources or []) if str(s).strip()]
+    if not any(_src_key(s) == "cochrane" for s in srcs):
+        return sources, bool(include_reviews)
+    if not any(_src_key(s) in ("europepmc", "pubmed", "medline", "pmc") for s in srcs):
+        srcs.append("EuropePMC")
+    return srcs, True
 
 
 def _src_key(name):
@@ -3132,6 +3224,33 @@ def _a2_coverage_nha(studies, outs2, card, max_results, year_from, strategy=None
             raw_by_source[raw] = raw_by_source.get(raw, 0) + 1
             src = _canon_source(raw)
             by_source[src] = by_source.get(src, 0) + 1
+    # 2026-10-25：用户要求「各数据库条数应包含所有（被请求的）源」。
+    # 原先 by_source 只统计实际返回了文献的源，0 命中的库不显示 —— 用户无法
+    # 区分「没选这个库」与「选了但静默漏检」。此处把本次请求的源（card.params.sources，
+    # 逗号分隔串）全部补入 by_source，缺失置 0，让缺库在概览里显性可见。
+    _req_sources = []
+    try:
+        _params = (card or {}).get("params") or {}
+        _raw_sources = _params.get("sources")
+        if isinstance(_raw_sources, str):
+            _req_sources = [x.strip() for x in _raw_sources.split(",") if x.strip()]
+        elif isinstance(_raw_sources, (list, tuple)):
+            _req_sources = [str(x).strip() for x in _raw_sources if str(x).strip()]
+    except Exception:  # noqa: BLE001
+        _req_sources = []
+    for _s in _req_sources:
+        _cs = _canon_source(_s)
+        if _cs and _cs != "unknown" and _cs not in by_source:
+            by_source[_cs] = 0
+    # Cochrane 专项口径（2026-10-25）：Cochrane 是 EuropePMC 的 journal-filter 子模式，
+    # 命中记录的 source 字段仍是 EuropePMC / OpenAlex，仅 publication 为 "Cochrane
+    # Database of Systematic Reviews"。若只按 source 计数，用户勾了 Cochrane 却在
+    # 「各数据库条数」里看不到它。此处按 journal 标记单列 Cochrane 桶；这些命中同时
+    # 保留在其 source 桶中（不扣减），保持 total = len(studies) 可对账。
+    if any(_src_key(_s) == "cochrane" for _s in _req_sources):
+        _coch = sum(1 for _s in studies if isinstance(_s, dict)
+                    and "cochrane" in str(_s.get("journal") or "").lower())
+        by_source["Cochrane"] = _coch
     status = (outs2[0].get("status") if outs2 and isinstance(outs2[0], dict) else "n/a")
     core_missing = [s for s in CORE_SOURCES if by_source.get(s, 0) <= 0]
     search_ok = (not core_missing) and len(studies) > 0
@@ -3265,10 +3384,15 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
         if _c2sr.get("studies") and _cid.get(A1):
             _reuse_src = {"a1": _cid.get(A1), "a2": _c2, "sr": _c2sr}
 
+    # Cochrane 约束修正（2026-10-25）：Cochrane 是 EuropePMC journal-filter 子模式，
+    # 勾选时自动补 EuropePMC 并强制纳入综述（详见 _normalize_sources_for_search）。
+    # 在此处一次性规范化，保证 A1 记录 / 检索指纹 / 真实检索三者口径一致。
+    sources, include_reviews = _normalize_sources_for_search(sources, include_reviews)
+
     a4_only = False
     if start_stage in ("A3", "A4") and cached_envelope:
         _s1, _s2 = _cid.get(A1), _cid.get(A2)
-        if _s1 and _s2:
+        if _s2:   # A2 存在即可复用；A1 可能缺失（文献准备从 A2 起步的会话不含 A1）
             _r2 = _s2.get("stage_result") or {}
             _studies = _r2.get("studies") or []
             _screened = _r2.get("screened") or []
@@ -3278,7 +3402,7 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
                 _screened = (_s3.get("stage_result") or {}).get("screened") or []
             if _studies or _screened:
                 studies, screened = _studies, _screened
-                stages = [_s1, _s2] + ([_s3] if _s3 else [])
+                stages = ([_s1] if _s1 else []) + [_s2] + ([_s3] if _s3 else [])
                 tool_card_outputs = []
                 for _s in stages:
                     tool_card_outputs += (_s.get("tool_cards") or [])
@@ -3286,8 +3410,10 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
                          else _derive_inclusion_hints(topic))
                 a4_only = True
 
-    if not a4_only:
+    if not a4_only and start_stage != "A2":
         # A1 — 本地启发式选题 + 真实 ct-registry 查重探针（不阻塞，失败优雅降级）
+        # 文献准备从 A2 起步（2026-10-21 用户裁定）：A1 选题闸门仅在「选题评估」内运行，
+        # 「文献准备」直接进 A2 检索，跳过 A1 选题启发式与 ct-registry 查重探针。
         # 回退复用：同一会话内 topic 未变 → 上一轮探针仍是有效的「拥挤度快照」，
         # 直接复用跳过联网（该探针 timeout 180s，是回退进 A 块的一大块纯等待）。
         _probe_reuse = (((_reuse_src or {}).get("a1") or {}).get("stage_result") or {}).get(
@@ -3307,7 +3433,7 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
         rep1["include_reviews"] = bool(include_reviews)
         # A1 页面「检索数据源」初值 = 本次 A 块配置（A1 revision 可随后增减）。
         # sources 是用户选题阶段选定的「要检索的库」子集；None → 用核心源全量。
-        rep1["sources"] = list(sources) if sources else list(CORE_SOURCES)
+        rep1["sources"] = list(sources) if sources else list(DEFAULT_SOURCES)
         s1 = _mk_stage(A1, 0, "await_human", rep1, nha1)
         stages.append(s1)
         _st = _soft_stop(env, pid, stages, tool_card_outputs, s1, A1, pause_at, human_decision)
@@ -3325,6 +3451,7 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
                 _st["stages"] = list(_st.get("stages") or []) + [_p]
             return _st
 
+    if not a4_only:
         # A2（合并节点「文献集」）— 🟡 软停靠：检索覆盖确认 + 同节点内去重/规则初筛。
         # 用户裁定（2026-09-10）：原 A2 检索 与 A3 初筛合并为一个节点，只软停一次、
         # 只产出一张合并表（检索结果 + 裁决/理由/文献类型确认列）。

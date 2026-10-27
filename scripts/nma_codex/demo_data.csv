@@ -1,0 +1,13 @@
+﻿study,treat,event,n
+S1,Placebo,40,100
+S1,DrugA,25,100
+S2,Placebo,38,100
+S2,DrugB,30,100
+S3,Placebo,50,120
+S3,DrugC,33,120
+S4,DrugA,20,90
+S4,DrugB,22,90
+S5,DrugB,35,110
+S5,DrugC,28,110
+S6,DrugA,18,80
+S6,Placebo,33,80

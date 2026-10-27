@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>meta-analysis 报告 · pairwise_meta</title>
+<style>
+:root{
+  --bg:#eef1f6;--card:#ffffff;--card2:#f8fafc;--border:#e2e8f0;
+  --text:#0f172a;--muted:#64748b;--accent:#4f46e5;--accent2:#0ea5e9;
+  --ok:#16a34a;--warn:#d97706;--bad:#dc2626;--teal:#0F9B81;
+  --radius:14px;--shadow:0 1px 3px rgba(15,23,42,.08),0 1px 2px rgba(15,23,42,.04);
+  --shadow-hover:0 10px 28px rgba(15,23,42,.12);
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  /* 与 build_figure_widget 同名变量，确保内联 SVG 区块在独立文件里也能正确着色 */
+  --color-text-primary:#0f172a;--color-border-tertiary:#e2e8f0;--border-radius-md:10px;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:15px;line-height:1.6;}
+header{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;padding:22px 28px;}
+header h1{margin:0;font-size:21px;font-weight:700;letter-spacing:.01em;}
+header .meta{font-size:13px;opacity:.9;margin-top:5px;}
+main{max-width:1040px;margin:22px auto;padding:0 16px;display:flex;flex-direction:column;gap:18px;}
+@keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+main>*{animation:fade .35s ease both;}
+.hero{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;box-shadow:var(--shadow);}
+.hero .lead{font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;font-weight:600;}
+.hero .est{font-size:38px;font-weight:800;color:var(--text);margin:6px 0 2px;font-variant-numeric:tabular-nums;line-height:1.1;}
+.hero .est .ci{font-size:19px;color:var(--muted);font-weight:700;margin-left:6px;}
+.hero .est .sm{font-size:17px;color:var(--accent);font-weight:700;}
+.hero .sub{margin-top:8px;font-size:15px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.interp-card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:var(--radius);padding:16px 20px;box-shadow:var(--shadow);}
+.interp-header{font-size:15px;font-weight:700;color:var(--text);margin-bottom:10px;}
+.interp-conclusion{font-size:15px;line-height:1.7;color:var(--text);margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border);}
+.interp-section{margin-top:8px;}
+.interp-label{font-size:13px;font-weight:700;color:var(--muted);margin-bottom:4px;}
+.interp-section ul{margin:0;padding-left:18px;list-style:disc;}
+.interp-section li{font-size:14px;line-height:1.6;color:var(--text);margin-bottom:3px;}
+.interp-grade{display:inline-block;padding:2px 8px;border-radius:4px;background:#eef6f4;color:#0d6e5a;font-weight:700;font-size:12px;margin-right:6px;}
+.interp-overclaim{display:inline-block;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:700;font-size:12px;margin-right:6px;}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;font-size:13px;font-weight:700;}
+.badge.ok{background:#dcfce7;color:#166534;}
+.badge.warn{background:#fef3c7;color:#92400e;}
+.badge.bad{background:#fee2e2;color:#991b1b;}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:currentColor;}
+.figure-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px 16px;box-shadow:var(--shadow);transition:box-shadow .2s,transform .2s;}
+.figure-card:hover{box-shadow:var(--shadow-hover);transform:translateY(-2px);}
+.figure-card .cap{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;color:var(--text);margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.figure-card .cap .ico{font-size:16px;}
+.figure-card .svg-wrap{overflow-x:auto;}
+.fig-note{margin:10px 2px 0;padding:9px 13px;font-size:13px;line-height:1.6;color:#334155;background:#eef6f4;border:1px solid #bfe3da;border-radius:var(--radius);}
+.fig-note.warn{background:#fef6e7;border-color:#f3d28a;color:#8a5a00;}
+.group{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px 16px;box-shadow:var(--shadow);}
+.group h3{font-size:16px;margin:0 0 12px;display:flex;align-items:center;gap:8px;color:var(--text);}
+.group h3 .ico{font-size:16px;}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 16px;font-size:15px;}
+.kv .k{color:var(--muted);}
+.kv .v{font-weight:700;font-variant-numeric:tabular-nums;text-align:right;}
+.checks{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px;}
+.checks li{display:flex;align-items:flex-start;gap:8px;font-size:15px;}
+.checks .cdot{margin-top:5px;width:8px;height:8px;border-radius:50%;flex:none;}
+.cdot.ok{background:var(--ok);} .cdot.warn{background:var(--warn);} .cdot.bad{background:var(--bad);}
+.checks-kv{margin-top:10px;}
+.checks-kv .k{display:flex;align-items:center;gap:8px;color:inherit;}
+.checks-kv .v.ok{color:var(--ok);}
+.checks-kv .v.warn{color:var(--warn);}
+.checks-kv .v.bad{color:var(--bad);}
+.checks-kv .cdot{margin-top:0;}
+details.repro{background:#eef1f5;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);}
+details.repro summary{cursor:pointer;padding:13px 18px;font-size:14px;font-weight:600;color:#1e293b;outline:none;display:flex;justify-content:space-between;align-items:center;list-style:none;}
+details.repro summary::-webkit-details-marker{display:none;}
+details.repro .body{padding:0 18px 18px;}
+details.repro .meta{font-size:12px;color:#57606a;margin:0 0 10px;}
+details.repro pre{margin:0;max-height:440px;overflow:auto;background:#e3e8ee;padding:14px;border:1px solid #d0d7de;border-radius:8px;}
+details.repro code{font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;line-height:1.6;color:#24292e;}
+details.repro code .c{color:#6a737d;font-style:italic;}
+details.repro code .s{color:#032f62;}
+details.repro code .f{color:#6f42c1;}
+details.repro code .n{color:#005cc5;}
+.copy-btn{font-size:12px;color:#57606a;background:#eaeef2;border:1px solid #d0d7de;border-radius:6px;padding:3px 9px;cursor:pointer;}
+.copy-btn:hover{color:#1e293b;border-color:#b0b8c0;}
+.banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:var(--radius);padding:11px 15px;font-size:14px;}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:18px;}
+@media (max-width:640px){main{padding:0 10px;} .hero .est{font-size:30px;}}
+@media print{body{background:#fff;} header{background:var(--accent)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;} .figure-card,.group,.hero{box-shadow:none;break-inside:avoid;} .copy-btn{display:none;} .figure-card .svg-wrap svg{max-width:100%!important;} main>*{animation:none;}}
+</style></head>
+<body>
+<header><h1>meta-analysis 结果报告 · pairwise_meta</h1>
+<div class="meta">生成时间 2026-10-27 08:41:43</div></header>
+<main>
+
+<div class="hero"><div class="lead">合并效应量（MD）</div><div class="est"><span class="sm">MD</span> -10.547<span class="ci">95% CI -11.457 – -9.638</span></div><div class="sub"><span class="badge ok"><span class="dot"></span>有统计学显著性</span><span>p = 0.0000</span></div></div>
+<div class="interp-card"><div class="interp-header">📊 结果解读</div><div class="interp-conclusion">合并 MD = -10.55（95% CI -11.46–-9.64，p &lt; 0.001），提示实验组效应低于对照组，差异有统计学显著性。</div><div class="interp-section"><div class="interp-label">⚠ 注意事项</div><ul><li>Egger 检验 p = 0.065，提示可能存在发表偏倚，合并效应可能被高估。</li><li>MD = -10.55，效应量极端偏大（|d| &gt; 3），请复核原始数据或考虑离群研究。</li></ul></div><div class="interp-section"><div class="interp-label">💡 建议</div><ul><li>建议做剪补法（trim-and-fill）校正，并检查漏斗图不对称原因。</li><li>建议做逐一剔除敏感性分析，识别离群研究。</li><li>推荐做逐一剔除敏感性分析，识别对合并效应影响最大的研究。</li><li>正文应报告：合并效应、95% CI、I²、τ²（如有）、研究数、GRADE 证据等级、发表偏倚检验结果。</li></ul></div><div class="interp-section"><div class="interp-label">🔍 审稿人可能问</div><ul><li>是否存在发表偏倚？是否进行了剪补法或失安全系数分析？</li><li>是否报告了 PRISMA 检索策略和筛选流程？是否进行了偏倚风险评估？</li></ul></div><div class="interp-section"><div class="interp-label">📋 质量评估</div><div class="interp-qa"><span class="interp-grade">GRADE: Moderate</span><div style="margin-top:4px;font-size:13px;color:var(--muted);">GRADE=Moderate，未检出明显过度声明，证据质量可接受。</div></div></div></div>
+
+<div style="display:flex;flex-direction:column;gap:16px;font-family:var(--font-sans);"><div class="figure-card"><div class="cap"><span class="ico">📊</span>森林图</div><div class="svg-wrap"><svg viewBox="-152.63 -24 809.26 408" style="width:809.26px;height:auto;display:block;margin:0 auto;">
+<g class='svglite'>
+<defs>
+  <style type='text/css'><![CDATA[
+    .svglite line, .svglite polyline, .svglite polygon, .svglite path, .svglite rect, .svglite circle {
+      fill: none;
+      stroke: #000000;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-miterlimit: 10.00;
+    }
+    .svglite text {
+      white-space: pre;
+    }
+    .svglite g.glyphgroup path {
+      fill: inherit;
+      stroke: none;
+    }
+  ]]></style>
+</defs>
+<rect width='100%' height='100%' style='stroke: none; fill: #FFFFFF;'/>
+<defs>
+  
+</defs>
+<g>
+<text x='-144.63' y='126.77' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='39.34px' lengthAdjust='spacingAndGlyphs'>Study</text>
+<text x='-144.63' y='241.97' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='151.14px' lengthAdjust='spacingAndGlyphs'>Random effects model</text>
+<text x='-144.63' y='256.57' style='font-size: 11.00px; font-family: "DejaVu Sans";' textLength='84.91px' lengthAdjust='spacingAndGlyphs'>Heterogeneity: </text>
+<text x='-59.72' y='256.57' style='font-size: 11.00px; font-style: italic; font-family: "DejaVu Sans";' textLength='3.25px' lengthAdjust='spacingAndGlyphs'>I</text>
+<text x='-55.27' y='250.85' style='font-size: 7.70px; font-family: "DejaVu Sans";' textLength='4.89px' lengthAdjust='spacingAndGlyphs'>2</text>
+<text x='-50.38' y='256.57' style='font-size: 11.00px; font-family: "DejaVu Sans";' textLength='44.17px' lengthAdjust='spacingAndGlyphs'> = 4.0%</text>
+<text x='-6.20' y='256.57' style='font-size: 11.00px; font-family: "DejaVu Sans";' textLength='7.00px' lengthAdjust='spacingAndGlyphs'>, </text>
+<text x='0.80' y='256.57' style='font-size: 11.00px; font-family: "DejaVu Sans";' textLength='6.62px' lengthAdjust='spacingAndGlyphs'>τ</text>
+<text x='7.42' y='250.85' style='font-size: 7.70px; font-family: "DejaVu Sans";' textLength='4.89px' lengthAdjust='spacingAndGlyphs'>2</text>
+<text x='12.32' y='256.57' style='font-size: 11.00px; font-family: "DejaVu Sans";' textLength='54.72px' lengthAdjust='spacingAndGlyphs'> = 0.0371</text>
+<text x='67.04' y='256.57' style='font-size: 11.00px; font-family: "DejaVu Sans";' textLength='7.00px' lengthAdjust='spacingAndGlyphs'>, </text>
+<text x='74.04' y='256.57' style='font-size: 11.00px; font-style: italic; font-family: "DejaVu Sans";' textLength='6.98px' lengthAdjust='spacingAndGlyphs'>p</text>
+<text x='81.94' y='256.57' style='font-size: 11.00px; font-family: "DejaVu Sans";' textLength='54.72px' lengthAdjust='spacingAndGlyphs'> = 0.3839</text>
+<text x='-144.63' y='155.57' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='46.06px' lengthAdjust='spacingAndGlyphs'>ARB_01</text>
+<text x='-144.63' y='169.97' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='46.06px' lengthAdjust='spacingAndGlyphs'>ARB_02</text>
+<text x='-144.63' y='184.37' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='46.06px' lengthAdjust='spacingAndGlyphs'>ARB_03</text>
+<text x='-144.63' y='198.77' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='46.06px' lengthAdjust='spacingAndGlyphs'>ARB_04</text>
+<text x='-144.63' y='213.17' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='46.06px' lengthAdjust='spacingAndGlyphs'>ARB_05</text>
+<text x='44.96' y='126.77' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='32.78px' lengthAdjust='spacingAndGlyphs'>Total</text>
+<text x='44.96' y='241.97' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='25.03px' lengthAdjust='spacingAndGlyphs'>587</text>
+<text x='44.96' y='155.57' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='22.92px' lengthAdjust='spacingAndGlyphs'>120</text>
+<text x='44.96' y='169.97' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='15.28px' lengthAdjust='spacingAndGlyphs'>95</text>
+<text x='44.96' y='184.37' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='22.92px' lengthAdjust='spacingAndGlyphs'>160</text>
+<text x='44.96' y='198.77' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='15.28px' lengthAdjust='spacingAndGlyphs'>78</text>
+<text x='44.96' y='213.17' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='22.92px' lengthAdjust='spacingAndGlyphs'>134</text>
+<text x='89.34' y='126.77' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='36.72px' lengthAdjust='spacingAndGlyphs'>Mean</text>
+<text x='89.34' y='155.57' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.70px' lengthAdjust='spacingAndGlyphs'>-14.20</text>
+<text x='89.34' y='169.97' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.70px' lengthAdjust='spacingAndGlyphs'>-12.80</text>
+<text x='89.34' y='184.37' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.70px' lengthAdjust='spacingAndGlyphs'>-15.50</text>
+<text x='89.34' y='198.77' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.70px' lengthAdjust='spacingAndGlyphs'>-10.90</text>
+<text x='89.34' y='213.17' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.70px' lengthAdjust='spacingAndGlyphs'>-13.30</text>
+<text x='137.02' y='126.77' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='18.61px' lengthAdjust='spacingAndGlyphs'>SD</text>
+<text x='137.02' y='155.57' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>8.1000</text>
+<text x='137.02' y='169.97' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>7.4000</text>
+<text x='137.02' y='184.37' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>9.0000</text>
+<text x='137.02' y='198.77' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>6.8000</text>
+<text x='137.02' y='213.17' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>8.6000</text>
+<text x='137.02' y='112.37' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='89.83px' lengthAdjust='spacingAndGlyphs'>Experimental</text>
+<text x='175.47' y='126.77' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='32.78px' lengthAdjust='spacingAndGlyphs'>Total</text>
+<text x='175.47' y='241.97' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='25.03px' lengthAdjust='spacingAndGlyphs'>585</text>
+<text x='175.47' y='155.57' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='22.92px' lengthAdjust='spacingAndGlyphs'>118</text>
+<text x='175.47' y='169.97' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='15.28px' lengthAdjust='spacingAndGlyphs'>97</text>
+<text x='175.47' y='184.37' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='22.92px' lengthAdjust='spacingAndGlyphs'>158</text>
+<text x='175.47' y='198.77' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='15.28px' lengthAdjust='spacingAndGlyphs'>80</text>
+<text x='175.47' y='213.17' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='22.92px' lengthAdjust='spacingAndGlyphs'>132</text>
+<text x='217.86' y='126.77' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='36.72px' lengthAdjust='spacingAndGlyphs'>Mean</text>
+<text x='217.86' y='155.57' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='31.06px' lengthAdjust='spacingAndGlyphs'>-3.10</text>
+<text x='217.86' y='169.97' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='31.06px' lengthAdjust='spacingAndGlyphs'>-2.40</text>
+<text x='217.86' y='184.37' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='31.06px' lengthAdjust='spacingAndGlyphs'>-3.80</text>
+<text x='217.86' y='198.77' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='31.06px' lengthAdjust='spacingAndGlyphs'>-2.00</text>
+<text x='217.86' y='213.17' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='31.06px' lengthAdjust='spacingAndGlyphs'>-2.90</text>
+<text x='265.54' y='126.77' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='18.61px' lengthAdjust='spacingAndGlyphs'>SD</text>
+<text x='265.54' y='155.57' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>7.6000</text>
+<text x='265.54' y='169.97' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>7.0000</text>
+<text x='265.54' y='184.37' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>8.3000</text>
+<text x='265.54' y='198.77' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>6.5000</text>
+<text x='265.54' y='213.17' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='42.02px' lengthAdjust='spacingAndGlyphs'>8.0000</text>
+<text x='265.54' y='112.37' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='49.62px' lengthAdjust='spacingAndGlyphs'>Control</text>
+<polygon points='271.21,244.80 441.29,244.80 441.29,144.00 271.21,144.00
+' style='stroke-width: 0.75; stroke: none;' />
+<polyline points='356.25,244.80 356.25,144.00
+' style='stroke-width: 0.75;' />
+<polyline points='290.31,237.60 290.31,144.00
+' style='stroke-width: 0.75; stroke-dasharray: 1.00,3.00;' />
+<polyline points='293.74,244.80 418.77,244.80
+' style='stroke-width: 0.75;' />
+<line x1='293.74' y1='244.80' x2='293.74' y2='252.00' style='stroke-width: 0.75;' />
+<line x1='324.99' y1='244.80' x2='324.99' y2='252.00' style='stroke-width: 0.75;' />
+<line x1='356.25' y1='244.80' x2='356.25' y2='252.00' style='stroke-width: 0.75;' />
+<line x1='387.51' y1='244.80' x2='387.51' y2='252.00' style='stroke-width: 0.75;' />
+<line x1='418.77' y1='244.80' x2='418.77' y2='252.00' style='stroke-width: 0.75;' />
+<text x='293.74' y='270.77' text-anchor='middle' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='19.61px' lengthAdjust='spacingAndGlyphs'>-10</text>
+<text x='324.99' y='270.77' text-anchor='middle' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='11.97px' lengthAdjust='spacingAndGlyphs'>-5</text>
+<text x='356.25' y='270.77' text-anchor='middle' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='7.64px' lengthAdjust='spacingAndGlyphs'>0</text>
+<text x='387.51' y='270.77' text-anchor='middle' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='7.64px' lengthAdjust='spacingAndGlyphs'>5</text>
+<text x='418.77' y='270.77' text-anchor='middle' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='15.28px' lengthAdjust='spacingAndGlyphs'>10</text>
+<polyline points='293.74,244.80 418.77,244.80
+' style='stroke-width: 0.75;' />
+<line x1='293.74' y1='244.80' x2='293.74' y2='252.00' style='stroke-width: 0.75;' />
+<line x1='324.99' y1='244.80' x2='324.99' y2='252.00' style='stroke-width: 0.75;' />
+<line x1='356.25' y1='244.80' x2='356.25' y2='252.00' style='stroke-width: 0.75;' />
+<line x1='387.51' y1='244.80' x2='387.51' y2='252.00' style='stroke-width: 0.75;' />
+<line x1='418.77' y1='244.80' x2='418.77' y2='252.00' style='stroke-width: 0.75;' />
+<text x='356.25' y='126.77' text-anchor='middle' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='110.69px' lengthAdjust='spacingAndGlyphs'>Mean Difference</text>
+<polygon points='284.63,237.60 290.31,232.99 296.00,237.60 290.31,242.21
+' style='stroke-width: 0.75; fill: #0F9B81;' />
+<rect x='281.35' y='145.69' width='11.01' height='11.01' style='stroke-width: 0.75; stroke: #BEBEBE; fill: #2A3950;' />
+<polyline points='286.86,152.64 286.86,149.76
+' style='stroke-width: 0.75;' />
+<polyline points='274.39,151.20 299.33,151.20
+' style='stroke-width: 0.75;' />
+<rect x='285.84' y='160.21' width='10.79' height='10.79' style='stroke-width: 0.75; stroke: #BEBEBE; fill: #2A3950;' />
+<polyline points='291.23,167.04 291.23,164.16
+' style='stroke-width: 0.75;' />
+<polyline points='278.49,165.60 303.98,165.60
+' style='stroke-width: 0.75;' />
+<rect x='277.35' y='174.24' width='11.52' height='11.52' style='stroke-width: 0.75; stroke: #BEBEBE; fill: #2A3950;' />
+<polyline points='283.11,181.44 283.11,178.56
+' style='stroke-width: 0.75;' />
+<polyline points='271.21,180.00 295.00,180.00
+' style='stroke-width: 0.75;' />
+<rect x='295.32' y='189.10' width='10.59' height='10.59' style='stroke-width: 0.75; stroke: #BEBEBE; fill: #2A3950;' />
+<polyline points='300.61,195.84 300.61,192.96
+' style='stroke-width: 0.75;' />
+<polyline points='287.64,194.40 313.59,194.40
+' style='stroke-width: 0.75;' />
+<rect x='285.73' y='203.29' width='11.01' height='11.01' style='stroke-width: 0.75; stroke: #BEBEBE; fill: #2A3950;' />
+<polyline points='291.23,210.24 291.23,207.36
+' style='stroke-width: 0.75;' />
+<polyline points='278.76,208.80 303.71,208.80
+' style='stroke-width: 0.75;' />
+<text x='489.88' y='126.77' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='21.91px' lengthAdjust='spacingAndGlyphs'>MD</text>
+<text x='489.88' y='241.97' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='42.92px' lengthAdjust='spacingAndGlyphs'>-10.55</text>
+<text x='489.88' y='155.57' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.70px' lengthAdjust='spacingAndGlyphs'>-11.10</text>
+<text x='489.88' y='169.97' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.70px' lengthAdjust='spacingAndGlyphs'>-10.40</text>
+<text x='489.88' y='184.37' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.70px' lengthAdjust='spacingAndGlyphs'>-11.70</text>
+<text x='489.88' y='198.77' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='31.06px' lengthAdjust='spacingAndGlyphs'>-8.90</text>
+<text x='489.88' y='213.17' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.70px' lengthAdjust='spacingAndGlyphs'>-10.40</text>
+<text x='592.99' y='126.77' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='46.17px' lengthAdjust='spacingAndGlyphs'>95% CI</text>
+<text x='592.99' y='241.97' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='97.44px' lengthAdjust='spacingAndGlyphs'>[-11.46; -9.64]</text>
+<text x='592.99' y='155.57' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='87.00px' lengthAdjust='spacingAndGlyphs'>[-13.10; -9.10]</text>
+<text x='592.99' y='169.97' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='87.00px' lengthAdjust='spacingAndGlyphs'>[-12.44; -8.36]</text>
+<text x='592.99' y='184.37' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='87.00px' lengthAdjust='spacingAndGlyphs'>[-13.60; -9.80]</text>
+<text x='592.99' y='198.77' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='87.00px' lengthAdjust='spacingAndGlyphs'>[-10.98; -6.82]</text>
+<text x='592.99' y='213.17' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='87.00px' lengthAdjust='spacingAndGlyphs'>[-12.40; -8.40]</text>
+<text x='648.63' y='126.77' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='47.94px' lengthAdjust='spacingAndGlyphs'>Weight</text>
+<text x='648.63' y='241.97' text-anchor='end' style='font-size: 12.00px; font-weight: bold; font-family: "DejaVu Sans";' textLength='49.97px' lengthAdjust='spacingAndGlyphs'>100.0%</text>
+<text x='648.63' y='155.57' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.14px' lengthAdjust='spacingAndGlyphs'>20.1%</text>
+<text x='648.63' y='169.97' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.14px' lengthAdjust='spacingAndGlyphs'>19.3%</text>
+<text x='648.63' y='184.37' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.14px' lengthAdjust='spacingAndGlyphs'>22.0%</text>
+<text x='648.63' y='198.77' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.14px' lengthAdjust='spacingAndGlyphs'>18.6%</text>
+<text x='648.63' y='213.17' text-anchor='end' style='font-size: 12.00px; font-family: "DejaVu Sans";' textLength='38.14px' lengthAdjust='spacingAndGlyphs'>20.1%</text>
+</g>
+</svg></div></div></div><div class="fig-note">📌 森林图头条菱形为<strong>随机效应（REML）</strong>合并估计，与上方"合并效应量"卡片口径一致；固定效应估计不单独显示。</div>
+<div class="group"><h3><span class="ico">🎯</span>合并效应</h3><div class="kv"><div class="k">estimate</div><div class="v">-10.5474</div><div class="k">ci_low</div><div class="v">-11.4572</div><div class="k">ci_high</div><div class="v">-9.6377</div><div class="k">z</div><div class="v">None</div><div class="k">p</div><div class="v">2.6288e-114</div><div class="k">unit</div><div class="v">raw</div><div class="k">pi_low</div><div class="v">-11.9427</div><div class="k">pi_high</div><div class="v">-9.1522</div></div></div><div class="group"><h3><span class="ico">📐</span>异质性</h3><div class="kv"><div class="k">I2</div><div class="v">0.04</div><div class="k">tau2</div><div class="v">0.0371</div><div class="k">H2</div><div class="v">1.0206</div><div class="k">Q</div><div class="v">4.1667</div><div class="k">Q_p</div><div class="v">0.3839</div></div></div><div class="group"><h3><span class="ico">⚖️</span>发表偏倚</h3><div class="kv"><div class="k">egger_p</div><div class="v">0.0652</div><div class="k">begg_p</div><div class="v">0.0833</div></div></div><div class="group"><h3><span class="ico">✅</span>质量评估</h3><span class="badge warn"><span class="dot"></span>需注意</span><div class="kv checks-kv"><div class="k"><span class="cdot ok"></span>k=5 OK</div><div class="v ok">通过</div><div class="k"><span class="cdot ok"></span>I2=0.0% OK</div><div class="v ok">通过</div><div class="k"><span class="cdot warn"></span>Trim-and-fill recommended (k&gt;=5)</div><div class="v warn">需注意</div></div></div><div class="group"><h3><span class="ico">📋</span>分析概要</h3><div class="kv"><div class="k">k</div><div class="v">5</div><div class="k">model</div><div class="v">random</div><div class="k">sm</div><div class="v">MD</div></div></div>
+<details class="repro"><summary><span>可复现 R 脚本</span><span class="copy-btn">复制</span></summary><div class="body"><div class="meta">R R version 4.6.1 (2026-06-24) · meta 8.5.0；metafor 5.0.1；netmeta 3.6.1；bayesmeta 3.5；dosresmeta 2.2.0；mada 0.5.12；robumeta 2.1；clubSandwich 0.7.0；ggplot2 4.0.3；svglite 2.2.2；forestploter 1.1.4；jsonlite 2.0.0；dplyr 1.2.1；scales 1.4.0</div><pre><code><span class="c"># ==== 可复现 R 脚本（coze meta-analysis 引擎自动生成 2026-10-27）====</span>
+<span class="c"># task: pairwise_meta | 模型: REML | 效应量: MD</span>
+<span class="f">suppressMessages</span>(<span class="f">library</span>(meta));
+<span class="f">suppressMessages</span>(<span class="f">library</span>(metafor));
+<span class="f">suppressMessages</span>(<span class="f">library</span>(netmeta))
+df &lt;- <span class="f">structure</span>(<span class="f">list</span>(study = <span class="f">c</span>(<span class="s">&quot;ARB_01&quot;</span>, <span class="s">&quot;ARB_02&quot;</span>, <span class="s">&quot;ARB_03&quot;</span>, <span class="s">&quot;ARB_04&quot;</span>, <span class="s">&quot;ARB_05&quot;</span>),
+    mean_exp = <span class="f">c</span>(-<span class="n">14.2</span>, -<span class="n">12.8</span>, -<span class="n">15.5</span>, -<span class="n">10.9</span>, -<span class="n">13.3</span>),
+    sd_exp = <span class="f">c</span>(<span class="n">8.1</span>, <span class="n">7.4</span>, <span class="n">9</span>, <span class="n">6.8</span>, <span class="n">8.6</span>),
+    n_exp = <span class="f">c</span>(120L, 95L, 160L, 78L, 134L),
+    mean_ctrl = <span class="f">c</span>(-<span class="n">3.1</span>, -<span class="n">2.4</span>, -<span class="n">3.8</span>, -<span class="n">2</span>, -<span class="n">2.9</span>),
+    sd_ctrl = <span class="f">c</span>(<span class="n">7.6</span>, <span class="n">7</span>, <span class="n">8.3</span>, <span class="n">6.5</span>, <span class="n">8</span>),
+    n_ctrl = <span class="f">c</span>(118L, 97L, 158L, 80L, 132L),
+    year = <span class="f">c</span>(2016L, 2018L, 2020L, 2022L, 2023L)),
+  row.names = <span class="f">c</span>(NA, -5L),
+  class = <span class="s">&quot;data.frame&quot;</span>)
+fit &lt;- meta::<span class="f">metacont</span>(mean.e = df$mean_exp,
+  sd.e = df$sd_exp,
+  n.e = df$n_exp,
+  mean.c = df$mean_ctrl,
+  sd.c = df$sd_ctrl,
+  n.c = df$n_ctrl,
+  sm = <span class="s">&#x27;MD&#x27;</span>,
+  method.tau = <span class="s">&#x27;REML&#x27;</span>,
+  common = TRUE,
+  random = TRUE,
+  studlab = df$study)
+<span class="f">cat</span>(<span class="s">&quot;R:&quot;</span>, R.version.string, <span class="s">&quot;\n&quot;</span>);
+<span class="f">print</span>(<span class="f">vapply</span>(<span class="f">c</span>(<span class="s">&quot;meta&quot;</span>,<span class="s">&quot;metafor&quot;</span>,<span class="s">&quot;netmeta&quot;</span>,<span class="s">&quot;bayesmeta&quot;</span>,<span class="s">&quot;dosresmeta&quot;</span>,<span class="s">&quot;mada&quot;</span>,<span class="s">&quot;robumeta&quot;</span>,<span class="s">&quot;clubSandwich&quot;</span>,<span class="s">&quot;ggplot2&quot;</span>,<span class="s">&quot;svglite&quot;</span>,<span class="s">&quot;forestploter&quot;</span>,<span class="s">&quot;jsonlite&quot;</span>,<span class="s">&quot;dplyr&quot;</span>,<span class="s">&quot;scales&quot;</span>), <span class="f">function</span>(p) <span class="f">if</span>(<span class="f">requireNamespace</span>(p, quietly=TRUE)) <span class="f">as.character</span>(<span class="f">packageVersion</span>(p)) else NA_character_, <span class="f">character</span>(<span class="n">1</span>)))
+</code></pre></div></details>
+</main>
+<footer>由 meta-analysis 技能生成 · 图形为内联 SVG（可缩放/检查）· R 脚本可本地复现</footer>
+<script>
+function copyR(btn){
+  var pre=btn.closest('details').querySelector('pre');
+  navigator.clipboard.writeText(pre.innerText).then(function(){
+    var t=btn.textContent;btn.textContent='已复制 ✓';setTimeout(function(){btn.textContent=t;},1500);
+  });
+}
+</script>
+</body></html>

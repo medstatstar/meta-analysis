@@ -3,7 +3,7 @@
 
 设计约束（对齐 contracts/pipeline_stage/v1.0.0/SPEC.md §9 / 架构终态原则 2026-09-01）：
 
-- **coze = 唯一计算真相源**：B1 计算经 coze_client.run_stage 发往 ct-meta2 R 引擎（23 图/NMA/TSA）。
+- **coze = 唯一计算真相源**：B1 计算经 coze_client.run_stage 发往 ct-meta R 引擎（23 图/NMA/TSA）。
   本地不保留独立计算引擎；coze 未授权/失败 → 返回结构化错误，绝不回退本地（ct-base §5 授权门控）。
 - **本地仅编排 + 收发**：本模块构造信封、调用 run_stage、消费返回 stats、驱动 B1→B2→B3→B4 阶段
   序列与 HITL 软停靠/红线闸。B1 的 pairwise 由 coze 产出，stats 经 _coze_stats_to_pairwise 映射为
@@ -347,13 +347,14 @@ def b1_nma_r(network_studies, effect_measure="OR", reference=None):
         return {"status": "error", "reason": f"{type(e).__name__}: {e}"}
 
 
-def _norm_b1_rows(studies):
+def _norm_b1_rows(studies, effect_measure="OR"):
     """A4/抽取产出的 ai/bi/ci/di（事件/非事件，pdf_extractor 原生） → R 引擎 metabin 约定
     event_exp/n_exp/event_ctrl/n_ctrl（事件/总数）。
 
     - 已含 event_exp/n_exp/event_ctrl/n_ctrl 的行原样透传（兼容演示/手动数据路径）。
     - 形如 TE/seTE 的预计算行原样透传（R 引擎单独处理）。
     - 仅含 ai/bi/ci/di 的行做换算：event_exp=ai, n_exp=ai+bi, event_ctrl=ci, n_ctrl=ci+di。
+    - 含 mean_exp/sd_exp/n_exp/mean_ctrl/sd_ctrl/n_ctrl 的行（连续结局）：原样透传，R 引擎按效应量类型（MD/SMD）走 metacont。
     幂等：重复调用不会重复换算（一旦已含 event_exp 即透传）。
     """
     out = []
@@ -362,6 +363,10 @@ def _norm_b1_rows(studies):
             out.append(s)
             continue
         if all(k in s for k in ("event_exp", "n_exp", "event_ctrl", "n_ctrl")):
+            out.append(s)
+            continue
+        if all(k in s for k in ("mean_exp", "sd_exp", "n_exp", "mean_ctrl", "sd_ctrl", "n_ctrl")):
+            # 连续结局（MD / SMD）：R 引擎直接消费 mean/sd/n，无需换算
             out.append(s)
             continue
         if all(k in s for k in ("ai", "bi", "ci", "di")):
@@ -394,7 +399,10 @@ def _build_b1_coze_env(studies, effect_measure):
         # B1 实际从未成功发出，合并计算静默落空（B 块容错继续，表面看流程照常走到 B4）。
         "data": {"rows": _norm_b1_rows(studies)},
         "params": {"effect_measure": effect_measure},
-        "figure": {},
+        # 2026-10-27 多图默认：figure 传空 {} 时 R 端 plots 为空 → 默认只画 1 张森林图。
+        # 改为显式请求 forest + funnel（发表偏倚标配图）；labbe/baujat 等仍按需显式传。
+        # R 端非二分类自动跳过 labbe、DTA 自动映射 SROC，多请求不会报错。
+        "figure": {"plots": ["forest", "funnel"]},
         "contract_version": cc.CONTRACT_VERSION,
         "schema": cc.STAGE_SCHEMA_ID,
         "pipeline_id": f"blkB-{uuid.uuid4().hex[:8]}",
@@ -456,11 +464,92 @@ def _coze_stats_to_pairwise(stats, effect_measure):
     }
 
 
+def _extract_coze_figures(resp):
+    """从 coze 响应中提取 SVG 森林图等图形。"""
+    if not isinstance(resp, dict):
+        return []
+    figures = resp.get("figures")
+    if not isinstance(figures, list):
+        figures = None
+    if figures is None:
+        sr = resp.get("stage_result")
+        if isinstance(sr, dict):
+            res = sr.get("result")
+            if isinstance(res, dict):
+                figures = res.get("figures")
+    if not isinstance(figures, list):
+        return []
+    out = []
+    for f in figures:
+        if not isinstance(f, dict):
+            continue
+        svg = f.get("svg") or f.get("content") or f.get("image") or ""
+        if not svg:
+            continue
+        title = f.get("title") or f.get("caption") or _FIGURE_TITLE_MAP.get(f.get("type"), "图形")
+        out.append({"title": title, "svg": svg, "type": f.get("type", "")})
+    return out
+
+
+_FIGURE_TITLE_MAP = {
+    "forest": "森林图 (Forest Plot)",
+    "funnel": "漏斗图 (Funnel Plot)",
+    "bubble": "气泡图 (Bubble Plot)",
+    "nma_network": "NMA 网络图",
+    "sucra": "SUCRA 排名图",
+    "radar": "GRADE 雷达图",
+    "heatmap": "异质性热力图",
+    "galbraith": "Galbraith 图(星状图)",
+    "labbe": "L'Abbe 图",
+    "influence": "影响分析图",
+    "cumulative": "累积 meta 分析图",
+    "prediction": "预测区间图",
+}
+
+
+def _extract_error_notes(resp):
+    """从 coze 错误响应中提取真实错误信息。"""
+    if not isinstance(resp, dict):
+        return []
+    notes = []
+    if resp.get("status") == "error":
+        err = resp.get("error") or resp.get("message") or resp.get("detail")
+        if isinstance(err, dict):
+            notes.append(err.get("message") or err.get("detail") or str(err))
+        elif err:
+            notes.append(str(err))
+        # coze R 引擎常把具体错误放在 notes 字段（如 "Missing required columns: ..."）
+        if isinstance(resp.get("notes"), str) and resp["notes"]:
+            notes.append(resp["notes"])
+        elif isinstance(resp.get("notes"), list):
+            notes.extend([n for n in resp["notes"] if n])
+    sr = resp.get("stage_result")
+    if isinstance(sr, dict):
+        if sr.get("status") == "error":
+            err = sr.get("error") or sr.get("message")
+            if isinstance(err, dict):
+                notes.append(err.get("message") or err.get("detail") or str(err))
+            elif err:
+                notes.append(str(err))
+            if isinstance(sr.get("notes"), str) and sr["notes"]:
+                notes.append(sr["notes"])
+        inner = sr.get("result")
+        if isinstance(inner, dict) and inner.get("status") == "error":
+            err = inner.get("error") or inner.get("message")
+            if isinstance(err, dict):
+                notes.append(err.get("message") or err.get("detail") or str(err))
+            elif err:
+                notes.append(str(err))
+            if isinstance(inner.get("notes"), str) and inner["notes"]:
+                notes.append(inner["notes"])
+    return [n for n in notes if n]
+
+
 def b1_meta_analysis(studies, effect_measure="OR", engine="coze", nma=False,
                      network_studies=None, nma_reference=None):
     """B1 双范式 meta 分析。
 
-    - 默认 engine="coze"：B1 计算经 coze_client.run_stage 发往 ct-meta2 R 引擎（唯一计算真相源），
+    - 默认 engine="coze"：B1 计算经 coze_client.run_stage 发往 ct-meta R 引擎（唯一计算真相源），
       stats 经 _coze_stats_to_pairwise 映射为本地 pairwise 形状，供 B2/B3/B4 原样消费。
       coze 未授权 / 失败 → 返回结构化错误，绝不回退本地（ct-base §5 授权门控；原则：本地不保留计算引擎）。
     - engine="local"（显式、仅回归 / 调试用，非运行路径）：走 b1_pairwise_python 本地 numpy 确定性实现。
@@ -489,11 +578,14 @@ def b1_meta_analysis(studies, effect_measure="OR", engine="coze", nma=False,
         resp = cc.run_stage(env)
         stats = _extract_coze_stats(resp)
         if stats is None:
+            error_notes = _extract_error_notes(resp) or ["coze 响应缺 stats"]
             return {"effect_measure": effect_measure,
-                    "pairwise": {"k": 0, "error": "coze 未返回 stats"},
+                    "pairwise": {"k": 0, "error": error_notes[0] if error_notes else "coze 未返回 stats"},
                     "nma": {"status": "skipped", "reason": "B1 coze 无 stats"},
-                    "notes": ["coze 响应缺 stats"], "_source": "coze_error"}
+                    "notes": error_notes, "_source": "coze_error",
+                    "_figures": [], "_error": error_notes}
         pairwise = _coze_stats_to_pairwise(stats, effect_measure)
+        figures = _extract_coze_figures(resp)
         if pairwise.get("k", 0) == 0:
             notes.append("pairwise：coze 返回无可计算研究。")
         nma_res = _nma_branch(nma, network_studies, effect_measure, notes, nma_reference)
@@ -501,21 +593,45 @@ def b1_meta_analysis(studies, effect_measure="OR", engine="coze", nma=False,
         # 供工作台前端像对话模式那样展示「修饰和解读后的结果」。复用 run_analysis.py 同套引擎；
         # 失败不影响主结果。
         # 2026-09-22：改走统一出口 _interp_quality_from_stats（local / demo 同源，见其 docstring）。
-        _interpretation, _quality_advice = _interp_quality_from_stats(
-            stats, "pairwise_meta", {"sm": effect_measure})
-        return {"effect_measure": effect_measure, "pairwise": pairwise,
-                "nma": nma_res, "notes": notes, "_source": "coze",
-                "_interpretation": _interpretation,
-                "_quality_advice": _quality_advice}
+        # 2026-10-27 幂等守卫：coze 统一封装后已在服务端回传 _interpretation /
+        # _quality_advice / 极端警告 / 红灯警告 —— 直接透传（单一真相源），
+        # 仅在 coze 未回传（旧版部署）时本地重算兜底，保证两条路径口径一致。
+        # 注意 parse_stage_response 把 coze 富集字段留在 resp["result"] 内层
+        # （顶层白名单只拷 status/stats/figures/warnings/notes/task/repro）。
+        _inner = resp.get("result") if isinstance(resp, dict) else None
+        if not isinstance(_inner, dict):
+            _inner = {}
+        _interpretation = resp.get("_interpretation") or _inner.get("_interpretation")
+        _quality_advice = resp.get("_quality_advice") or _inner.get("_quality_advice")
+        if _interpretation is None or _quality_advice is None:
+            _li, _lq = _interp_quality_from_stats(
+                stats, "pairwise_meta", {"sm": effect_measure})
+            if _interpretation is None:
+                _interpretation = _li
+            if _quality_advice is None:
+                _quality_advice = _lq
+        _b1_out = {"effect_measure": effect_measure, "pairwise": pairwise,
+                   "nma": nma_res, "notes": notes, "_source": "coze",
+                   "_interpretation": _interpretation,
+                   "_quality_advice": _quality_advice,
+                   "_figures": figures, "_error": []}
+        for _k in ("_effect_size_extreme_warning", "_quality_gate_red_warning"):
+            _v = resp.get(_k) or _inner.get(_k)
+            if _v:
+                _b1_out[_k] = _v
+        return _b1_out
     except cc.AuthRequiredError as e:
         return {"effect_measure": effect_measure, "pairwise": {"k": 0, "error": "auth_blocked"},
                 "nma": {"status": "skipped", "reason": "auth_blocked"},
                 "notes": [f"未授权出站（ct-base §5 授权门控）：{e}"],
-                "_source": "auth_blocked", "_auth_required": True}
+                "_source": "auth_blocked", "_auth_required": True,
+                "_figures": [], "_error": [f"未授权：{e}"]}
     except Exception as e:
+        err_msg = f"{type(e).__name__}: {e}"
         return {"effect_measure": effect_measure, "pairwise": {"k": 0, "error": f"coze_error: {e}"},
                 "nma": {"status": "skipped", "reason": "coze_error"},
-                "notes": [f"coze 调用失败：{type(e).__name__}: {e}"], "_source": "coze_error"}
+                "notes": [f"coze 调用失败：{err_msg}"], "_source": "coze_error",
+                "_figures": [], "_error": [err_msg]}
 
 
 def _nma_branch(nma, network_studies, effect_measure, notes, reference=None):
@@ -939,10 +1055,18 @@ def run_block_b(studies, effect_measure="OR", nma=False, network_studies=None,
     # B1（coze 计算；engine="coze" 为唯一运行路径，绝不回退本地）
     b1 = b1_meta_analysis(studies, effect_measure, engine="coze", nma=nma,
                           network_studies=network_studies)
-    s1 = _mk_stage(B1, 0, "completed", {"pairwise": b1["pairwise"], "nma": b1["nma"],
-                                         "effect_measure": effect_measure,
-                                         "_interpretation": b1.get("_interpretation"),
-                                         "_quality_advice": b1.get("_quality_advice")},
+    # 2026-10-27：极端效应 / 质量门红灯警告随 B1 stage_result 下发（此前仅对话态
+    # run_analysis 有，工作台前端无消费——两条路径呈现不统一）。缺省不产键。
+    _b1_sr = {"pairwise": b1["pairwise"], "nma": b1["nma"],
+              "effect_measure": effect_measure,
+              "_interpretation": b1.get("_interpretation"),
+              "_quality_advice": b1.get("_quality_advice"),
+              "_figures": b1.get("_figures", []),
+              "_error": b1.get("_error", [])}
+    for _wk in ("_effect_size_extreme_warning", "_quality_gate_red_warning"):
+        if b1.get(_wk):
+            _b1_sr[_wk] = b1[_wk]
+    s1 = _mk_stage(B1, 0, "completed", _b1_sr,
                    # 2026-09-17：B1 也会软停（DEFAULT_PAUSE_AT 含 B1.meta_analysis）——
                    # 停靠时前端取 nha.prompt 作为提示语，故必须给出（此前为 None → 空提示）。
                    {"type": "review", "required": True, "gate": "none",

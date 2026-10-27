@@ -18,7 +18,9 @@ Europe PMC 只索引**英文摘要**；把中文主题原样送去检索几乎�
 - **零第三方依赖**：只用标准库（urllib / json / hashlib / os / re / time）。
 - **不臆造、可核对**：翻译结果回传给前端展示，用户可改；检索式随之可见。
 - **失败即降级**：任何异常（无端点 / 超时 / 限流 / 输出不像英文）一律返回 None，
-  由调用方回退到「显式索要英文检索词」路径，绝不抛错中断流程。
+  由调用方回退到「显式索要英文检索词」路径，绝不抛错中断流程。失败原因经
+  `reason_out`（可选 dict）带出，供 notice 给出具体诊断（2026-10-20 用户反馈：
+  笼统的「未能自动翻译」无法区分是网络抖动、端点未配还是主题超长）。
 - **缓存**：同一主题只翻一次（进程内 + 磁盘），省 token、避开限流。
 
 端点解析优先级：META_WB_TRANSLATE_* / LLM_* 环境变量 → models.json（按候选梯队）→ 无。
@@ -239,16 +241,30 @@ def _call(base, key, model, text, timeout=_TIMEOUT, system=None, raw=False):
     return content if raw else _strip_noise(content)
 
 
-def translate_to_english(text, timeout=_TIMEOUT, use_cache=True):
+def translate_to_english(text, timeout=_TIMEOUT, use_cache=True, reason_out=None):
     """把中文研究主题翻成英文检索式。
+
+    Args:
+        reason_out: 可选 dict。失败时写入 {"reason": "..."} 人类可读原因
+            （输入被拒 / 无候选端点 / 全部候选失败 / 输出不合规）—— 调用方
+            （literature_probe 的 notice）据此给出**具体**诊断，而不是笼统的
+            「未能自动翻译」。成功时不写。默认 None = 完全旧行为。
 
     Returns:
         str  英文检索式（已清洗、已校验）
         None 无可用端点 / 全部候选失败 / 输出不合规 → 调用方降级（索要英文检索词）
     """
+    def _fail(reason):
+        if isinstance(reason_out, dict):
+            reason_out["reason"] = reason
+        return None
+
     t = (text or "").strip()
     if not t or not has_cjk(t) or len(t) > _MAX_INPUT:
-        return None
+        return _fail(
+            "主题为空或不含中文，无需翻译" if (t and not has_cjk(t)) else
+            ("主题为空" if not t else
+             "主题过长（%d 字符 > %d 上限，属异常输入，未送译）" % (len(t), _MAX_INPUT)))
 
     ck = _cache_key(t)
     if use_cache:
@@ -260,10 +276,16 @@ def translate_to_english(text, timeout=_TIMEOUT, use_cache=True):
             _MEM_CACHE[ck] = hit["en"]
             return hit["en"]
 
-    for base, key, model in _candidates():
+    cands = _candidates()
+    if not cands:
+        return _fail("无可用翻译端点（环境变量 / models.json / LongCat 兜底均未配置）")
+
+    errors = []          # [(model, "ExcType: msg" 或 "输出不合规"), ...] —— 供诊断
+    for base, key, model in cands:
         try:
             out = _call(base, key, model, t, timeout=timeout)
-        except Exception:  # noqa: BLE001 - 逐个候选降级，绝不抛错
+        except Exception as e:  # noqa: BLE001 - 逐个候选降级，绝不抛错
+            errors.append((model, "%s: %s" % (type(e).__name__, str(e)[:80])))
             continue
         if _looks_english(out):
             _MEM_CACHE[ck] = out
@@ -272,7 +294,9 @@ def translate_to_english(text, timeout=_TIMEOUT, use_cache=True):
                 cache[ck] = {"en": out, "model": model, "ts": int(time.time())}
                 _save_cache(cache)
             return out
-    return None
+        errors.append((model, "输出不合规：%r" % (out or "")[:60]))
+    _tail = "；".join("%s → %s" % (m, e) for m, e in errors[-3:])
+    return _fail("全部 %d 个翻译候选失败（%s）" % (len(errors), _tail))
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +442,93 @@ def translate_ui_texts(texts, timeout=_TIMEOUT, use_cache=True):
                     "en": en, "model": used, "ts": int(time.time())}
     if use_cache and pending:
         _save_cache(cache)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# PICOS 五维翻译（2026-10-25）
+#
+# 背景：Meta 分析选题本质是英文检索，但工作台输入是中文。PICOS 此前一路中文：
+# 进了四维评分、进了 A1 报告表格、还被拼进 A2 检索主题 —— 检索库里混中文必然失配。
+# 这里给「翻译确认」环节提供 PICOS 英文化能力，用户确认后再用于检索。
+#
+# 与 translate_ui_texts 的区别：那个用「软件界面本地化」prompt，翻 PICOS 内容会
+# 得到 UI 味道的措辞（如 "oil supplement"）；这里用**医学检索**专用 prompt，
+# 要求 MeSH 风格、短句、保留缩写与数值 —— 因为它最终要拼进检索式。
+# ---------------------------------------------------------------------------
+_PICOS_SYS = (
+    "You are a medical research librarian building a systematic-review search strategy. "
+    "You receive a JSON object whose keys are PICOS dimensions (P population, I intervention, "
+    "C comparator, O outcome, S study design) and whose values are Simplified Chinese.\n"
+    "Translate each value into concise, standard English as used in biomedical literature.\n"
+    "Rules:\n"
+    "  - Keep numbers, units, drug names and abbreviations unchanged "
+    "(RCT, HAMD, BDI, OR, RR, SMD, DHA, EPA, I²).\n"
+    "  - Prefer standard MeSH-style phrasing (e.g. 'major depressive disorder' not 'depression illness').\n"
+    "  - Keep each value SHORT — it will be embedded in a search query, not shown as prose.\n"
+    "  - Values already in English: return them unchanged.\n"
+    "  - Do not add explanations, do not merge or split keys.\n"
+    "Return ONLY the JSON object with the SAME keys and translated values. "
+    "No prose, no code fences."
+)
+_PICOS_KEY = "picos:"      # 缓存键命名空间：与主题检索式 / UI 文案分开
+
+
+def translate_picos(picos, timeout=_TIMEOUT, use_cache=True):
+    """PICOS 五维 zh → en，键值一一对应。
+
+    Args:
+        picos: {"P": "...", "I": "...", ...}，可含英文值（无 CJK 的原样返回，不占额度）。
+
+    Returns:
+        dict{维度: 英文}。只含「有值」的维度；某维翻译失败则**不出现在结果里**
+        （调用方据此回落中文原文并提示，绝不静默用半翻的串去检索）。
+    """
+    out = {}
+    if not isinstance(picos, dict):
+        return out
+    keys = [k for k in ("P", "I", "C", "O", "S")
+            if isinstance(picos.get(k), str) and picos[k].strip()]
+    if not keys:
+        return out
+
+    cache = _load_cache() if use_cache else {}
+    todo = []
+    for k in keys:
+        v = picos[k].strip()
+        if not has_cjk(v):
+            out[k] = v                     # 已是英文 → 原样
+            continue
+        rec = cache.get(_PICOS_KEY + _cache_key(v))
+        if use_cache and isinstance(rec, dict) and isinstance(rec.get("en"), str):
+            out[k] = rec["en"]
+        else:
+            todo.append((k, v))
+    if not todo:
+        return out
+
+    user = json.dumps({k: v for k, v in todo}, ensure_ascii=False)
+    for base, key, model in _candidates():
+        try:
+            raw = _call(base, key, model, user, timeout=timeout,
+                        system=_PICOS_SYS, raw=True)
+        except Exception:  # noqa: BLE001 - 逐个候选降级，绝不抛错
+            continue
+        got = _loads_json_obj(raw)
+        if not got:
+            continue                   # 解析失败 → 换候选
+        changed = False
+        for k, v in todo:
+            en = got.get(k)
+            if isinstance(en, str) and en.strip() and not has_cjk(en):
+                out[k] = en.strip()
+                changed = True
+                if use_cache:
+                    cache[_PICOS_KEY + _cache_key(v)] = {
+                        "en": en.strip(), "model": model, "ts": int(time.time())}
+        if changed and use_cache:
+            _save_cache(cache)
+        break
     return out
 
 

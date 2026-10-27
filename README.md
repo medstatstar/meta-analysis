@@ -28,7 +28,7 @@ meta-analysis is part of the CT-series skill family, built for three groups:
 
 meta-analysis is a **conversational skill**: you simply tell the assistant what you want in natural language — no commands, no parameter names to remember. As a WorkBuddy skill it **auto-loads with no extra installation**.
 
-Below are 7 real conversational examples — **one per category** in the Scenario Index (§2): ① systematic-review workflow, ② pairwise meta, ③ heterogeneity & bias, ④ advanced models, ⑤ effect-size conversion, ⑥ visualization, ⑦ study quality. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
+Below are 8 real conversational examples — **one per category** in the Scenario Index (§2): ① systematic-review workflow, ② pairwise meta, ③ heterogeneity & bias, ④ advanced models, ⑤ effect-size conversion, ⑥ visualization, ⑦ study quality, ⑧ sample size & power. Examples 1 and 8 are the two **upstream gates** — topic selection before you start, and sample-size planning before you commit. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
 
 ### Example 1 · ① Systematic review workflow: topic selection
 **You say:**
@@ -121,11 +121,28 @@ Below are 7 real conversational examples — **one per category** in the Scenari
 **Assistant replies (sketch):**
 > ✅ RoB 2.0 assessment complete. Please provide the risk-of-bias judgment (Low / Some concerns / High) for each study — I'll generate the traffic-light plot and stacked summary bar. [SVG output]
 
+### Example 8 · ⑧ Sample size & power: how many studies does this meta need
+**You say:**
+> I'm planning a meta on SGLT2 inhibitors for renoprotection in CKD. Expected effect SMD ≈ 0.5, about 50 patients per study, heterogeneity assumed at I² = 50% — roughly how many studies do I need for 80% power? And if I can only include 8 studies, what's the power?
+
+**Assistant replies (sketch):**
+> ✅ Computed with **random-effects meta planning** (Hedges & Pigott, 2001):
+>
+> **Required number of studies** (SMD = 0.5, N = 50 per study, I² = 50%, α = 0.05 two-sided, target power 80%)
+> - **Required K ≈ 3 studies**
+>
+> **Power back-solve** (fix K = 8, everything else unchanged)
+> - **Power ≈ 0.9985** — 8 studies are quite generous for this effect size
+>
+> Comes with a planning figure (SVG) and reproducible R code — say **"give me the R code for the sample-size estimate"** to get it.
+
+**📌 Note:** This is the newly added **sample-size estimation** capability, computed by the ct-samplesize coze R engine (`meta_planning` test; Hedges & Pigott 2001 random-effects model). Two question forms are supported — **leave K blank to solve for the required number of studies**, or **fill K to solve for power** (switches automatically). Effect types cover SMD / OR / RR / correlation / paired difference / cluster-randomized (cluster needs ICC and cluster size m). A **web UI** is also available: open the workbench → click the **"Sample Size"** tab on the left → pick the effect type and fill in parameters → compute. Inputs and results persist when switching tabs.
+
 ---
 
 ## 2. What You Can Do — Scenario Index
 
-Categories are grouped by **workflow stage first, then analysis purpose** (7 below). The systematic-review workflow comes first as the upstream gate, followed by six analysis-purpose categories. Each row gives the typical **clinical scenario** and a line you can **copy verbatim** under "Try saying". The same test may be reached from multiple entry points.
+Categories are grouped by **workflow stage first, then analysis purpose** (8 below). The systematic-review workflow comes first as the upstream gate, followed by seven analysis-purpose categories. Each row gives the typical **clinical scenario** and a line you can **copy verbatim** under "Try saying". The same test may be reached from multiple entry points.
 
 > The underlying R packages (metafor / meta / netmeta …) are listed in Section 6 "Advanced Reference"; ordinary users don't need to care.
 
@@ -230,6 +247,16 @@ Categories are grouped by **workflow stage first, then analysis purpose** (7 bel
 | GRADE | "Do a GRADE evidence-quality assessment" |
 | CINeMA (network evidence) | "Assess the NMA with the CINeMA six domains" |
 | PRISMA checklist | "PRISMA checklist" |
+
+### ⑧ Sample Size & Power
+| Scenario | Try saying in chat |
+|:---|:---|
+| Required number of studies (K) | "Roughly how many studies does this meta need for 80% power" (leave K blank; solved by the random-effects model) |
+| Power back-solve | "Fix 8 studies — what's the power" (fill K to solve for power) |
+| Heterogeneity sensitivity | "Assume I² = 50% and compute the required K" / "Scan I² from 0% to 90% and see how K changes" |
+| All effect types | "OR = 1.5, 60 patients per study — how many studies do I need" (SMD/OR/RR/r/paired/cluster) |
+| Cluster-randomized design | "Cluster-randomized, ICC = 0.05, 30 per cluster — estimate the number of clusters needed" |
+| Reproducible code | "Give me the R code for the sample-size estimate" |
 
 ---
 

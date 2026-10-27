@@ -762,3 +762,61 @@ for _MSG_NAME in ("i18n_messages.json", "i18n_r_messages.json", "i18n_skill_mess
             _MESSAGES.update(json.load(_f))
     except (OSError, ValueError):
         pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CDISC Define-XML UI 术语对照（zh↔en，v1.3.0 接线）
+# ═══════════════════════════════════════════════════════════════════════════
+# 来源：CDISC 官方 define2-1-0.xsl 中文本地化版（MIT）提取的 72 条 UI 术语，
+# 落盘 references/cdisc_zh_terms.json。供双语合规报告 / Define-XML 审阅文案
+# 复用；未知词回退原文，文件缺失/损坏静默兜底（同外部词典合并纪律）。
+
+_CDISC_TERMS_CACHE = None
+
+
+def load_cdisc_terms():
+    """加载 CDISC UI 术语表（zh -> en dict），懒加载 + 进程内缓存。"""
+    global _CDISC_TERMS_CACHE
+    if _CDISC_TERMS_CACHE is None:
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "references", "cdisc_zh_terms.json")
+        try:
+            with open(p, encoding="utf-8") as f:
+                _CDISC_TERMS_CACHE = {t["zh"]: t["en"]
+                                      for t in json.load(f).get("terms", [])}
+        except (OSError, ValueError, KeyError, TypeError):
+            _CDISC_TERMS_CACHE = {}
+    return _CDISC_TERMS_CACHE
+
+
+def t_cdisc(zh_text, default=None):
+    """CDISC UI 中文术语 -> 英文对照；未知词返回 default（缺省原文）。"""
+    return load_cdisc_terms().get(zh_text,
+                                  default if default is not None else zh_text)
+
+
+def cdisc_en2zh(en_text, default=None):
+    """英文 -> 中文反向对照（供英文产物本地化为中文审阅文案）。"""
+    for zh, en in load_cdisc_terms().items():
+        if en == en_text:
+            return zh
+    return default if default is not None else en_text
+
+
+if __name__ == "__main__":
+    import argparse
+    _ap = argparse.ArgumentParser(
+        description="ct- i18n utilities（语言策略 + CDISC 术语对照）")
+    _ap.add_argument("--cdisc-lookup", nargs="+", metavar="ZH",
+                     help="CDISC UI 中文术语 -> 英文对照（可多个）")
+    _ap.add_argument("--cdisc-reverse", nargs="+", metavar="EN",
+                     help="英文术语 -> 中文对照（可多个）")
+    _a = _ap.parse_args()
+    if _a.cdisc_lookup:
+        for _z in _a.cdisc_lookup:
+            print(f"{_z} -> {t_cdisc(_z)}")
+    if _a.cdisc_reverse:
+        for _e in _a.cdisc_reverse:
+            print(f"{_e} -> {cdisc_en2zh(_e)}")
+    if not (_a.cdisc_lookup or _a.cdisc_reverse):
+        _ap.print_help()

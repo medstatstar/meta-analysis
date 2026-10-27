@@ -141,3 +141,17 @@ adapters/coze/.venv/
 # publish_inject 注入清单（本地元信息，不入库）
 .ctbase_injected.json
 adapters/wb_http_probe.py
+
+# ── F20 对齐补齐（2026-10-13 周检）：归档目录不进发布包 ──
+_archive/
+
+# ── F20 对齐补齐（2026-10-20 周检）：顶层工作台发布入口 / 契约目录 / 演示用例目录不进发布包 ──
+# main.py  = WorkBuddy sites 部署入口，依赖已排除的 adapters/workbench/
+# contracts/ = 契约文档（ct-base §16.7 红线：契约不随技能发布）
+# cases/     = 演示/测试会话用例（运行时生成，非技能通用资产）
+main.py
+contracts/
+cases/
+# ── 2026-10-27 内部测试资产（offline 校验器+复现分析）：纯测试用途，不随任何发布版本出去 ──
+scripts/offline_verify_meta.py
+references/repro_academic_kernel_ANALYSIS.md

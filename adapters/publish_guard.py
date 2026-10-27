@@ -8,6 +8,13 @@
 这是「禁止发布新版本」的权威检查点：每次发布动作前都应先跑本脚本 / 调
 assert_publish_allowed()，冻结时直接抛错或非零退出，绝不静默放行。
 
+门禁权威归属（2026-10-20 归一，审计 P1-6 / 开放问题 3）：
+  **ct-base 官方三闸链是发布唯一权威前置**（BASE.md §16 / docs/07-publish-
+  checklist.md）：clawhub_security_audit → shared_sync_check → publish_secret_scan
+  → publish_inject，已由 adapters/deploy_retest.py 的 g0_* 闸门编排（先于本技能
+  9 闸运行）。本脚本的 publish_freeze 只是**开发期叠加策略**（冻结时优先级更高：
+  连官方闸门都不应进入发布动作），不构成第二套技术门禁轨道。
+
 用法：
     python adapters/publish_guard.py            # 退出码 0=允许发布 / 2=冻结中
     # 或在 Python 中：

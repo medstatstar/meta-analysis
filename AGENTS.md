@@ -1,4 +1,4 @@
-# AGENTS.md — meta-analysis v2.20.1 (R-based Meta-Analysis Skill)
+# AGENTS.md — meta-analysis v2.20.2 (R-based Meta-Analysis Skill)
 
 > This skill is a published skill (A-tier equivalent). Its AGENTS.md is **English-only** (SKILL.md body + references + AGENTS.md are English-only for published skills). Compute is delegated to a coze workflow (coze-only); no local R engine is shipped or advertised.
 
@@ -68,6 +68,7 @@ The workbench is published as a WorkBuddy online app. **When re-publishing, alwa
   - **Vague**: unclear what user wants (e.g., "I need meta-analysis help") → grill-me style branch questions, 1–3 per round.
 - Menu structure mirrors level-1 (7 categories) → level-2 (sub-menus) from SKILL.md.
 - Non-exclusive menu entries per the global interaction-guidance rules.
+- **Framework alignment & pruning (2026-10-27)**: menu categories mirror the published workbench's five modules; entries without engine backing (ROBINS-I, RoB traffic-light plot, inconsistency heatmap, AI screening, PDF batch download, figure digitization, missing-data imputation) are removed — never offer them in chat (R engine returns `unknown_task`). **Manuscript/writing module (Block C + writing-advisor) is DISABLED in conversation** — workbench surface only; do not invoke `writing_advisor` (no `advise=True`). Detail → `references/interactive_menu.md` §2 banners.
 
 ### 7. Traceability (Grounding) / 溯源硬规则
 - All factual/assertive claims must cite source: specific `ref-*.md` section or official guideline.

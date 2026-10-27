@@ -1,0 +1,85 @@
+"""report — CODEX 风格 NMA 报告模板（模块 I）。借结构不借内容。
+
+拼接与 CODEX benchmark report 同构的产出：网络 + 传递性 + league table
++ SUCRA 排序 + 证据置信度声明。数据源为公开证据，不调用 CODEX 专有库。
+"""
+from __future__ import annotations
+
+from typing import Dict
+
+
+def render(results: Dict, net: Dict, trans: Dict, evidence_notes: str = "") -> str:
+    t = results.get("treatments", net.get("treatments", []))
+    out = [
+        "# NMA 基准报告 (CODEX-style, 公开证据)",
+        "",
+        "> 方法学对标 Certara CODEX；数据全部来自公开源（CT.gov / PubMed / 已发表荟萃），"
+        "不调用其专有库。",
+        "",
+        _net_to_md(net),
+        "",
+        _trans_to_md(trans),
+        "",
+        "## 相对效应 (League Table)",
+        "",
+        _league_to_md(results.get("league", {}), t),
+        "",
+        "## 干预排序 (SUCRA / P-score)",
+        "",
+        _sucra_to_md(results.get("sucra", {}), results.get("ranks", {})),
+        "",
+        "## 证据置信度声明",
+        "",
+        evidence_notes or (
+            "⚠️ 本分析基于公开策展证据，数据丰度 / QC 等级低于 CODEX 专有库；"
+            "效应量估计的置信区间应结合研究数量与网络结构审慎解读。"
+        ),
+        "",
+        "---",
+        "_红线：仅借鉴结构 / 方法；不爬 CODEX 13,500 研究、不搬运患者级数据、不冒充其 UI (BASE.md §9.1)。_",
+        "",
+    ]
+    return "\n".join(out)
+
+
+def _net_to_md(net: Dict) -> str:
+    try:
+        from . import network
+        return network.to_markdown(net)
+    except Exception:
+        return "### 治疗网络\n(网络信息缺失)"
+
+
+def _trans_to_md(trans: Dict) -> str:
+    try:
+        from . import transitivity
+        return transitivity.to_markdown(trans)
+    except Exception:
+        return "### 传递性\n(缺失)"
+
+
+def _league_to_md(league: Dict, treatments: List[str]) -> str:
+    if not league:
+        return "_（无 league 数据；走 dev R 引擎时由 netmeta::netleague 填充）_"
+    head = "| 干预 | " + " | ".join(treatments) + " |"
+    sep = "| --- | " + " | ".join(["---"] * len(treatments)) + " |"
+    rows = [head, sep]
+    for t1 in treatments:
+        cells = []
+        for t2 in treatments:
+            if t1 == t2:
+                cells.append("—")
+            else:
+                v = league.get(t1, {}).get(t2)
+                cells.append(str(v) if v is not None else "·")
+        rows.append(f"| {t1} | " + " | ".join(cells) + " |")
+    return "\n".join(rows)
+
+
+def _sucra_to_md(sucra: Dict, ranks: Dict) -> str:
+    if not sucra and not ranks:
+        return "_（无排序数据；走 dev R 引擎时由 netmeta::netrank 填充）_"
+    items = []
+    for t in sorted(sucra.keys(), key=lambda x: -float(sucra.get(x, 0))):
+        items.append(f"- **{t}**: SUCRA={float(sucra.get(t, 0)):.3f}  P-score={ranks.get(t)}")
+    return "\n".join(items)

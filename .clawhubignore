@@ -119,3 +119,14 @@ adapters/coze/.venv/
 # ── venv 目录（发布集排除，2026-10-09 检查补齐）──
 .venv/
 adapters/wb_http_probe.py
+
+# ── F20 对齐补齐（2026-10-13 周检）：归档目录不进发布包（与 .gitignore 同集）──
+_archive/
+
+# ── F20 对齐补齐（2026-10-20 周检）：与 .gitignore 同集 ──
+main.py
+contracts/
+cases/
+# ── 2026-10-27 内部测试资产（offline 校验器+复现分析）：纯测试用途，不随任何发布版本出去 ──
+scripts/offline_verify_meta.py
+references/repro_academic_kernel_ANALYSIS.md

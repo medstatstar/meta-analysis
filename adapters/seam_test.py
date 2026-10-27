@@ -109,8 +109,8 @@ def main():
 
         # 通过门控 + 有候选 → 下载（受 MAX_ATTEMPTS 配额约束）
         # 下载前先查统一缓存：已落盘且确为真 PDF 直接复用，绝不重复下载/覆盖。
-        cached = block_a._a4_cached_pdf(study, PDF_DIR)
-        pdf_path = cached or os.path.join(PDF_DIR, block_a._pdf_stem(study) + ".pdf")
+        cached = block_a._a4_cached_pdf(s, PDF_DIR)
+        pdf_path = cached or os.path.join(PDF_DIR, block_a._pdf_stem(s) + ".pdf")
         if cached:
             kind, ident = "cached", os.path.basename(cached)
             print(f"  [缓存] ♻ {title[:48]} → 复用 {ident}，跳过下载")

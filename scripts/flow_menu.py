@@ -390,7 +390,7 @@ def _a1_summary(sess, sr, nha, aw, lang):
         lines.append(("probe", " → ".join(str(b) for b in bits)))
     _scope_mode = L("scope_rev" if sr.get("include_reviews") else "scope_orig", lang)
     import block_a  # 延迟导入：避免启动时拉起整个块层
-    _srcs = sr.get("sources") or list(block_a.CORE_SOURCES)
+    _srcs = sr.get("sources") or list(block_a.DEFAULT_SOURCES)
     _src_str = "、".join(str(s) for s in _srcs) if _srcs else L("none", lang)
     lines.append(("scope", f"{_scope_mode} ｜ 数据源：{_src_str}"))
     return lines

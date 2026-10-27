@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>meta-analysis 报告 · pairwise_meta</title>
+<style>
+:root{
+  --bg:#eef1f6;--card:#ffffff;--card2:#f8fafc;--border:#e2e8f0;
+  --text:#0f172a;--muted:#64748b;--accent:#4f46e5;--accent2:#0ea5e9;
+  --ok:#16a34a;--warn:#d97706;--bad:#dc2626;--teal:#0F9B81;
+  --radius:14px;--shadow:0 1px 3px rgba(15,23,42,.08),0 1px 2px rgba(15,23,42,.04);
+  --shadow-hover:0 10px 28px rgba(15,23,42,.12);
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  /* 与 build_figure_widget 同名变量，确保内联 SVG 区块在独立文件里也能正确着色 */
+  --color-text-primary:#0f172a;--color-border-tertiary:#e2e8f0;--border-radius-md:10px;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:15px;line-height:1.6;}
+header{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;padding:22px 28px;}
+header h1{margin:0;font-size:21px;font-weight:700;letter-spacing:.01em;}
+header .meta{font-size:13px;opacity:.9;margin-top:5px;}
+main{max-width:1040px;margin:22px auto;padding:0 16px;display:flex;flex-direction:column;gap:18px;}
+@keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+main>*{animation:fade .35s ease both;}
+.hero{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;box-shadow:var(--shadow);}
+.hero .lead{font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;font-weight:600;}
+.hero .est{font-size:38px;font-weight:800;color:var(--text);margin:6px 0 2px;font-variant-numeric:tabular-nums;line-height:1.1;}
+.hero .est .ci{font-size:19px;color:var(--muted);font-weight:700;margin-left:6px;}
+.hero .est .sm{font-size:17px;color:var(--accent);font-weight:700;}
+.hero .sub{margin-top:8px;font-size:15px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.interp-card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:var(--radius);padding:16px 20px;box-shadow:var(--shadow);}
+.interp-header{font-size:15px;font-weight:700;color:var(--text);margin-bottom:10px;}
+.interp-conclusion{font-size:15px;line-height:1.7;color:var(--text);margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border);}
+.interp-section{margin-top:8px;}
+.interp-label{font-size:13px;font-weight:700;color:var(--muted);margin-bottom:4px;}
+.interp-section ul{margin:0;padding-left:18px;list-style:disc;}
+.interp-section li{font-size:14px;line-height:1.6;color:var(--text);margin-bottom:3px;}
+.interp-grade{display:inline-block;padding:2px 8px;border-radius:4px;background:#eef6f4;color:#0d6e5a;font-weight:700;font-size:12px;margin-right:6px;}
+.interp-overclaim{display:inline-block;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:700;font-size:12px;margin-right:6px;}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;font-size:13px;font-weight:700;}
+.badge.ok{background:#dcfce7;color:#166534;}
+.badge.warn{background:#fef3c7;color:#92400e;}
+.badge.bad{background:#fee2e2;color:#991b1b;}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:currentColor;}
+.figure-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px 16px;box-shadow:var(--shadow);transition:box-shadow .2s,transform .2s;}
+.figure-card:hover{box-shadow:var(--shadow-hover);transform:translateY(-2px);}
+.figure-card .cap{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;color:var(--text);margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.figure-card .cap .ico{font-size:16px;}
+.figure-card .svg-wrap{overflow-x:auto;}
+.fig-note{margin:10px 2px 0;padding:9px 13px;font-size:13px;line-height:1.6;color:#334155;background:#eef6f4;border:1px solid #bfe3da;border-radius:var(--radius);}
+.fig-note.warn{background:#fef6e7;border-color:#f3d28a;color:#8a5a00;}
+.group{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px 16px;box-shadow:var(--shadow);}
+.group h3{font-size:16px;margin:0 0 12px;display:flex;align-items:center;gap:8px;color:var(--text);}
+.group h3 .ico{font-size:16px;}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 16px;font-size:15px;}
+.kv .k{color:var(--muted);}
+.kv .v{font-weight:700;font-variant-numeric:tabular-nums;text-align:right;}
+.checks{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px;}
+.checks li{display:flex;align-items:flex-start;gap:8px;font-size:15px;}
+.checks .cdot{margin-top:5px;width:8px;height:8px;border-radius:50%;flex:none;}
+.cdot.ok{background:var(--ok);} .cdot.warn{background:var(--warn);} .cdot.bad{background:var(--bad);}
+.checks-kv{margin-top:10px;}
+.checks-kv .k{display:flex;align-items:center;gap:8px;color:inherit;}
+.checks-kv .v.ok{color:var(--ok);}
+.checks-kv .v.warn{color:var(--warn);}
+.checks-kv .v.bad{color:var(--bad);}
+.checks-kv .cdot{margin-top:0;}
+details.repro{background:#eef1f5;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);}
+details.repro summary{cursor:pointer;padding:13px 18px;font-size:14px;font-weight:600;color:#1e293b;outline:none;display:flex;justify-content:space-between;align-items:center;list-style:none;}
+details.repro summary::-webkit-details-marker{display:none;}
+details.repro .body{padding:0 18px 18px;}
+details.repro .meta{font-size:12px;color:#57606a;margin:0 0 10px;}
+details.repro pre{margin:0;max-height:440px;overflow:auto;background:#e3e8ee;padding:14px;border:1px solid #d0d7de;border-radius:8px;}
+details.repro code{font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;line-height:1.6;color:#24292e;}
+details.repro code .c{color:#6a737d;font-style:italic;}
+details.repro code .s{color:#032f62;}
+details.repro code .f{color:#6f42c1;}
+details.repro code .n{color:#005cc5;}
+.copy-btn{font-size:12px;color:#57606a;background:#eaeef2;border:1px solid #d0d7de;border-radius:6px;padding:3px 9px;cursor:pointer;}
+.copy-btn:hover{color:#1e293b;border-color:#b0b8c0;}
+.banner{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:var(--radius);padding:11px 15px;font-size:14px;}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:18px;}
+@media (max-width:640px){main{padding:0 10px;} .hero .est{font-size:30px;}}
+@media print{body{background:#fff;} header{background:var(--accent)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;} .figure-card,.group,.hero{box-shadow:none;break-inside:avoid;} .copy-btn{display:none;} .figure-card .svg-wrap svg{max-width:100%!important;} main>*{animation:none;}}
+</style></head>
+<body>
+<header><h1>meta-analysis 结果报告 · pairwise_meta</h1>
+<div class="meta">生成时间 2026-10-27 09:15:24</div></header>
+<main>
+
+<div class="hero"><div class="lead">合并效应量（MD）</div><div class="est"><span class="sm">MD</span> -10.547<span class="ci">95% CI -11.457 – -9.638</span></div><div class="sub"><span class="badge ok"><span class="dot"></span>有统计学显著性</span><span>p = 0.0000</span></div></div>
+<div class="interp-card"><div class="interp-header">📊 结果解读</div><div class="interp-conclusion">合并 MD = -10.55（95% CI -11.46–-9.64，p &lt; 0.001），提示实验组效应低于对照组，差异有统计学显著性。</div><div class="interp-section"><div class="interp-label">⚠ 注意事项</div><ul><li>Egger 检验 p = 0.065，提示可能存在发表偏倚，合并效应可能被高估。</li><li>MD = -10.55，效应量极端偏大（|d| &gt; 3），请复核原始数据或考虑离群研究。</li></ul></div><div class="interp-section"><div class="interp-label">💡 建议</div><ul><li>建议做剪补法（trim-and-fill）校正，并检查漏斗图不对称原因。</li><li>建议做逐一剔除敏感性分析，识别离群研究。</li><li>推荐做逐一剔除敏感性分析，识别对合并效应影响最大的研究。</li><li>正文应报告：合并效应、95% CI、I²、τ²（如有）、研究数、GRADE 证据等级、发表偏倚检验结果。</li></ul></div><div class="interp-section"><div class="interp-label">🔍 审稿人可能问</div><ul><li>是否存在发表偏倚？是否进行了剪补法或失安全系数分析？</li><li>是否报告了 PRISMA 检索策略和筛选流程？是否进行了偏倚风险评估？</li></ul></div><div class="interp-section"><div class="interp-label">📋 质量评估</div><div class="interp-qa"><span class="interp-grade">GRADE: Moderate</span><div style="margin-top:4px;font-size:13px;color:var(--muted);">GRADE=Moderate，未检出明显过度声明，证据质量可接受。</div></div></div></div>
+
+
+<div class="group"><h3><span class="ico">🎯</span>合并效应</h3><div class="kv"><div class="k">estimate</div><div class="v">-10.5474</div><div class="k">ci_low</div><div class="v">-11.4572</div><div class="k">ci_high</div><div class="v">-9.6377</div><div class="k">z</div><div class="v">None</div><div class="k">p</div><div class="v">2.6288e-114</div><div class="k">unit</div><div class="v">raw</div><div class="k">pi_low</div><div class="v">-11.9427</div><div class="k">pi_high</div><div class="v">-9.1522</div></div></div><div class="group"><h3><span class="ico">📐</span>异质性</h3><div class="kv"><div class="k">I2</div><div class="v">0.04</div><div class="k">tau2</div><div class="v">0.0371</div><div class="k">H2</div><div class="v">1.0206</div><div class="k">Q</div><div class="v">4.1667</div><div class="k">Q_p</div><div class="v">0.3839</div></div></div><div class="group"><h3><span class="ico">⚖️</span>发表偏倚</h3><div class="kv"><div class="k">egger_p</div><div class="v">0.0652</div><div class="k">begg_p</div><div class="v">0.0833</div></div></div><div class="group"><h3><span class="ico">✅</span>质量评估</h3><span class="badge warn"><span class="dot"></span>需注意</span><div class="kv checks-kv"><div class="k"><span class="cdot ok"></span>k=5 OK</div><div class="v ok">通过</div><div class="k"><span class="cdot ok"></span>I2=0.0% OK</div><div class="v ok">通过</div><div class="k"><span class="cdot warn"></span>Trim-and-fill recommended (k&gt;=5)</div><div class="v warn">需注意</div></div></div><div class="group"><h3><span class="ico">📋</span>分析概要</h3><div class="kv"><div class="k">k</div><div class="v">5</div><div class="k">model</div><div class="v">random</div><div class="k">sm</div><div class="v">MD</div></div></div>
+
+</main>
+<footer>由 meta-analysis 技能生成 · 图形为内联 SVG（可缩放/检查）· R 脚本可本地复现</footer>
+<script>
+function copyR(btn){
+  var pre=btn.closest('details').querySelector('pre');
+  navigator.clipboard.writeText(pre.innerText).then(function(){
+    var t=btn.textContent;btn.textContent='已复制 ✓';setTimeout(function(){btn.textContent=t;},1500);
+  });
+}
+</script>
+</body></html>

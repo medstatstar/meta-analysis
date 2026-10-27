@@ -89,6 +89,15 @@ def _registry_total(registry):
 # Deterministic per-dimension scorers (0–5)
 # ---------------------------------------------------------------------------
 def _score_data(registry_total, pubmed_hits, cochrane_hits):
+    # 2026-10-25 修（用户报「结论自相矛盾」）：注册库 0 命中、文献库却已有大量同类
+    # SR/MA 时，那个 0 几乎一定是探针没打中（中文主题查英文注册库），不能据此判
+    # 「数据可得性 0 分」。此时退回文献库代理口径并降置信，note 如实标注。
+    _sr = (pubmed_hits or 0) + (cochrane_hits or 0)
+    degraded = False
+    if registry_total == 0 and _sr >= 20:
+        registry_total = None
+        pubmed_hits = max(pubmed_hits or 0, _sr)
+        degraded = True
     if registry_total is not None:
         t, conf = registry_total, "registry"
     elif pubmed_hits is not None:
@@ -107,9 +116,15 @@ def _score_data(registry_total, pubmed_hits, cochrane_hits):
         s = 1
     else:
         s = 0
-    note = ("注册库 %d 项 → 原始研究充足" % registry_total
-            if registry_total is not None else
-            "PubMed SR/MA %d 篇（代理，置信低于注册库）" % pubmed_hits)
+    if degraded:
+        note = ("注册库未命中但文献库有 %d 篇同类 SR/MA → 按文献代理估计（原始研究数需人工核实）"
+                % t)
+    elif registry_total is not None:
+        # 文案修正：0~9 项时不能说「原始研究充足」（此前 s=0 仍输出「充足」，与分数打脸）
+        note = ("注册库 %d 项 → 原始研究充足" % registry_total if registry_total >= 10
+                else "注册库仅 %d 项 → 原始研究可能不足，需人工核实" % registry_total)
+    else:
+        note = "PubMed SR/MA %d 篇（代理，置信低于注册库）" % pubmed_hits
     return s, conf, note
 
 
@@ -127,21 +142,35 @@ def _score_novelty(pubmed_hits, cochrane_hits):
 
 
 def _score_feasibility(registry_total, pubmed_hits, missing):
-    k = registry_total if registry_total is not None else (pubmed_hits
-                                                            if pubmed_hits is not None else 0)
-    if k >= 10:
-        s = 5
-    elif k >= 5:
-        s = 4
-    elif k >= 2:
+    # 2026-10-25：与 _score_data 同一处矛盾的可行性侧修复 —— 注册库 0 命中但文献库
+    # 已有大量同类 SR/MA 时，0 是「探针没打中」而非「没有原始研究」。此时不判 0 分
+    # （否则「可行性 0/5」会与「778 篇同类 SR/MA」并列，结论互相打脸），
+    # 按「中等、待核实」给分并在 note 里说明依据。
+    _proxy = (registry_total == 0 and (pubmed_hits or 0) >= 20)
+    if _proxy:
         s = 3
-    elif k >= 1:
-        s = 1
+        k = None
     else:
-        s = 0
+        k = registry_total if registry_total is not None else (pubmed_hits
+                                                                if pubmed_hits is not None else 0)
+        if k >= 10:
+            s = 5
+        elif k >= 5:
+            s = 4
+        elif k >= 2:
+            s = 3
+        elif k >= 1:
+            s = 1
+        else:
+            s = 0
     if len(missing or []) >= 3:
         s = min(s, 2)
-    return s, ("预期可纳入研究数 k=%s" % k)
+    if _proxy:
+        note = ("注册库未命中，但文献库已有 %d 篇同类 SR/MA → 原始研究数按「可纳入、待核实」"
+                "处理，不判空白方向" % pubmed_hits)
+    else:
+        note = ("预期可纳入研究数 k=%s" % k)
+    return s, note
 
 
 def _score_clinical(topic, override):
@@ -317,8 +346,15 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
         "summary": nov_note,
     }
 
-    expected = ("约 %s 项注册试验 / 预期可纳入研究" % registry_total
-                if registry_total is not None else "注册库未探针，预期研究数未知")
+    # 2026-10-25：注册库 0 命中但文献库已有大量同类 SR/MA 时，不能写「约 0 项注册试验」——
+    # 与「同类 SR/MA 已饱和」并列会自相矛盾，改为如实标注待核实。
+    _sr_n = (pubmed_hits or 0) + (cochrane_hits or 0)
+    if registry_total == 0 and _sr_n >= 20:
+        expected = "待核实（注册库未命中，但文献库已有 %d 篇同类 SR/MA）" % _sr_n
+    elif registry_total is not None:
+        expected = "约 %s 项注册试验 / 预期可纳入研究" % registry_total
+    else:
+        expected = "注册库未探针，预期研究数未知"
 
     compliance = _compliance()
 
@@ -352,6 +388,9 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
             "sample": _prospero.get("sample") or [],
             "error": _prospero.get("error"),
             "source": _prospero.get("source"),
+            # 2026-10-25：新版 PROSPERO 探针会回报实际生效的检索式，
+            # 前端挂在命中数的 title 上，便于用户核对「51 条」是按什么口径查出来的。
+            "query_used": _prospero.get("query_used"),
             "manual_url": _prospero.get("manual_url"),
             "note": _prospero.get("note") or "",
             "register_before_extraction": "PROSPERO 注册应在数据提取前完成（AMSTAR-2 要求）",

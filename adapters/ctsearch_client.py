@@ -209,6 +209,27 @@ def _skill_version() -> str:
     return "1.0.0"
 
 
+def _resolve_user_language(override: str | None = None, query: str = "") -> str:
+    """user_language 提示（zh/en）—— ct-base §1.1 三级优先级，权威实现委托共享 i18n。
+
+    1) 显式 override 最高（中文语境→zh / 英文→en）；
+    2) 否则按 query 文本内容判定（detect_text_language：中文系统+英文输入→en，
+       不被系统 locale 误判 zh）；
+    3) query 为空时回退系统 locale。
+    与 coze_client._resolve_user_language 同源同语义（2026-10-20 代码正确性检查
+    补齐：本客户端两处出站此前硬编码 zh，英文用户的检索/PDF 请求会被误报中文）。
+    """
+    try:
+        _scripts = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
+        if _scripts not in sys.path:
+            sys.path.insert(0, _scripts)
+        import i18n as _i18n  # type: ignore
+        return _i18n.resolve_user_language(query if query else "", override)
+    except Exception:  # noqa: BLE001 — 解析失败不影响检索本身，回退 zh
+        pass
+    return "zh"
+
+
 def _dig_output(node):
     """从单个流式事件对象（workflow_end / node_end）提取最终 output（兼容多层嵌套）。"""
     if not isinstance(node, dict):
@@ -379,7 +400,8 @@ def _parse_coze_stream(resp, log_fn) -> list:
 
 
 def resolve_publisher_pdfs(identifiers: list, query_origin: str = None,
-                           timeout: int = 1200, progress=None) -> list:
+                           timeout: int = 1200, progress=None,
+                           user_language: str | None = None) -> list:
     """批量委托 ct-search 端点（stream_run + publisher_pdf_batch）把间接链接/DOI
     解码为可直接下载的真实直链。
 
@@ -391,6 +413,8 @@ def resolve_publisher_pdfs(identifiers: list, query_origin: str = None,
     Args:
         identifiers: 统一标识列表（open_access_url / preprint.url / doi 混排）。
         progress: 可选进度回调 fn(msg)。
+        user_language: 可选语言提示覆盖（zh/en）；缺省走 ct-base §1.1 三级解析
+            （本路径入参为 DOI/直链、无自然语言内容信号 → 回落系统 locale）。
     Returns:
         list[dict]，每项为 {key, doi, pdf_url, pdf_s3_url, status, via, ...}；
         与 coze 端 publisher_pdf_batch 回参同形态。空列表表示无结果/失败。
@@ -428,7 +452,9 @@ def resolve_publisher_pdfs(identifiers: list, query_origin: str = None,
                 "batch_size": len(chunk),
                 "identifiers": chunk,
             }, ensure_ascii=False),
-            "params": {"user_language": "zh"},
+            # ct-base §1.1：user_language 三级解析（显式 > 内容级 > 系统 locale），
+            # 不再硬编码 zh（2026-10-20 代码正确性检查补齐）。
+            "params": {"user_language": _resolve_user_language(user_language)},
         }
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(STREAM_ENDPOINT, data=body,
@@ -452,7 +478,8 @@ def resolve_publisher_pdfs(identifiers: list, query_origin: str = None,
 
 def search_literature(source: str = "europepmc", keyword: str = None,
                       year_from: int = None, year_to: int = None,
-                      max_results: int = 50, timeout: int = 300) -> dict:
+                      max_results: int = 50, timeout: int = 300,
+                      user_language: str | None = None) -> dict:
     """选题门控「简单分析」路径：直接调用 ct-search 远端服务做轻量文献检索/去重探针。
 
     这是 ct-literature 的统一文献检索后端（source 与 ct-literature 共用同一 Coze 端点），
@@ -465,6 +492,10 @@ def search_literature(source: str = "europepmc", keyword: str = None,
 
     窗口内同参重复调用直接回放缓存（跨进程，见 _dedup_*），不再重复出站——防
     调用方「误判为空→重试」把同一 querystr 反复打到 coze/飞书日志（2026-09-15 复盘）。
+    （user_language 仅作出站语言提示、不进 dedup 键：不改变检索结果，避免缓存无谓分裂。）
+
+    user_language: 可选语言提示覆盖（zh/en）；缺省按 ct-base §1.1 三级解析，
+       内容级信号取 keyword（2026-10-20 代码正确性检查补齐，此前硬编码 zh）。
 
     Returns:
         dict: {source, works:[...], total_count:N, error:str|None, from_cache:bool}
@@ -473,21 +504,48 @@ def search_literature(source: str = "europepmc", keyword: str = None,
     if not keyword:
         return {"source": source, "works": [], "total_count": 0,
                 "error": "keyword 为空"}
+
+    # 长期缓存命中（24h TTL，跨运行）
+    try:
+        from search_cache import load as _cache_load, save as _cache_save, cache_key as _cache_key
+        _ck = _cache_key(source, keyword, year_from, year_to, max_results)
+        _long_cached = _cache_load(key=_ck)
+        if _long_cached is not None:
+            _long_cached["from_long_cache"] = True
+            return _long_cached
+    except Exception:
+        pass
+
     fp = _dedup_key(source, keyword, year_from, year_to, max_results)
     cached = _dedup_load(fp)
     if cached is not None:
         cached = dict(cached)
         cached["from_cache"] = True
+        # 回写长期缓存（短期命中但长期未命中时补写，不重复出站）
+        try:
+            from search_cache import save as _cache_save, cache_key as _cache_key
+            _ck = _cache_key(source, keyword, year_from, year_to, max_results)
+            _cache_save(key=_ck, payload=cached)
+        except Exception:
+            pass
         return cached
     result = _search_literature_uncached(
-        source, keyword, year_from, year_to, max_results, timeout)
+        source, keyword, year_from, year_to, max_results, timeout,
+        user_language=user_language)
     _dedup_save(fp, result)
     _dedup_evict()
+    # 写入长期缓存
+    try:
+        from search_cache import save as _cache_save, cache_key as _cache_key
+        _ck = _cache_key(source, keyword, year_from, year_to, max_results)
+        _cache_save(key=_ck, payload=result)
+    except Exception:
+        pass
     return result
 
 
 def _search_literature_uncached(source, keyword, year_from, year_to,
-                                max_results, timeout) -> dict:
+                                max_results, timeout, user_language=None) -> dict:
     payload = {
         "source": source,
         "mode": "search",
@@ -499,7 +557,9 @@ def _search_literature_uncached(source, keyword, year_from, year_to,
         "request_id": uuid.uuid4().hex,
         "skill_version": _skill_version(),
         "locale": "zh",
-        "params": {"user_language": "zh"},
+        # ct-base §1.1：user_language 三级解析，内容级信号取 keyword
+        # （2026-10-20 代码正确性检查补齐，此前硬编码 zh）。
+        "params": {"user_language": _resolve_user_language(user_language, keyword)},
         "skillname": "meta-analysis",
         # 审计透传（对齐 ct-literature 新格式）：Coze 端飞书节点把 querystr 原样落库。
         # 修复老格式只存 {"source": ...} 导致后台飞书记录信息量不足的问题。

@@ -80,6 +80,89 @@ def _direction_text(sm: str, est: float) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# 2026-10-27 解读强化（方案二·规则层）：效应量临床幅度分级 / 证据强度评级 /
+# 通读段 narrative / 关键数字 key_numbers。全部纯规则、可单测，LLM 层只做叙述。
+# ---------------------------------------------------------------------------
+
+
+def _cohen_text(sm: str, est: float | None) -> str:
+    """效应量临床幅度分级（规则层）。
+
+    - SMD/MD 类：Cohen 标准（|0.2| 小 / |0.5| 中 / |0.8| 大）；
+    - OR/RR 类：按离无效值 1 的距离粗分（1.2-1.5 边缘 / 1.5-2.5 中等 / >2.5 强）。
+    """
+    if est is None:
+        return ""
+    if sm in _SM_SM:
+        a = abs(est)
+        if a < 0.2:
+            return f"效应幅度很小（|{sm}| = {a:.2f} < 0.2，Cohen 标准下限）"
+        if a < 0.5:
+            return f"小效应（|{sm}| = {a:.2f}，Cohen 标准：0.2 小 / 0.5 中 / 0.8 大）"
+        if a < 0.8:
+            return f"中等效应（|{sm}| = {a:.2f}，Cohen 标准：0.5 中）"
+        return f"大效应（|{sm}| = {a:.2f} ≥ 0.8，Cohen 标准）"
+    if sm in _RATIO_SM:
+        d = est / 1.0 if est >= 1 else 1.0 / est if est > 0 else 0.0
+        if d < 1.2:
+            return f"效应接近无效值（{sm} = {est:.2f}，与 1 的距离不足 20%）"
+        if d < 1.5:
+            return f"边缘效应（{sm} = {est:.2f}）"
+        if d < 2.5:
+            return f"中等强度关联（{sm} = {est:.2f}）"
+        return f"强关联（{sm} = {est:.2f}，距无效值 1 较远，需复核数据真实性）"
+    return ""
+
+
+def _evidence_grade(k: float | None, i2: float | None,
+                    ci_lo: float | None, ci_hi: float | None, sm: str):
+    """证据强度综合评级（规则层简化 GRADE 取向，供通读与前端徽标）。
+
+    起始 High，按不精确性（k 少）/ 异质性（I²）/ 不显著性（CI 跨无效值）降级。
+    返回 (grade: str, reasons: list[str])。
+    """
+    grade = "High"
+    reasons: list[str] = []
+    if k is not None and k < 5:
+        reasons.append(f"研究数少（k = {int(k)} < 5，不精确性）")
+        grade = "VeryLow" if k < 3 else "Low"
+    if i2 is not None and i2 >= 75:
+        reasons.append(f"高异质性（I² = {i2:.0f}%）")
+        grade = {"High": "Low", "Moderate": "Low", "Low": "VeryLow", "VeryLow": "VeryLow"}[grade]
+    elif i2 is not None and i2 >= 50:
+        reasons.append(f"中等异质性（I² = {i2:.0f}%）")
+        if grade == "High":
+            grade = "Moderate"
+    if not _is_significant(ci_lo, ci_hi, sm):
+        reasons.append("95% CI 跨无效值（合并效应未达统计学显著）")
+        if grade == "High":
+            grade = "Moderate"
+        elif grade == "Moderate":
+            grade = "Low"
+    if not reasons:
+        reasons.append("研究数、异质性与精度均未见明显降级因素")
+    return grade, reasons
+
+
+def _ci_precision_text(ci_lo: float | None, ci_hi: float | None, sm: str) -> str:
+    """CI 宽度 → 精度表述（通读段用）。"""
+    if ci_lo is None or ci_hi is None:
+        return "区间精度不可评估"
+    w = ci_hi - ci_lo
+    if sm in _RATIO_SM:
+        if w > 10:
+            return f"95% CI 跨度很大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足"
+        if w > 3:
+            return f"95% CI 跨度较大（{ci_lo:.2f}–{ci_hi:.2f}），精度有限"
+        return f"95% CI（{ci_lo:.2f}–{ci_hi:.2f}）跨度可接受，精度尚可"
+    if w > 3:
+        return f"95% CI 跨度很大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足"
+    if w > 1:
+        return f"95% CI 跨度较大（{ci_lo:.2f}–{ci_hi:.2f}），精度有限"
+    return f"95% CI（{ci_lo:.2f}–{ci_hi:.2f}）较窄，精度较好"
+
+
 def _is_significant(
     ci_lo: float | None,
     ci_hi: float | None,
@@ -375,9 +458,12 @@ def _interpret_netmeta(stats: dict, task: str, sm: str) -> dict:
 
     return {
         "conclusion": conclusion,
+        "narrative": conclusion,  # netmeta 分支 conclusion 已是通读段，narrative 同体
         "caveats": caveats,
         "suggestions": suggestions,
         "reviewer_questions": reviewer_questions,
+        "key_numbers": [],
+        "evidence_grade": "",
     }
 
 
@@ -406,7 +492,8 @@ def interpret_result(
           - reviewer_questions: list[str]，审稿人可能追问的问题。
     """
     # 初始化
-    empty = {"conclusion": "", "caveats": [], "suggestions": [], "reviewer_questions": []}
+    empty = {"conclusion": "", "narrative": "", "caveats": [], "suggestions": [],
+             "reviewer_questions": [], "key_numbers": [], "evidence_grade": ""}
     if not isinstance(stats, dict):
         return empty
 
@@ -589,9 +676,97 @@ def interpret_result(
             "是否报告了 PRISMA 检索策略和筛选流程？是否进行了偏倚风险评估？"
         )
 
+    # ---- 9. 解读强化（2026-10-27 方案二·规则层）：临床幅度 / 证据评级 / 通读段 / 关键数字 ----
+    magnitude = _cohen_text(sm, est)
+    if magnitude:
+        caveats.insert(0, magnitude)  # 幅度分级放在注意事项首位，先定性再提醒
+    grade, grade_reasons = _evidence_grade(k, i2, ci_lo, ci_hi, sm)
+    precision_txt = _ci_precision_text(ci_lo, ci_hi, sm)
+
+    # 通读段：统计顾问口吻的连贯叙述（数据 → 方向/显著性 → 幅度 → 异质性 → 精度 → 评级）
+    narrative_parts: list[str] = []
+    if k is not None:
+        narrative_parts.append(f"本次共纳入 {int(k)} 项研究")
+    if est is not None:
+        sig = _is_significant(ci_lo, ci_hi, sm)
+        narrative_parts.append(
+            f"合并 {sm} = {est:.2f}"
+            + (f"（95% CI {ci_lo:.2f}–{ci_hi:.2f}" if ci_lo is not None and ci_hi is not None else "")
+            + (f"，{_sig_text(p)}）" if (ci_lo is not None and p is not None) else
+               ("）" if ci_lo is not None else ""))
+            + f"，{_direction_text(sm, est)}"
+            + ("，差异有统计学显著性" if sig else "，但 CI 跨无效值，差异无统计学显著性")
+        )
+        if magnitude:
+            narrative_parts.append(f"效应幅度判定：{magnitude}")
+    if i2 is not None:
+        narrative_parts.append(
+            f"研究间异质性 I² = {i2:.0f}%"
+            + (f"，τ² = {tau2:.3f}" if tau2 is not None else "")
+        )
+    narrative_parts.append(f"估计精度：{precision_txt}")
+    if egger_p is not None:
+        if egger_p < 0.10:
+            narrative_parts.append(
+                f"发表偏倚信号：Egger p = {egger_p:.3f} < 0.10"
+                + ("（但研究数少、检验效能有限）" if k is not None and k < 5 else "")
+            )
+        elif k is not None and k >= 10:
+            narrative_parts.append(f"发表偏倚：Egger p = {egger_p:.3f}，未见明显不对称信号")
+    narrative_parts.append(f"综合证据强度：{grade}（{'；'.join(grade_reasons)}）")
+    narrative = "。".join(p.rstrip("。") for p in narrative_parts if p) + "。"
+
+    # 关键数字：供前端高亮展示
+    key_numbers: list[dict] = []
+    if k is not None:
+        key_numbers.append({"label": "研究数", "value": int(k)})
+    if est is not None:
+        key_numbers.append({"label": f"合并 {sm}", "value": round(est, 3)})
+    if ci_lo is not None and ci_hi is not None:
+        key_numbers.append({"label": "95% CI", "value": f"{ci_lo:.2f}–{ci_hi:.2f}"})
+    if p is not None:
+        key_numbers.append({"label": "p 值", "value": _sig_text(p).replace("p ", "").lstrip("= ")} )
+    if i2 is not None:
+        key_numbers.append({"label": "I²", "value": f"{i2:.0f}%"})
+    if tau2 is not None:
+        key_numbers.append({"label": "τ²", "value": round(tau2, 4)})
+    if egger_p is not None:
+        key_numbers.append({"label": "Egger p", "value": round(egger_p, 3)})
+    key_numbers.append({"label": "证据强度", "value": grade})
+
     return {
         "conclusion": conclusion,
+        "narrative": narrative,
         "caveats": caveats,
         "suggestions": suggestions,
         "reviewer_questions": reviewer_questions,
+        "key_numbers": key_numbers,
+        "evidence_grade": grade,
     }
+
+
+def check_effect_size_extreme(stats: dict | None) -> str | None:
+    """效应量极端判定（飞书 searchlog 实证：60/281 成功记录效应量极端）。
+
+    返回警告文本（应贴到结果上）或 None（效应量在合理范围）。
+    判定阈值：
+      - 比值类（OR/RR/PLO/PLOGIT/HR/IRR/RRR...）：estimate_exp > 10 或 < 0.1（真实比值）
+      - 差值类（MD/SMD/ZCOR/MC/SMCR...）：|estimate| > 3
+
+    纯本地规则，无外部依赖；原 run_analysis._check_effect_size_extreme 已收敛到此单一实现。
+    """
+    if not isinstance(stats, dict):
+        return None
+    _sm = str(stats.get("sm") or "").upper()
+    _pooled = stats.get("pooled") or {}
+    _est_e = _safe_float(_pooled.get("estimate_exp"))  # 真实比值(OR/RR/PLO)
+    _est = _safe_float(_pooled.get("estimate"))        # log 比值 或 均值差
+    if _sm in _RATIO_SM and _est_e is not None:
+        if _est_e > 10:
+            return f"{_sm}={_est_e:.2f} (>10)"
+        if _est_e < 0.1:
+            return f"{_sm}={_est_e:.2f} (<0.1)"
+    if _sm in _SM_SM and _est is not None:
+        if abs(_est) > 3:
+            return f"{_sm}={_est:.2f} (|d|>3)"
+    return None

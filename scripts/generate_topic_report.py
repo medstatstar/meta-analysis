@@ -18,8 +18,22 @@ Python 3.8+ standard library only. No third-party dependencies.
 import argparse
 import html
 import json
+import os as _os
 import sys
 from datetime import date
+
+# Ensure scripts/ is on path so gov22 can be imported when run from skill root
+_script_dir = _os.path.dirname(_os.path.abspath(__file__))
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+
+try:
+    from gov22 import build_gov22, render_gov22_md
+    _GOV22_AVAILABLE = True
+except ImportError:
+    _GOV22_AVAILABLE = False
+    build_gov22 = None
+    render_gov22_md = None
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +345,20 @@ def build_markdown(d):
         _sec(10, "Potential Risks & Mitigations", _fmt_bullets(d.get("risks"))),
         _sec(11, "Recommended Next Actions", _fmt_bullets(d.get("next_actions"))),
     ]
+
+    # §22 governance (RAG checklist + stratified acceptance)
+    # Default to zh (primary user); explicit lang in meta or score_anchors
+    if _GOV22_AVAILABLE:
+        meta_lang = d.get("meta", {}).get("lang")
+        if meta_lang in ("zh", "zh-CN", "zh-cn"):
+            lang = "zh"
+        elif meta_lang in ("en",):
+            lang = "en"
+        else:
+            lang = "zh"  # default zh for missing / auto
+        gov = build_gov22(d, lang=lang)
+        gov_md = render_gov22_md(gov, lang=lang)
+        sections.append(gov_md)
 
     # PROSPERO mapping appendix (conditional)
     if pros.get("ready") or pros.get("mapping_note"):

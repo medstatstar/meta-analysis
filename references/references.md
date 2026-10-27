@@ -42,4 +42,6 @@
 - [upstream_orchestration.md](./upstream_orchestration.md) — 上游编排（检索→筛选→提取→分析）：复用 ct-literature + 数据提取助手与人工核验闸
 - [systematic_review_fullflow.md](./systematic_review_fullflow.md) — 系统综述全流程模式（@skill 入口 playbook）：触发词 + Stage 0 启动确认 + 5 阶段命令链 + 两道人工闸 + 失败/边界处理
 - [data_templates.md](./data_templates.md) — Data input templates
+- [methodology_absorb_ritsushah_20261027.md](./methodology_absorb_ritsushah_20261027.md) — 方法学吸收(升级项 C):预测区间报告规范、CINeMA、NOS/JBI/ROBINS-I 工具选择矩阵、灰文献+引文追逐、双筛 κ、PRISMA-DTA(源:ritsushah/systematic-review-meta-analysis-skills,MIT)
+- [search_strategy_absorb_srsearch_20261027.md](./search_strategy_absorb_srsearch_20261027.md) — 检索策略方法学吸收(升级项 H):多库语法对照表([已核]/[未核])、MeSH+自由词双行策略、known-item 召回核查、PRESS 自审、PRISMA-S 16 项+双语模板+Table S1(源:y9655980-crypto/sr-search-skill,MIT)
 - [stata_to_r_mapping.md](./stata_to_r_mapping.md) — Stata equivalents

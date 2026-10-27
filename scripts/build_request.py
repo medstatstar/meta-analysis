@@ -504,7 +504,7 @@ def _coerce_rows(rows, resolved, carry_cols=None, non_numeric=None):
 
 def build(query=None, spec=None, data_arg=None, data_json=None, out_path="request.json",
           colmap_override=None, measure_override=None, model_override=None,
-          language_override=None):
+          language_override=None, transitivity_cov_path=None, benchmark_ref_path=None):
     spec = spec or _classify(query or "")
     if spec.get("track") == "topic":
         raise SystemExit("[build_request] 选题轨不走计算路径；请用 literature_probe.py（见 §2.2）")
@@ -587,6 +587,49 @@ def build(query=None, spec=None, data_arg=None, data_json=None, out_path="reques
         params["subgroup"] = subgroup
 
     task = spec.get("task") or "pairwise_meta"
+
+    # —— CODEX 对齐（仅借方法，不借数据）可选参数装配（2026-10-14）——
+    # 仅对 NMA 家族 task 生效；coze 端 run_task.R nma/nma_rank 分支按 params 守卫消费：
+    #   transitivity_covariates: 研究级协变量表（study + 各协变量列）→ assess_transitivity()
+    #   benchmark_reference:     公开文献效应量参考 {对比名:{estimate,ci_low,ci_high,source}}
+    #                            → benchmark_nma_effects()（声明：仅来自公开荟萃，非商业策展库）
+    # 来源三优先级：显式 CLI 文件 > spec.params_extra 内联 > 不注入（保持原行为）。
+    # 注：仅 nma/nma_rank——与 coze 端 run_task.R 守卫分支严格一致；
+    # cnma 分支未实现消费，注入只会产生被静默忽略的死参数。
+    if task in ("nma", "nma_rank"):
+        extra = spec.get("params_extra") or {}
+        tc_data = None
+        if transitivity_cov_path:
+            tc_raw = _load_rows(transitivity_cov_path, None)
+            if tc_raw and "study" not in (tc_raw[0] if tc_raw else {}):
+                sys.stderr.write(
+                    "[build_request] 警告：--transitivity-cov 文件缺少 'study' 列，"
+                    "coze 端将无法把协变量映射到研究，传递性评估将退化为未匹配。\n")
+            if tc_raw:
+                def _coerce_cov(v):
+                    # CSV 读入全是字符串；R 端 assess_transitivity 按 is.numeric 分支，
+                    # 这里把可解析为数值的协变量值转 float，避免数值协变量被误判为分类。
+                    try:
+                        f_ = float(str(v))
+                        return int(f_) if f_.is_integer() else f_
+                    except (TypeError, ValueError):
+                        return v
+                tc_data = [{"study": str(r.get("study", "")),
+                            **{k: _coerce_cov(v) for k, v in r.items() if k != "study"}}
+                           for r in tc_raw]
+        elif extra.get("transitivity_covariates"):
+            tc_data = extra["transitivity_covariates"]
+        if tc_data:
+            params["transitivity_covariates"] = tc_data
+        bm_data = None
+        if benchmark_ref_path:
+            with open(benchmark_ref_path, encoding="utf-8") as bf:
+                bm_data = json.load(bf)
+        elif extra.get("benchmark_reference"):
+            bm_data = extra["benchmark_reference"]
+        if bm_data:
+            params["benchmark_reference"] = bm_data
+
     default_plots = _default_plots_for(task, params.get("sm"))
     user_plots = (spec.get("params_extra") or {}).get("plots")
     if user_plots:
@@ -622,6 +665,13 @@ def main():
     ap.add_argument("--measure", help="LLM 兜底回灌：效应量覆盖（OR/RR/RD/MD/SMD/HR…）")
     ap.add_argument("--model", help="LLM 兜底回灌：模型覆盖（REM-L/MH）")
     ap.add_argument("--language", help="用户语言（zh/en/...），覆盖自动检测，注入 coze 入参 user_language 备用")
+    ap.add_argument("--transitivity-cov",
+                    help="CODEX 对齐（可选）：研究级协变量表文件（.csv/.json，须含 study 列），"
+                         "nma/nma_rank/cnma 时注入 params.transitivity_covariates 触发 coze 端传递性评估")
+    ap.add_argument("--benchmark-ref",
+                    help="CODEX 对齐（可选）：公开文献效应量参考 JSON，"
+                         "{对比名:{estimate,ci_low,ci_high,source}}，注入 params.benchmark_reference 触发基准比对"
+                         "（仅接受公开已发表荟萃来源，不接商业策展库）")
     a = ap.parse_args()
 
     spec = None
@@ -629,7 +679,8 @@ def main():
         spec = json.load(open(a.spec, encoding="utf-8"))
     req = build(query=a.query, spec=spec, data_arg=a.data, data_json=a.data_json, out_path=a.out,
                 colmap_override=a.colmap, measure_override=a.measure, model_override=a.model,
-                language_override=a.language)
+                language_override=a.language, transitivity_cov_path=a.transitivity_cov,
+                benchmark_ref_path=a.benchmark_ref)
     print(json.dumps(req, ensure_ascii=False, indent=2))
 
 

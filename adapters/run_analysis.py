@@ -41,6 +41,7 @@ from rendering import svg_to_png, render_html_report
 from coze_error_analyze import analyze_coze_error as _analyze_coze_error
 from coze_error_analyze import render_error_analysis as _render_error_analysis
 from interpretation import interpret_result as _interpret_result
+from interpretation import check_effect_size_extreme as _check_effect_size_extreme
 from quality_advice import evaluate_quality as _evaluate_quality
 # 2026-09-13：出站信封被拦截时，复用校验器的指导渲染（envelope_invalid 分支回传 _error_guidance）。
 from coze_contract_validate import render_guidance as _render_contract_guidance
@@ -54,31 +55,6 @@ RENDER_SVG_THRESHOLD = 30.0
 RENDER_SVG_KB_THRESHOLD = 200.0
 
 
-def _check_effect_size_extreme(stats: dict) -> str | None:
-    """效应量极端判定（飞书 searchlog 实证：60/281 成功记录效应量极端）。
-
-    返回警告文本（应贴到结果上）或 None（效应量在合理范围）。
-    判定阈值：
-      - OR/RR/PLO/PLOGIT：estimate_exp > 10 或 < 0.1（真实比值）
-      - SMD/MD/ZCOR：|estimate| > 3（标准化均值差）
-    """
-    if not isinstance(stats, dict):
-        return None
-    _sm = str(stats.get("sm") or "").upper()
-    _pooled = stats.get("pooled") or {}
-    _est_e = _pooled.get("estimate_exp")   # 真实比值(OR/RR/PLO)
-    _est = _pooled.get("estimate")         # log 比值 或 均值差
-    # OR / RR / PLO / PLOGIT：estimate_exp 为真实比值
-    if _sm in ("OR", "RR", "PLO", "PLOGIT") and isinstance(_est_e, (int, float)):
-        if _est_e > 10:
-            return "%s=%.2f (>10)" % (_sm, _est_e)
-        if _est_e < 0.1:
-            return "%s=%.2f (<0.1)" % (_sm, _est_e)
-    # SMD / MD / ZCOR：estimate 为标准化均值差
-    if _sm in ("SMD", "MD", "ZCOR") and isinstance(_est, (int, float)):
-        if abs(_est) > 3:
-            return "%s=%.2f (|d|>3)" % (_sm, _est)
-    return None
 def run_analysis(task, data, params, figure="forest", out_dir=".", debug=False, advise=False, topic="", field="", references=None, merged_json=None, use_network=True, ref_sections=None):
     """统一分析入口（架构重构 · per-stage pipeline）。
 
@@ -138,26 +114,31 @@ def run_analysis(task, data, params, figure="forest", out_dir=".", debug=False, 
         # coze 端已内置 Haldane 自动校正（event+0.5, n+1），无需建议用户手动加 0.5。
         # 极端效应不阻断（可能真实），但顶层 status 降为 warn，并在结果上贴 ⚠ 标记。
         # 不自动重跑——给用户看提示，用户确认后再决定是否切 Peto 法。
+        # 2026-10-27 幂等守卫：coze 已回传 _effect_size_extreme_warning 则跳过本地重算。
         try:
-            _extreme_msg = _check_effect_size_extreme(res.get("stats") or {})
-            if _extreme_msg:
-                if res.get("status") == "ok":
-                    res["status"] = "warn"
-                res["_effect_size_extreme_warning"] = (
-                    "⚠ 效应量极端（%s）：请复核原始数据。"
-                    "coze 端已自动应用 Haldane 连续性校正；"
-                    "若仍不理想，可改用 Peto 法（sm='Peto'）或广义线性混合模型（task='ipd_meta'）。"
-                    "确认后请告知我切换方法重跑。" % _extreme_msg
-                )
+            if not res.get("_effect_size_extreme_warning"):
+                _extreme_msg = _check_effect_size_extreme(res.get("stats") or {})
+                if _extreme_msg:
+                    if res.get("status") == "ok":
+                        res["status"] = "warn"
+                    res["_effect_size_extreme_warning"] = (
+                        "⚠ 效应量极端（%s）：请复核原始数据。"
+                        "coze 端已自动应用 Haldane 连续性校正；"
+                        "若仍不理想，可改用 Peto 法（sm='Peto'）或广义线性混合模型（task='ipd_meta'）。"
+                        "确认后请告知我切换方法重跑。" % _extreme_msg
+                    )
         except Exception:  # noqa: BLE001
             pass
         # 2026-09-13 结果解读引擎（统计顾问层）：基于 stats 自动生成结构化解读，
         # 包括结论、警告、后续建议、审稿人可能问的问题。贴到 _interpretation 供
         # CLI / 渲染层消费。解读失败不影响主结果。
+        # 2026-10-27 幂等守卫：coze（统一封装后）已回传 _interpretation 则直接用，
+        # 本地仅作未部署 coze 时的兜底，保证两条路径结果一致。
         try:
-            _interp = _interpret_result(res.get("stats") or {}, task, params)
-            if _interp and any(_interp.values()):
-                res["_interpretation"] = _interp
+            if not res.get("_interpretation"):
+                _interp = _interpret_result(res.get("stats") or {}, task, params)
+                if _interp and any(_interp.values()):
+                    res["_interpretation"] = _interp
         except Exception:  # noqa: BLE001
             pass
         # 2026-09-13 质量评估（B2/B3/B4 解耦）：GRADE + 过度声明 + 质量门
@@ -283,6 +264,21 @@ def _normalize_stage(res: dict) -> dict:
             for f in ("status", "stats", "figures", "warnings", "notes", "task", "repro"):
                 if f in inner and f not in res:
                     res[f] = inner[f]
+    # 2026-10-27：上提 coze 统一封装回传的统计顾问层字段（服务端 main.py 已注入
+    # _interpretation / _effect_size_extreme_warning / _quality_gate_red_warning 等）。
+    # 来源优先级：顶层 result 内层（legacy result 模式）→ stage_result.result。
+    # 消费方（渲染层/CLI）只看顶层；未部署新版 coze 时这些字段缺失，本地兜底照旧。
+    _src_inner = None
+    if isinstance(res.get("result"), dict):
+        _src_inner = res["result"]
+    elif isinstance(res.get("stage_result"), dict) and \
+            isinstance(res["stage_result"].get("result"), dict):
+        _src_inner = res["stage_result"]["result"]
+    if _src_inner:
+        for _af in ("_interpretation", "_quality_advice",
+                    "_effect_size_extreme_warning", "_quality_gate_red_warning"):
+            if _af in _src_inner and _af not in res:
+                res[_af] = _src_inner[_af]
     if res.get("status") is None:
         # 仍缺 → 以 stage 模式视之，交由上层渲染 stage_result（不谎报 error）
         res["status"] = "ok" if res.get("mode") == "stage" else res.get("status")

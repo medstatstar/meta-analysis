@@ -313,37 +313,46 @@ def _skill_version() -> str:
     return _SKILL_VERSION_FALLBACK
 
 
-def _resolve_user_language(override: str | None = None) -> str:
-    """语言提示（zh/en）—— ct-base §1.1 三级优先级。
+def _resolve_user_language(override: str | None = None, query: str = "") -> str:
+    """语言提示（zh/en）—— ct-base §1.1 三级优先级，权威实现委托共享 i18n。
 
     1) 显式 override 最高（中文语境→zh / 英文→en）；
-    2) 否则按 scripts/i18n.py::_current_lang() 判定；
-    3) 失败回退 "zh"。
+    2) 否则按【输入 query 文本内容】判定（detect_text_language：中文系统+英文输入→en，
+       不被系统 locale 误判 zh——2026-10-20 补齐第 2 级，审计 P1-2）；
+    3) query 为空时回退系统 locale（_current_lang）。
     与 `locale`（引擎输出开关）并存，本字段仅作 caller→coze 的提示。
     """
-    if override:
-        v = str(override).strip().lower()
-        if v.startswith("zh"):
-            return "zh"
-        if v.startswith("en"):
-            return "en"
     try:
         _scripts = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
         if _scripts not in sys.path:
             sys.path.insert(0, _scripts)
         import i18n as _i18n  # type: ignore
-        lang = (_i18n._current_lang() or "").lower()
-        if lang.startswith("zh"):
-            return "zh"
-        if lang.startswith("en"):
-            return "en"
+        return _i18n.resolve_user_language(query if query else "", override)
     except Exception:  # noqa: BLE001
         pass
     return "zh"
 
 
-def _with_user_language(params: dict | None, override: str | None = None) -> dict:
-    """把 user_language 注入 params（已有有效值不覆盖）—— §1.1 单一承载位。"""
+def _t(key: str, **kwargs) -> str:
+    """i18n 取文案（ct-base §1.1 language_policy：用户可见文案一律经 t()，
+    支持 zh/en 双语与 {placeholder} 插值）。i18n 为随包注入共享件，懒加载。"""
+    try:
+        _scripts = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
+        if _scripts not in sys.path:
+            sys.path.insert(0, _scripts)
+        import i18n as _i18n  # type: ignore
+        return _i18n.t(key, **kwargs)
+    except Exception:  # noqa: BLE001
+        return key
+
+
+def _with_user_language(params: dict | None, override: str | None = None,
+                        query: str = "") -> dict:
+    """把 user_language 注入 params（已有有效值不覆盖）—— §1.1 单一承载位。
+
+    query：用户原始请求文本，供三级解析的内容级检测（ct-base §1.1）。
+    """
     out = dict(params or {})
     cur = str(out.get("user_language") or "").strip().lower()
     if cur.startswith("zh"):
@@ -351,7 +360,7 @@ def _with_user_language(params: dict | None, override: str | None = None) -> dic
     elif cur.startswith("en"):
         out["user_language"] = "en"
     else:
-        out["user_language"] = _resolve_user_language(override)
+        out["user_language"] = _resolve_user_language(override, query)
     return out
 
 
@@ -504,11 +513,77 @@ def _is_token_error(code: int, body: str) -> bool:
     return any(k in t for k in ("token", "unauthor", "forbidden", "invalid", "auth"))
 
 
+def _coze_async_poll(endpoint_base: str, run_id: str, timeout: int,
+                     headers: dict | None = None):
+    """异步协议：轮询 {endpoint_base}/run/status/{run_id}（参考 ct-literature
+    fetch_coze_unified._coze_async_poll，改适配 meta-analysis 的错误处理风格）。
+
+    背景：ct-meta 统一端点对重计算任务（NMA / 深滚雪球 / 批量 PDF / 多图渲染）
+    返回 `{status:"accepted", run_id}` 而非同步结果——服务端还要跑数分钟，
+    同步响应必被网关 60s 掐断。此前客户端不识别该协议，把 accepted 信封当
+    同步响应对待 → result 缺失 → 空结果。
+
+    轮询策略（与 ct-literature / ct-registry 对齐）：
+      - 指数退避：首轮 5s，逐轮 ×2 封顶 30s；总上限 timeout 秒；
+      - 轮询 GET 为短请求：单次网络抖动 / 单次超时 / 404（最终一致性窗口）
+        均续轮，不废弃服务端任务；401/403 鉴权问题立即失败（重试无意义）；
+      - 终态 completed → data["result"] 或 data 本体（与 /run 同步路径同口径）；
+        failed/cancelled → 抛 RuntimeError；到期 → 抛 RuntimeError。
+
+    返回 response data dict（completed 时的最终结果 payload）。
+    失败/到期抛 RuntimeError（与 _post_run 风格一致）。
+    """
+    status_url = "%s/run/status/%s" % (endpoint_base.rstrip("/"), run_id)
+    hdrs = headers or _headers(endpoint_base + "/run")
+    deadline = time.time() + timeout
+    wait = 5.0
+    while time.time() < deadline:
+        try:
+            req = urllib.request.Request(status_url, method="GET", headers=hdrs)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise RuntimeError(
+                    f"coze 异步轮询鉴权失败 HTTP {e.code}（run_id={run_id}），"
+                    f"请检查 COZE_META_TOKEN 是否有效")
+            # 404（最终一致性窗口）/ 其它 5xx（网关抖动）：续轮等终态
+            time.sleep(min(wait, max(1, deadline - time.time())))
+            wait = min(wait * 2, 30)
+            continue
+        except Exception:
+            # 连接抖动 / 单次超时：服务端任务不受影响，续轮（deadline 兜底）
+            time.sleep(min(wait, max(1, deadline - time.time())))
+            wait = min(wait * 2, 30)
+            continue
+        status = data.get("status")
+        if status == "running":
+            time.sleep(min(wait, max(1, deadline - time.time())))
+            wait = min(wait * 2, 30)
+            continue
+        if status == "failed":
+            raise RuntimeError(
+                f"coze 异步计算失败（run_id={run_id}）：{data.get('error', 'unknown')}")
+        if status == "cancelled":
+            raise RuntimeError(f"coze 异步计算被取消（run_id={run_id}）")
+        # completed（或 status 缺失的兜底）：最终结果两种形态
+        #  (a) 平台已重命名：{"status", "result": {...}}
+        #  (b) 直接是 result dict
+        return data.get("result", data)
+    raise RuntimeError(
+        f"coze 异步计算超时（{timeout}s，run_id={run_id}）；"
+        f"建议缩小分析范围 / 减少研究数后重试")
+
+
 def _post_run(run_url: str, body: bytes, headers: dict, timeout: int):
     """POST 到 coze /run 端点，返回 (raw_text, elapsed_seconds)。
 
     HTTPError → 抛 _CozeHttpError（带 code/body，供 token 错误判定）；
     网络层 URLError → 抛 RuntimeError（不可达，不触发回退）。
+
+    异步协议（2026-10-26 新增）：若 coze 端返回 `{status:"accepted", run_id}`（
+    长任务异步网关），自动轮询 `/run/status/{run_id}` 回收最终结果。网关 60s 硬超时
+    必掐断同步响应，只有异步轮询能完整回收 NMA / 批量 PDF / 多图渲染等长任务。
     """
     req = urllib.request.Request(run_url, data=body, headers=headers, method="POST")
     _t0 = time.time()
@@ -527,6 +602,23 @@ def _post_run(run_url: str, body: bytes, headers: dict, timeout: int):
             f"默认端点应为 https://ct-meta.coze.site/run（如被旧配置覆盖，"
             f"请检查 COZE_META_ENDPOINT 是否误指向 localhost）。"
         )
+    # 异步协议检测：accepted + run_id → 轮询回收（2026-10-26 新增）
+    try:
+        outer = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw, time.time() - _t0  # 非 JSON，保持原始 raw
+    if isinstance(outer, dict) and outer.get("status") == "accepted" and outer.get("run_id"):
+        run_id = outer["run_id"]
+        endpoint_base = run_url.rsplit("/run", 1)[0]
+        timeout_left = max(60, timeout - int(time.time() - _t0))
+        poll_result = _coze_async_poll(endpoint_base, run_id, timeout_left, headers)
+        # 构造与同步返回同构的 raw_text（外层 envelope 包装）
+        if isinstance(poll_result, dict):
+            poll_result.setdefault("status", "ok")
+            poll_result["_coze_async"] = True
+            poll_result["_coze_run_id"] = run_id
+        raw = json.dumps({"result": json.dumps(poll_result, ensure_ascii=False)},
+                         ensure_ascii=False)
     return raw, time.time() - _t0
 
 
@@ -837,7 +929,7 @@ def _post_run_with_fallback(run_url: str, body: bytes, headers: dict, timeout: i
             fb_headers = _headers(fb_url)
             if not _auth_gate(fb_url):
                 raise AuthRequiredError(
-                    f"coze 回退端点未授权（{fb_url} 不在 auto_approve_endpoints 白名单）。"
+                    _t("auth.coze_outbound", endpoint=fb_url)
                 )
             try:
                 _acquire_rate_limit()
@@ -857,7 +949,7 @@ def run_meta(task: str, data: dict, params: dict | None = None,
              figure: dict | None = None, query_origin: str | None = None,
              entry_point: str | None = None,
              debug: bool = False, user_language: str | None = None,
-             timeout: int | None = None) -> dict:
+             query: str | None = None, timeout: int | None = None) -> dict:
     """调用 coze 元分析工作流，返回解析后的结果 dict。
 
     Args:
@@ -902,7 +994,7 @@ def run_meta(task: str, data: dict, params: dict | None = None,
         "task": task,
         "data": data or {},
         # ct-base §1.1：user_language 仅承载于 params（顶层不双写）
-        "params": _with_user_language(params, user_language),
+        "params": _with_user_language(params, user_language, query or ""),
         "figure": fig,
         "query_origin": origin,
         "entry_point": entry_point,  # 调用入口标识（2026-10-07）：skill/workbench
@@ -932,8 +1024,8 @@ def run_meta(task: str, data: dict, params: dict | None = None,
     # ct-base §5 授权门控：首次出站须用户确认（未授权 → AuthRequiredError → 结构化错误）
     if not _auth_gate(run_url):
         raise AuthRequiredError(
-            f"coze 出站未授权（端点 {run_url} 不在 auto_approve_endpoints 白名单）。"
-            f"如同意发送请让用户确认后调用 approve_endpoint('{run_url}') 再重试。"
+            _t("auth.coze_outbound", endpoint=run_url)
+            + f" 如同意发送请让用户确认后调用 approve_endpoint('{run_url}') 再重试。"
         )
     # ct-base §5：出站 payload 发送前脱敏（剥离 PII）
     payload = sanitize_payload(payload)
@@ -1082,16 +1174,32 @@ def _is_legacy_envelope(env: dict) -> bool:
 
 
 def build_stage_payload(env: dict, debug: bool = False,
-                        user_language: str | None = None) -> dict:
+                        user_language: str | None = None,
+                        query: str | None = None) -> dict:
     """规范化 stage 信封：补齐 contract_version/schema/request_id/query_origin
     + skill_version（顶层）/ user_language（params 内，ct-base §1.1/§1.2）；
     coze 恒只返 SVG（2026-08-20 收紧）；byvar→subgroup 归一化。"""
     env = dict(env)
-    fig = dict(env.get("figure") or {})
+    # figure 兼容三种形态：None/空 → {}；dict（如 {"plots":["forest"]}）→ 原样；
+    # str（如 "forest"，run_analysis 公共 API 默认 figure="forest"）→ 单图 {"plots":[s]}；
+    # list（如 ["forest","funnel"]）→ {"plots": list}。避免对字符串/列表直接 dict()
+    # 触发 "dictionary update sequence element #0 has length 1" 崩溃（对话态直连必现）。
+    _fig_raw = env.get("figure") or {}
+    if isinstance(_fig_raw, str):
+        _fig = {"plots": [_fig_raw]} if _fig_raw else {}
+    elif isinstance(_fig_raw, list):
+        _fig = {"plots": _fig_raw}
+    else:
+        _fig = dict(_fig_raw)
+    fig = _fig
     fig["format"] = "svg"
     env["figure"] = fig
     if env.get("params") and "byvar" in env["params"]:
         env["params"] = {**env["params"], "subgroup": env["params"].pop("byvar")}
+    # 2026-10-26：effect_measure → sm 归一化（R 引擎只认 sm；之前 effect_measure 原样透传 →
+    # R 引擎走默认 OR 路径 → 要求 event_exp/n_exp → "Missing required columns"）
+    if env.get("params") and "effect_measure" in env["params"]:
+        env["params"] = {**env["params"], "sm": env["params"].pop("effect_measure")}
     if "contract_version" not in env:
         env["contract_version"] = CONTRACT_VERSION
     if "schema" not in env:
@@ -1102,7 +1210,7 @@ def build_stage_payload(env: dict, debug: bool = False,
     # 入口标识（2026-10-07）：skill/workbench，透传飞书 entry_point 列
     env["entry_point"] = env.get("entry_point") or _ENTRY_POINT
     # ct-base §1.1/§1.2：语言仅落 params、版本仅落顶层；调用方已给有效值则不覆盖。
-    env["params"] = _with_user_language(env.get("params"), user_language)
+    env["params"] = _with_user_language(env.get("params"), user_language, query or "")
     if not env.get("skill_version"):
         env["skill_version"] = _skill_version()
     if debug:
@@ -1122,7 +1230,7 @@ def attach_billing(env: dict, account_id: str | None = None,
 
 
 def run_stage(env: dict, debug: bool = False, transport=None,
-              user_language: str | None = None) -> dict:
+              user_language: str | None = None, query: str | None = None) -> dict:
     """发送 per-stage 信封并解析响应。
 
     - 旧 per-task 信封（无管线字段）→ 委派 run_meta（R1 双模在客户端层也成立）。
@@ -1134,9 +1242,10 @@ def run_stage(env: dict, debug: bool = False, transport=None,
             env.get("task"), env.get("data"), env.get("params"),
             env.get("figure"), query_origin=env.get("query_origin"),
             entry_point=env.get("entry_point"), debug=debug,
-            user_language=user_language,
+            user_language=user_language, query=query,
         )
-    payload = build_stage_payload(env, debug=debug, user_language=user_language)
+    payload = build_stage_payload(env, debug=debug, user_language=user_language,
+                                  query=query)
     # 2026-09-13：POST 前按 coze 契约校验出站信封（同 run_meta 主路径）。
     payload = _validate_outbound(payload)
     fp = _dedup_fingerprint(payload)
@@ -1148,8 +1257,8 @@ def run_stage(env: dict, debug: bool = False, transport=None,
     run_url = ep if ep.endswith("/run") else ep + "/run"
     if not _auth_gate(run_url):
         raise AuthRequiredError(
-            f"coze 出站未授权（端点 {run_url} 不在 auto_approve_endpoints 白名单）。"
-            f"如同意发送请让用户确认后调用 approve_endpoint('{run_url}') 再重试。"
+            _t("auth.coze_outbound", endpoint=run_url)
+            + f" 如同意发送请让用户确认后调用 approve_endpoint('{run_url}') 再重试。"
         )
     payload = sanitize_payload(payload)
     _assert_query_origin(payload)  # 出站硬守卫，杜绝空归因（2026-08-30）

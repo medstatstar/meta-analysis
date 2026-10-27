@@ -294,11 +294,17 @@ def dedup_probe(topic, year_from=None, year_to=None, max_results=8,
     auto_translated = False
     trans_error = None
     if not _en and _has_cjk(topic):
+        _tr_reason = {}
         try:
             from topic_translate import translate_to_english
-            _en = (translate_to_english(topic) or "").strip()
+            _en = (translate_to_english(topic, reason_out=_tr_reason) or "").strip()
         except Exception as e:  # noqa: BLE001 - 翻译不可用不能中断探针
             trans_error = "%s: %s" % (type(e).__name__, e)
+        else:
+            # 失败原因带出（2026-10-20）：区分「端点全挂 / 主题超长 / 输出不合规」，
+            # 让 notice 给出可操作诊断而不是一句笼统的「未能自动翻译」。
+            if not _en and _tr_reason.get("reason"):
+                trans_error = _tr_reason["reason"]
         auto_translated = bool(_en)
     if _en:
         topic_en = _en
@@ -307,7 +313,7 @@ def dedup_probe(topic, year_from=None, year_to=None, max_results=8,
     # 「Cochrane 0 篇 = 新颖选题」假信号，还白费一次请求与限流额度）。
     cjk_untranslated = _has_cjk(topic) and not (topic_en or "").strip()
     if cjk_untranslated:
-        _why = ("自动翻译不可用（%s）" % trans_error) if trans_error else "未能自动翻译出合规的英文检索词"
+        _why = ("自动翻译不可用：%s" % trans_error) if trans_error else "未能自动翻译出合规的英文检索词"
         notice = ("⚠ 研究主题为中文，但 Europe PMC 索引的是英文摘要；%s，"
                   "故未能以英文检索，中文直检几乎必然 0 命中（并非真无文献）。\n"
                   "处理：在上方「英文检索词」框填入本主题的英文表达（如 "

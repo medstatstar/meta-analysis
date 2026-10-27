@@ -1,0 +1,110 @@
+# nma_codex — meta-analysis 技能内 CODEX 对齐的 NMA 模块骨架
+
+> 配套映射文档：`ct-base/references/meta_analysis_nma_vs_codex.md`
+> （CODEX 的 NMA/MBMA 能力 → ct-meta-analysis 模块 逐项对应表 + 八步工作流）
+
+## 实现状态（2026-10-14 已落地 coze 源码）
+
+- **R 计算（含 CODEX 对齐）已直接写进 coze 适配器源码**：`adapters/coze/src/r_engine/network_meta_analysis.R` 新增 `assess_transitivity()`（对应 CODEX 模块 B 传递性）与 `benchmark_nma_effects()`（对应 CODEX 模块 H 按适应症效应量基准）；`run_task.R` 的 `nma`/`nma_rank` 任务末尾新增**受 params 守卫**的可选调用：
+  - `params$transitivity_covariates`：研究级协变量表（study + 各协变量列）→ 触发传递性评估；
+  - `params$benchmark_reference`：用户从**公开已发表荟萃**提供的参考效应量（estimate/ci_low/ci_high/source）→ 触发基准比对，并在 notes 中带回"基准仅来自公开文献、非商业策展库"声明。
+- 既有 `nma`/`nma_rank`/`cnma` 行为**完全不变**（默认不传这两个 params 即走原路径）。
+- 已用真实 netmeta 拟合（netmeta 3.4.0）通过四分支功能测试（有/无协变量、有/无参考）。
+- 本 Python 包定位为 **前端脚手架 + 本地 dev 验证器**：`curation`/`network`/`transitivity`/`report` 负责数据准备与报告渲染，数学仍归 coze 端 `netmeta`（与技能 coze-only 计算架构一致）。`engine_dev.py`/`nma_engine.R` 仅本地离线复现 netmeta 调用，非生产引擎。
+
+
+## 定位与边界
+
+本包是 **CODEX 方法论的前端脚手架**，不重复造 math 引擎：
+
+| 模块 | 对应 CODEX 能力 | 实现 |
+|---|---|---|
+| `schema.py` / `curation.py` | A 证据策展 | 公开证据 → `CuratedStudy` 长表（借 CODEX 字段形状） |
+| `transitivity.py` | B 传递性评估 | 定性比较清单（无 R 依赖） |
+| `network.py` | C 治疗网络构建 | 连通性 / 环 / 孤立节点校验（无 R 依赖） |
+| `engine_dev.py` / `nma_engine.R` | D/F/G NMA 拟合·不一致性·SUCRA | **DEV-ONLY** 本地 `netmeta` 验证器（生产数学已落地 coze `network_meta_analysis.R`） |
+| `report.py` | I 合规产出物 | CODEX 风格基准报告（league + SUCRA + 置信度声明） |
+
+**数学引擎归属 `netmeta`**：生产路径走 coze 端 R 引擎（`r_packages.md` 已登记 netmeta 为频率学派 NMA 后端），与 `build_request.py` 的 `nma` / `nma_rank` / `cnma` 任务对接。`engine_dev` 只用于本地离线验证那套 netmeta 调用可复现。
+
+## 红线（BASE.md §9.1）
+
+- ❌ 不爬 CODEX 13,500 研究；❌ 不搬运患者级数据；❌ 不冒充其 UI。
+- ✅ 只借鉴结构 / 方法 / 公开阈值；数据全来自 CT.gov / PubMed / 已发表荟萃。
+- ⚠️ 公开路线的数据丰度 / QC 等级必然低于 CODEX，报告中显式标注证据置信度。
+
+## 目录
+
+```
+nma_codex/
+├── __init__.py
+├── schema.py          # CuratedStudy（CODEX 形状）
+├── curation.py        # 公开证据 → netmeta/coze 长表
+├── transitivity.py    # 模块 B
+├── network.py         # 模块 C（连通性/环/孤立节点）
+├── report.py          # 模块 I（CODEX 风格报告）
+├── engine_dev.py      # DEV-ONLY 本地 netmeta 封装
+├── nma_engine.R       # DEV-ONLY netmeta 脚本（手动拼 JSON，零额外依赖）
+├── run_demo.py        # 端到端演示
+└── demo_data.csv      # 4 干预连通网络（Placebo/A/B/C + 环）
+```
+
+## 用法
+
+### 1. 纯前端脚手架（无需 R）
+
+```python
+from nma_codex import curation, network, transitivity, report
+df = curation.load_arm_table("demo_data.csv")
+arm = curation.to_netmeta_arm(df)
+net = network.build(arm)                 # 网络校验
+trans = transitivity.assess(
+    curation.curate_from_public(arm, meta={"ta": "Oncology", "outcome": "OS"}))
+# 把 net/trans 与 coze 返回的 NMA 结果一并喂给 report.render(...)
+```
+
+### 2. 端到端演示（含 DEV 本地 netmeta 验证）
+
+```bash
+cd meta-analysis/scripts
+python -m nma_codex.run_demo
+# 默认调用 C:\Tools\R4.42\bin\x64\Rscript.exe 跑 netmeta，输出 nma_codex_demo_report.md
+```
+
+> ⚠️ `engine_dev` 默认指向 `C:\Tools\R4.42`——这是**本地开发/验证**用的 R。
+> 生产部署请勿启用本地 R；NMA 计算一律经 coze 端点（技能架构：coze-only 计算）。
+
+## 下一步（最小可行落地）
+
+1. 把 `curation` 接到 `ct-literature`(PubMed) + `ct-registry`(CT.gov) 自动落成 `CuratedStudy`（闭环 [2] 证据策展）。
+2. 把 `report.render` 接到 coze `nma` / `nma_rank` 任务的返回 JSON，直接产出 CODEX 风格报告。
+3. ✅（2026-10-14 已完成）`build_request.py` 已支持 `--transitivity-cov`（研究级协变量 CSV/JSON）与 `--benchmark-ref`（公开文献效应量参考 JSON），对 `nma`/`nma_rank` 注入（与 coze 端守卫分支严格一致；cnma 不注入） `params.transitivity_covariates` / `params.benchmark_reference`，打通 CODEX 对齐的传递性评估与基准比对到生产请求路径；数值协变量自动强转（R 端 is.numeric 分支依赖）。
+4. （可选）补 `nma_engine_bayes.R`（gemtc / multinma）做稀疏网贝叶斯兜底。
+
+---
+
+## 提示词操作案例（CODEX 对齐可选参数，2026-10-14）
+
+**案例 1 · 传递性评估**
+
+你说：
+> 做网络荟萃，顺便检查各研究间年龄和地区分布是否均衡（传递性）
+
+实际操作：
+```
+python scripts/build_request.py   --query "网络荟萃分析 比较各药物疗效"   --data data.csv   --transitivity-cov study_covariates.csv   --out request.json
+```
+`study_covariates.csv` 须含 `study` 列（与研究标签一致）+ 各协变量列；数值列自动强转。coze 端 `assess_transitivity()` 输出各对比的协变量均值与跨对比范围，不均衡处标 `possible transitivity concern`。
+
+**案例 2 · 公开文献效应量基准比对**
+
+你说：
+> NMA 做完后和 Cochrane 已发表的效应量比一下，看是否一致
+
+实际操作：
+```
+python scripts/build_request.py   --query "网络荟萃分析 比较各药物疗效"   --data data.csv   --benchmark-ref benchmark_refs.json   --out request.json
+```
+`benchmark_refs.json` 形如 `{"A vs B": {"estimate": 0.22, "ci_low": 0.05, "ci_high": 0.40, "source": "Cochrane 2021 MA"}}`。coze 端 `benchmark_nma_effects()` 逐对比对，落参考 CI 内标 `within_reference_CI`，并带回"基准仅来自公开荟萃、非商业策展库"声明。
+
+**兼容性**：不传这两个参数时请求与原行为完全一致；`cnma` 任务不注入（coze 端守卫未覆盖）。

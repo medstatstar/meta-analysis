@@ -4,6 +4,126 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.21.0] - 2026-10-27
+
+### Added（结果解读强化：方案二「规则增强 + LLM 叙述层」，用户裁定）
+- **规则层四件套（`adapters/coze/src/interpretation.py`，单一真相源，已同步 `adapters/interpretation.py`）**：
+  - `_cohen_text()`：效应量临床幅度分级——SMD/MD 按 Cohen 标准（|0.2| 小 / |0.5| 中 / |0.8| 大），OR/RR 按距无效值 1 的距离粗分（<1.2 边缘 / 1.5-2.5 中等 / >2.5 强），插入 caveats 首位；
+  - `_evidence_grade()`：证据强度综合评级 High/Moderate/Low/VeryLow（研究数不精确性 + I² 异质性 + CI 跨无效值三因子降级）；
+  - `narrative`：统计顾问口吻通读段（数据 → 方向/显著性 → 幅度 → 异质性 → 精度 → 发表偏倚 → 综合评级）；
+  - `key_numbers`：关键数字结构化列表（研究数/合并效应/CI/p/I²/τ²/Egger p/证据强度），供前端 chips 高亮。
+- **LLM 叙述层（`adapters/coze/src/llm_narrative.py` 新建 + `config/interp_llm_cfg.json`）**：规则层产出后调用 LLM（复用 topic_llm 同款 LLMClient 范式，doubao-seed-2-0-pro，thinking disabled）补 `llm_narrative`（通读）/ `llm_clinical_meaning`（结合结局方向的临床语义，结局方向未知时强制提示「好坏取决于结局定义」）/ `llm_next_actions`（按本组数据个性化的 2-3 条优先行动）。
+  - **防幻觉护栏**：① prompt 硬约束只允许引用输入数字；② 数字白名单后处理——全文本 finditer 完整匹配数字（修小数点被句切分拆碎的坑），白名单 = stats + 规则解读全量数字（含舍入容差 ±0.5%），含编造数字的整句剔除；③ 超时 25s / 解析失败 / 过滤后为空 → `llm_engine="rule_fallback"` 静默降级纯规则。
+- **main.py 接线**：`/run` 在 `_enrich_result_with_interpretation` 后新增 `_enhance_interpretation_llm`（executor 线程内同步调用 LLMClient + `asyncio.wait_for` 超时包裹，不阻塞事件循环，永不阻断主结果路径）。
+- **工作台解读卡（`workbench.html` + publish 副本同步）**：新增关键数字 chips（`.interp-chips`）、「✦ 统计顾问通读」（`llm_engine=llm` 时挂「AI 顾问」徽标）、「🩺 临床语义」、「🎯 优先行动」四区块；`hasContent` 纳入新字段。对话态经 `_normalize_stage` 内层透传自动携带，无需改动。
+
+### Tests
+- `tests/test_interp_v2_20261027.py`：规则层四件套（用户示例 SMD=-0.28/CI -0.97–0.40/p=0.414/k=4/Egger 0.001 → narrative 含 Cohen 小效应、evidence_grade=Low）、数字白名单护栏（合法句保留 / 同句编造整句剔除 / 跨句编造剔除且合法句保留）、递归数字收集。ALL PASSED。
+- py_compile 全过（interpretation.py / llm_narrative.py / main.py / adapters/interpretation.py）；workbench.html 两段内联 JS `node --check` 通过。
+
+## [2.20.3] - 2026-10-27
+
+
+### Changed（对话菜单对齐工作台框架 + 冗余屏蔽，用户裁定）
+- **对话态内嵌菜单修正**：`references/interactive_menu.md` §2 场景索引与已发布工作台五大模块对齐（选题评估 / 文献准备 / Meta 分析 / 样本估算(开发中) / 论文撰写），头部加框架映射说明。
+- **无引擎支持条目移除（防错误调用）**：逐条核对 `run_task.R` dispatcher（~40 task）后，删除菜单虚标条目——ROBINS-I、RoB 交通灯图、NMA 不一致性热图（R 引擎零命中）；"文献筛选 / PDF 批量下载 / 图形数字化 / 缺失值插补"（无对应 task，调用返回 `unknown_task`）。§2 头部 + ⑦ 尾部加 ⛔ 注记，明示对话态不得承诺或尝试调用。
+- **论文撰写模块对话态屏蔽（2026-10-27 用户裁定）**：Block C（C1 初稿 / C2 AI 评审 / C3 参考核验 / C4 投稿前 QA）与本地 writing-advisor 暂时仅工作台提供。落地：SKILL.md triggers 删 7 条论文撰写触发词（论文撰写/写稿/初稿/投稿建议/发表建议/writing advisor/manuscript），§2.1 加 DISABLED 横幅（含解冻路径），§2.3 writing-advisor 引用划线标注，对话态不传 `advise=True`。
+- **顺带清理**：triggers 删已停用 CCM 的 4 条触发词（上下文菜单/对话菜单/全流程菜单/flow menu，2026-09-27 已裁定停用）；③ 生存 Meta 行过时注记 "（survmeta 已移除）" 修正为正常表述（`survival_meta` 引擎存在）。AGENTS.md §7 同步加框架对齐与屏蔽注记。
+- 保留不动：①②③④⑤⑥ 全部条目经引擎核对真实支持（含 esc 自实现转换 d↔logOR / t·F→d / mean→d / r↔z / d↔g / NNT）；工作台页面（workbench 五模块、writing 选项卡）零改动。
+
+## [Unreleased] — 2026-10-25 — A3 付费墙全文回传 Option B 前端（书签脚本 + 回传助手页，workbench.html + stash_helper.html）
+
+> 承接共享后端（a3_pending / a3_stash_pdf）的前端落地，是「下载由浏览器侧驱动」方案 B：出版商页签里点一个书签脚本 → 脚本用 `fetch(..., {credentials:'include'})` 把 PDF 当 blob 拉下来 → 打开工作台 `stash_helper` 回传助手 popup → 助手页校验 `%PDF` 头 → 经 `POST /a3_stash_pdf` 回传到会话 → 助手页 `postMessage` 回工作台触发刷新。全程**同源 fetch**（书签脚本跑在出版商源下，天然带登录态 + cookie），免 CORS。
+
+### Added — Option B 书签脚本 + 回传助手
+- **`stash_helper.html`**（新建，server.py 加 `@app.get("/stash_helper", response_class=HTMLResponse)` 服务）：
+  - 极简页（中文）：标题「PDF 全文回传助手」、会话/篇目/文件/状态行 + 关闭按钮。
+  - `window.addEventListener('message')` 接收 `{type:'ma-a3-stash', blob, filename, session_path, doc_index}`；校验 `%PDF` 头（`blob.slice(0,5).text()`），非 PDF 给友好错误（"疑似下到登录页/验证页"）。
+  - `POST ${WORKBASE}/api/a3_stash_pdf`（FormData）→ 成功：状态变绿 + 显示关闭按钮 + `window.opener.postMessage({type:'ma-a3-stashed', doc_index}, '*')` 通知工作台刷新。
+  - `no-cache` 响应头（`Cache-Control: no-store`），保每次加载最新 JS。
+- **`workbench.html`** 改动：
+  - **CSS**：`.btn-mini.bm`（小书签按钮）/ `.a3-bm-toast`（复制成功提示）。
+  - **`renderA4Downloads()`**：对 `needs_upload` / `failed` 篇目新增「📎 复制书签脚本」按钮行；复制成功闪 `.a3-bm-toast`。
+  - **`a3BmCopy(sessionPath, docIndex)`**：构建书签脚本 JS 为字符串 → `navigator.clipboard.writeText()`（fallback `execCommand('copy')`）。书签脚本逻辑：
+    - 在出版商页面检测 PDF 链接（多选择器 + 评分：href 命中 `.pdf` / 命中 `pdf` 关键词 / 文本命中 "PDF" / "Full Text" 等）。
+    - `fetch(pdfUrl, {credentials:'include'})` 拉 blob。
+    - `FileReader.readAsText(blob.slice(0,5))` 校验 `%PDF`。
+    - `window.open(helperUrl, 'ma_a3_stash', ...)` 打开回传助手 popup（宽 520 高 360）。
+    - `setInterval` 轮询 `win.document.readyState === 'complete'` → `win.postMessage({type:'ma-a3-stash', blob, filename, session_path, doc_index}, '*')`。
+  - **`window.addEventListener('message', ...)`**（新增）：监听 `{type:'ma-a3-stashed'}`（回传助手回的通知）→ 闪 toast + `fetchSession().then(applySession)` 整页刷新。
+- **验证**（Playwright headless, Chromium, `--noproxy`）：**15/15 全过**——① `a3_pending` 返回正确 pending 清单；② `stash_helper.html` 加载含正确 HTML/JS（`ma-a3-stash` 监听、`%PDF` 校验）；③ `workbench.html` 含 `a3BmCopy` 函数和 `ma-a3-stashed` 监听；④ 端到端：构造 `%PDF` blob → `POST /api/a3_stash_pdf` → 200 + `status=downloaded` → `a3_pending` 确认 pending 数从 3 降到 2（doc 0 移出清单）。零 console/page 错误。
+
+## [Unreleased] — 2026-10-25 — A3 付费墙全文回传 Option A 前端（深链+拖拽，workbench.html）
+
+> 承接上一节点「内网/订阅全文下载共享后端（a3_pending / a3_stash_pdf）」的前端落地。在 A3 PDF 下载节点逐篇清单中，对 `needs_upload` / `failed` 篇目新增：① 出版商深链按钮（DOI 解析器直链，浏览器带机构登录态跟跳，免 CORS）② 逐篇拖拽/选择文件上传区（调 `POST /a3_stash_pdf`，只存不抽、不受 `features.a4_extraction` 闸门）。这是"下载由浏览器侧驱动"方案 A 的最小完整形态，B/C 可复用同一后端端点。
+
+### Added — workbench.html A3 付费墙回传 UI
+- **CSS**：`.a3-stash-row`（行容器）/ `.a3-stash-drop`（拖拽区 + dragover / has-file 状态）/ `.a3-stash-progress` / `.a3-stash-done`，最小变量复用（`--wb-line` / `--wb-ok` / `--wb-brand` / `--wb-bg-2`）。
+- **`renderA4Downloads()`**：`needs_upload` / `failed` 篇目由"可到出版商页面自行下载"改为**可操作**：
+  - 深链按钮：`https://doi.org/<DOI>`（DOI 解析器 → 出版商落地页；机构/EZproxy 登录态带 cookie 跟跳）；无 DOI 篇目不渲染深链。
+  - 拖拽区：`ondragover` / `onddragleave` / `ondrop` + 点击触发隐藏 `<input type="file" accept=".pdf">`。
+  - 文案全 `zh ?` 三元（英：`↗ Open on publisher (institutional access)` / `Drop PDF here · or click to choose` / `✓ Stored (not extracted; reused when a4_extraction enabled)`）。
+- **JS 处理器**：`a3StashDragOver` / `a3StashDragLeave` / `a3StashDrop` / `a3StashOnFile` / `a3StashIsPdf`（校验后缀，非 PDF→flash）/ `a3StashDoUpload`（`FormData` → `fetch("/api/a3_stash_pdf")` → 成功：更新 drop 文案+状态类 → `fetchSession().then(applySession)` 整页重渲染，stash 行替换为 `.a4pdfpath` 已下载行）。
+- **验证**（Playwright headless, Chromium, `--noproxy`, fixture 3 篇：OA 已下 / needs_upload / failed）：**11/11 全过**——① OA 篇有 `.a4pdfpath`、无 stash 行；② needs_upload 篇深链 `href=https://doi.org/10.1234/test.2024`、拖拽区、file input 均到位；③ failed 篇也有 stash 区；④ 选 PDF → stash → 行变 `.a4pdfpath`、stash 行消失；⑤ 零 console/page 错误。夹具与脚本已清理。
+
+## [Unreleased] — 2026-10-24 — 工作台页面符合 ct-base 统一规范（4 偏离全修 + 2 建议收口，待重新部署）
+
+> 依据 `ct-base/references/workbench_ui.md` + `ct-base/docs/07-publish-checklist.md` §16.12/§16.13 审计（报告 `CT_WORKBENCH_PAGE_AUDIT_meta-analysis.md`）。磁盘修复已完成；线上生效需重新部署（重跑 `install_genie.py` + 原 appId 覆盖发布，待单独授权）。
+
+### Fixed — 页面规范偏离
+- **§16.2 声明条**（偏离 1）：`workbench.html` 三处 `liteNotice`（HTML 可见文案 / zh i18n / en i18n）改回家族统一句式，仅 `{skill}` 为 `meta-analysis` 差异，语义对齐「简化版 → 装技能」定位。
+- **favicon 生产 404**（偏离 2）：`build_publish.py` 白名单新增 `assets/icon.svg`（构建带入载荷），删载荷根遗留死文件 `publish/icon.svg`；`/icon.svg` 路由无需改动，生产布局解析验证通过。
+- **§16.13 C6 安全响应头**（偏离 3）：`server.py` 新增全局 `@app.middleware("http")` 注入 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'`（CSP 不引入 `script-src`，保内联 JS/CSS）；Anaconda3 fastapi/uvicorn 栈端到端实测三路由均下发。
+- **跨技能硬编码凭据依赖**（偏离 4，上一轮已修）：样本量凭据改自带 `adapters/ctss_token.py`，版本字段改自带常量（env 可覆盖），满足 §5.3 R3 + §16.12 自包含。
+
+### Changed — 品牌一致性
+- 品牌色 `clinical-indigo`(#1C6DD0) → 框架未分配备选 `clinical-teal`(#0e7490/#06b6d4)，消除与 ct-advisor 撞色。
+
+### Unaffected — 一致性建议经评估故意不动作
+- `workbench.config.json`：meta-analysis 不消费该文件（配置内联 `#wb-config`，§6.1 回退允许），补文件属死重，维持内联与其他「消费该文件」技能逻辑自洽。
+
+## [Unreleased] — 2026-10-25 — 选题界面细节自检规范沉淀（SKILL.md §8.6，对齐 ct-base §21）
+
+> 选题界面经多轮自动检查仍反复冒细节缺陷（提示文案与后端 `_infer_picos` 脱节、结果页两按钮形似冗余却静默丢 PICOS、开关名「中英对照」歧义、缺失维度占位「待填」无引导）。统一规范见 ct-base `references/workbench_ui.md` §21（2026-10-25 新增，ct-base v1.4.19）。
+
+### Added — 技能内自检闭环
+- **SKILL.md 新增 §8.6「Workbench UI 细节自检（发布前必做，对齐 ct-base §21）」**：把本次排查经验固化为 5 项发布前审计——① 文案对照代码（主题框不得诱导写 P:/I: 标签，入口是「PICOS 增强」折叠块）；② 相似控件读 handler 证伪（确认 PICOS / 重新评估 均须读 result 范围）；③ 标签自解释（开关名「显示中英文对照」）；④ 占位给示例（`PICOS_EG_ZH/EN`，非"待填"）；⑤ 动态 DOM 真实浏览器实测。每项均指向 ct-base §21 的红线 / 交付闸门 / 验收。
+- **关联代码改动（已落盘，本次随规范一并登记）**：`adapters/workbench/workbench.html` 结果页缺维占位由"待填"改为 `PICOS_EG_ZH/EN` 示例；结果页「↻ 重新评估」绑定 `reassess()`（读 result 范围，修复静默丢 PICOS）；PICOS 中文对照开关名「中英对照」→「显示中英文对照」；主题框 hint 明确"本框写 P:… 标签不会被解析"。
+- **细节机检接入 ct- 家族通用引擎（零叶子硬编码，随 ct-base v1.4.20）**：把"界面细节缺陷"变成可机械判定的 FAIL/WARN，实现对 bug 的自动检查而非仅靠人工 review。引擎为 **`ct-base/scripts/wb_detail_check.py`**（家族单点、零第三方依赖、仅标准库）；本技能随包持有**字节一致副本** `scripts/wb_detail_check.py` + 叶子专属 `scripts/wb_detail_check.rules.json`（`scope.selectors=[".picos-in"]`、`scope.values=["seed","result"]`，enable scope；dupctl 暂关待 `dup-verified:` 闭环）。引擎内置家族级默认词表，叶子用 `*_add`/`i18n_whitelist_force` 扩展，`scope`/`dupctl` 选择器经 rules.json 注入——**引擎不认识本技能任何 class**。已实现 `C-detail-label`/`C-detail-placeholder`/`C-detail-claim`/`C-detail-i18n-ph`/`C-detail-scope`；`C-detail-emptystate(容器级)` 未落地。注意与 §18.3 结构闸门脚本 `wb_ui_check.py`（C1–C7，带 `--set-version`）**分属不同脚本、勿混淆**。负向验证：注入「中英对照」+「待填」→ 2 FAIL 拦截（exit 1）；真实 `workbench.html` → 0 FAIL / 0 WARN（含 scope，exit 0）。SKILL.md §8.6.1 同步改写。
+- **按钮动作命名对齐 ct-base §21.5（批准 / 修订 / 确认 / 打回，保留语义·统一措辞）**：用户反馈不同页面按钮组合不一（审批门「✓ 批准 / 放行 + ✎ 修订」vs 别处「确认」）。结论：二者语义不同（阶段审批门推进流程 / 输入确认锁定输入），**不合并**，只统一族内措辞并立家族约定。修 `workbench.html` 批准门两处注释漂移——"批准 / 修订 两档""批准 / 打回 决策框"→"✓ 批准 / 放行 + ✎ 修订 两档""✓ 批准 / 放行 决策框"（按钮与用户可见提示本就是"批准 / 放行"，仅注释漂移）。约定落 ct-base `workbench_ui.md` §21.5（三张动作族固定 zh/en 动词 + 禁忌：审批门主按钮不得叫"确认"、打回≠修订）。
+- **审批门 i18n 缺口修复（决策条中英双语，原"遗留"已修）**：`renderActions()` 补 `const zh = WB_LANG !== "en"`，把 5 个按钮（`✓ 批准 / 放行`→`✓ Approve / Release`、`✎ 修订`→`✎ Revise`、`✓ 完成下载`→`✓ Finish download`、`✓ 完成`→`✓ Done`）+ A3/A4 提示 + 备注占位（`备注（可选，记入审计）`→`Note (optional, recorded in audit)`）全部改 `zh ?` 三元。此前这些走 `mk()` 硬编码中文、英文界面仍显中文。切语言经 `reloadSession→applySession→render→renderNode→renderActions` 全量重渲染生效（已核链路）。**Playwright 实测**（桩 `STATE.await`=A4 驱动 `renderActions`）：中→英切换后按钮/提示/占位全部正确切换、零 console/page 错误。注：这些是 JS 动态创建节点，静态 `wb_detail_check` 扫不到，属 §21"需实测兜底"项。
+
+## [Unreleased] — 2026-10-25 — 内网/订阅全文下载共享后端（a3_pending / a3_stash_pdf，A/B/C 方案共用基座）
+
+> 评估结论：发布版 web 应用后端在云端、coze 也在云端，**都够不到用户内网**；唯一在内网里的组件是**用户浏览器**（带订阅机构 IP 识别 + 出版商登录态）。故付费墙全文下载只能由「浏览器侧」驱动（伴生扩展 / 书签脚本 / 人工深链）。本次新增两个后端端点，作为 A/B/C 三套方案的**共用基座**：① 读待下清单 ② 把浏览器下到的 PDF 回传归位。
+
+### Added — 内网下载后端基座（已落盘 `adapters/workbench/server.py`，TestClient 验证 13/13 通过）
+- **`GET /api/a3_pending`**：机器可读的「尚缺本地 PDF」篇目清单（纯读、与抽取无关）。返回每篇 `{doc_index, title, doi, pmid, url, fetch_url, status}`；`fetch_url` 优先 study 直链，否则 `https://doi.org/<doi>`，再否则 PMC。供浏览器侧用自身内网 IP + 登录态去取。**不受 `features.a4_extraction` 闸门**。
+- **`POST /api/a3_stash_pdf`**：把「用内网/浏览器下载到的付费全文 PDF」**存进会话并归位到某篇（只存不抽）**。与 `/api/upload_pdf`（受 409 闸门、做 2×2 抽取）的关键区别：不做抽取、**不受 `features.a4_extraction` 闸门**——专为 A4 屏蔽期：先把 PDF 落盘到 `block_a.A4_PDF_CACHE_DIR`（稳定命名 `_pdf_stem`，后续 `a4_stream` 重跑命中缓存不重下）、把该篇 `status` 标 `downloaded`、回写会话（同步镜像到 `last_view.await.a4_result`）。**校验 `%PDF` 头**——拒绝把登录页/验证页当全文（400）。
+- **CORS**：仅反射 `chrome-extension://` / `moz-extension://` 源（扩展页面上下文用）；书签脚本走 FormData `simple request`（免预检）。不反射任意源（安全）。扩展更推荐把工作台 origin 加进 `host_permissions`（完全免 CORS）。
+- **令牌（可选）**：设了环境变量 `CT_A3_STASH_TOKEN` 才校验（`Authorization: Bearer` 或 `token` 字段/查询参数）；未设则开放（与本地无鉴权应用一致）。发布到公网时建议设置。
+- **验证**：用 `fastapi.testclient.TestClient` 直接打路由（不扰线上 127.0.0.1:8765）：① `pending` 返回 1 条且 `fetch_url=https://doi.org/10.1234/test.2024`；② 传真 `%PDF` → 200 + `status=downloaded`、会话文件 `per_doc[0].status` 已落盘、`pdf` 文件存在；③ 传非 PDF（登录页 HTML）→ 400；④ 设令牌后缺令牌 401 / 带令牌 200（GET 与 POST 均验）。`/api/upload_pdf` 与 `/api/upload_pdf_auto` 的 409 闸门确认未动。
+
+### Context — 架构前提（评估产出，决定方案走「浏览器侧」）
+- 终端可能接内网（校园网/VPN，出版商认订阅机构 IP）或浏览器带登录态 → 可下付费全文；但**后端/coze 在云端，无法借内网**。三方案：A 深链 + 原生下载 + 拖回（免 CORS）、B 书签脚本同源 fetch、C 伴生扩展（`host_permissions` + 跨站 cookie）。A/B/C 共用上面两个端点。
+- 注：磁盘代码已落地，线上生效仍需重新部署（重跑 `install_genie.py` + 原 appId 覆盖发布，待单独授权）；本地 `127.0.0.1:8765` 需重启 uvicorn 才能加载新路由（当前 PID 73952 仍跑旧代码）。
+
+## [Unreleased] — 2026-10-19 — coze 端点落实 ct-base §1.4 `query_origin` 准入闸门（待部署，随下一版发布）
+
+> 随 ct-base v1.3.33 契约 §1.4 落实。改动在 `adapters/coze/src/main.py`（meta-analysis 工作流源码），**仅端点侧行为**；部署需重新打包上传 Coze（手动，待授权）。
+
+- **合并守卫 `_guard_query_origin()`**：占位哈希闸门（2026-09-13）保留 + 新增 `query_origin` 空值拒绝（缺失 / `None` / 空串 / 纯空白 / 非字符串 → 返回 `""` 拒绝）。`/run` / `/stream_run` / `/async_run` / `/node_run` + 内部 run 分支共 5 个调用点挂接。
+- **动因 / 零误伤**：同 ct-registry（裸 POST 实测）；客户端出站必带非空 query_origin。
+
+## [2.20.2] — 2026-10-17 — SkillHub 卡面「需配置 API Key」徽章措辞修正（零用户侧配置事实对齐）
+
+### Changed — 措辞对齐事实（零行为变更）
+
+- SkillHub 竞品扫描发现卡面带平台「需配置 API Key」徽章，被「不限 API Key」筛选器排除，与「用户无需配置任何 key」的事实相悖（徽章疑由 `network: required` 触发）。
+- `permissions.network_note` 明确 `The cloud-engine credential is bundled in-package — no user-side API key configuration is ever required.`
+- frontmatter `summary` / `description` 末句统一为「云端 R 引擎凭证随包分发，零用户侧配置」（英文段同步）。
+- 未改：云端 R 引擎调用契约、IPD opt-in 语义、分析能力集均不变。
+
 ## [2.20.1] — 2026-10-09 — 工作台快速通道 504 根治 + skillname 落库口径统一
 
 ### Archived — 架构整理（2026-10-08）

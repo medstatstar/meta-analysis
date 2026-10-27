@@ -25,8 +25,14 @@
 
 输出：人类可读报告 + JSON 报告（--json <path> 可选）。全 GO → 退出码 0，否则 1。
 
+官方 ct-base 发布闸门链（2026-10-20 接入，BASE.md §16.0/§16.8/§16.11）：
+  可选前置 --inject（publish_inject 刷新共享件，会改文件）→ §16.0 clawhub_security_audit
+  （网络容忍 --warn-only，离线自动降级不阻断）→ §16.8 shared_sync_check（共享件一致性）
+  → 本管线 G1–G9 → §16.11 spec_lint（ERROR 清零）。
+
 设计：本脚本只做「只读核对 + 本地计算校验」，绝不发起任何出站请求、
 绝不自动修改源文件、绝不触发 coze 部署 / git push / 平台 publish。
+（例外：--inject 显式开启时才会改文件；§16.0 clawhub 闸门为网络容忍项，离线降级为提示。）
 """
 
 import argparse
@@ -350,10 +356,104 @@ def g9_publish_freeze():
                 f"⛔ 发布冻结中：{reason}（解除：删除 adapters/DEV_POLICY.json）")
 
 
+def _ctbase_script(name):
+    """定位 ct-base 官方闸门脚本（skills/ct-base/scripts/<name>）。"""
+    return os.path.join(CTBASE, "ct-base", "scripts", name)
+
+
+def _run_timeout(cmd, cwd=None, timeout=240):
+    """运行子进程（带超时）。超时返回 (124, "", "TIMEOUT")。"""
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=timeout)
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "", "TIMEOUT"
+
+
+def g0_clawhub_security():
+    """§16.0 ClawHub 安全审计比对闸门（官方发布链第一位，2026-10-20 接入）。
+
+    只读比对 + --warn-only（网络容忍）：离线 / 抓取失败 / 无缓存 HTML 时不阻断
+    （开发期可离线跑本闸门）；线上发布前须联网重跑并确保 High/Critical 的
+    STILL_PRESENT 清零（BASE.md §16.0）。
+    """
+    script = _ctbase_script("clawhub_security_audit.py")
+    if not os.path.isfile(script):
+        return gate("§16.0 ClawHub 安全审计", True,
+                    f"WARN: 未找到 {script}（线上发布前须补跑 clawhub_security_audit）")
+    rc, out, err = _run([PY, script, "--slug", "meta-analysis", "--namespace", "medstatstar",
+                         "--skill-dir", SKILL, "--warn-only"], cwd=SKILL)
+    blob = out + err
+    m = re.search(r"STILL_PRESENT=(\d+)", blob)
+    n_present = int(m.group(1)) if m else 0
+    offline = bool(re.search(r"无法(?:抓取|连接|访问)|ConnectionError|timed out|超时|URLError|Failed to|Max retries", blob))
+    if n_present == 0 and offline:
+        return gate("§16.0 ClawHub 安全审计", True,
+                    "WARN: 离线/未取到 ClawHub 审计页，STILL_PRESENT 未能自动比对（线上发布前须联网重跑）")
+    if n_present:
+        hi = len(re.findall(r"(?i)\b(?:High|Critical)\b", blob))
+        return gate("§16.0 ClawHub 安全审计", True,
+                    f"WARN(--warn-only 不阻断): STILL_PRESENT={n_present}"
+                    f"（High/Critical 字样 {hi} 处）——线上发布前须逐项整改/人工确认")
+    return gate("§16.0 ClawHub 安全审计", True, "无 STILL_PRESENT（审计项已整改或本地无命中）")
+
+
+def g0_shared_sync():
+    """§16.8 共享件一致性闸门（2026-10-20 接入）。离线只读。
+
+    严格件（term_map / drug_name_map / kw_lexicon + 10 个 Python 共享模块）字节级
+    一致 + 消费者契约符号核对；漂移 / 缺符号 → NO-GO（exit 1）。带 240s 超时：
+    meta-analysis 的 adapters/coze/.venv 会使消费者契约遍历极慢，超时按 WARN 提示
+    单独完整跑（严格件字节比对很快，漂移会在超时前体现）。
+    """
+    script = _ctbase_script("shared_sync_check.py")
+    if not os.path.isfile(script):
+        return gate("§16.8 共享件一致性", False, f"未找到 {script}")
+    rc, out, err = _run_timeout([PY, script, "--skill-dir", SKILL,
+                                 "--base-dir", os.path.join(CTBASE, "ct-base")],
+                                cwd=SKILL, timeout=240)
+    if rc == 124 and "TIMEOUT" in (err or ""):
+        return gate("§16.8 共享件一致性", True,
+                    "WARN: 超时(>240s)——adapters/coze/.venv 使消费者契约遍历极慢；"
+                    "请单独运行 shared_sync_check.py 完整校验")
+    drift = re.findall(r"\[[^\]]+\][^\n]*(?:不一致|漂移|缺少|无此符号|缺 \d+ key|值不同)[^\n]*",
+                       out + err)
+    if rc == 0:
+        return gate("§16.8 共享件一致性", True,
+                    "严格件字节一致 + 消费者契约通过（扩展件 WARN 见脚本输出）")
+    return gate("§16.8 共享件一致性", False,
+                "; ".join(drift[:3]) or f"exit={rc}（共享件漂移，详见脚本输出）")
+
+
+def g0_spec_lint():
+    """§16.11 规范扫描器（spec_lint，2026-10-20 接入）。只读。
+
+    对 meta-analysis 跑 spec_lint --level WARN；ERROR 必须清零（exit 1 → NO-GO）。
+    带 180s 超时：spec_lint 的 _walk_files 会遍历 adapters/coze/.venv（极慢），
+    超时按 WARN 提示单独完整跑，不阻断。
+    """
+    script = _ctbase_script("spec_lint.py")
+    if not os.path.isfile(script):
+        return gate("§16.11 spec_lint 规范扫描", False, f"未找到 {script}")
+    rc, out, err = _run_timeout([PY, script, "--skills-root", CTBASE, "--skill", "meta-analysis",
+                                 "--level", "WARN"], cwd=CTBASE, timeout=180)
+    if rc == 124 and "TIMEOUT" in (err or ""):
+        return gate("§16.11 spec_lint 规范扫描", True,
+                    "WARN: 超时(>180s)——spec_lint 遍历 adapters/coze/.venv 极慢；"
+                    "请单独运行 spec_lint.py 完整校验")
+    if rc == 0:
+        return gate("§16.11 spec_lint 规范扫描", True, "ERROR=0（WARN/INFO 见报告）")
+    tail = ((out + err).strip().splitlines() or [""])[-1][:140]
+    return gate("§16.11 spec_lint 规范扫描", False, f"ERROR>0（exit={rc}），须整改：{tail}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="meta-analysis 部署前全管线闸门")
     ap.add_argument("--json", default="",
                    help="可选：输出 JSON 报告路径（默认不写文件，仅打印）")
+    ap.add_argument("--inject", action="store_true",
+                   help="前置步骤：先运行 ct-base publish_inject.py 刷新共享件（会修改文件，需显式开启）")
     args = ap.parse_args()
     args.json = _norm_path(args.json)
     os.makedirs(os.path.dirname(os.path.abspath(args.json)), exist_ok=True)
@@ -366,10 +466,24 @@ def main():
     results = []
     lines = []
 
-    checks = [g1_testsuite, g2_contract_backward, g3_envelope,
+    # Phase 0 · 官方前置：可选刷新共享件（--inject，会修改文件；默认只读不注入）
+    if args.inject:
+        inj = _ctbase_script("publish_inject.py")
+        if os.path.isfile(inj):
+            rc_i, out_i, err_i = _run([PY, inj, SKILL], cwd=SKILL)
+            ok_i = (rc_i == 0)
+            tail_i = ((err_i or out_i).strip().splitlines() or [""])[-1][:140]
+            res_i, line_i = gate("Phase 0 · publish_inject 共享件注入", ok_i,
+                                 "共享件已刷新至 ct-base 最新" if ok_i else f"注入失败 exit={rc_i}: {tail_i}")
+        else:
+            res_i, line_i = gate("Phase 0 · publish_inject 共享件注入", False, f"未找到 {inj}")
+        results.append(res_i); lines.append(line_i); print(line_i)
+
+    checks = [g0_clawhub_security, g0_shared_sync,
+              g1_testsuite, g2_contract_backward, g3_envelope,
               g4_publish_exclude, g5_secret_scan, g6_r_engine_audit,
               g7_coze_mirror_smoke, g8_pre_deploy_pollution_check,
-              g9_publish_freeze]
+              g9_publish_freeze, g0_spec_lint]
     for fn in checks:
         try:
             res, line = fn()

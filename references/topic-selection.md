@@ -155,15 +155,30 @@ capability boundary, resource constraints.
 
 ### Stage 2 — PICO/PECO operational decomposition
 See `pico-guide.md`. Every element must be expressible as a search term.
+
+> **Collect PICOS early, as structured dimensions (2026-10-25, aligned with the published workbench):**
+> - Solicit **P / I / C / O / S** as **five separate dimensions** up front — ideally already while clarifying candidate directions in Stage 1, otherwise here — each with a **concrete example** so the user knows the expected granularity, e.g.
+>   `P: 成人抑郁症患者，≥18 岁` · `I: DHA/EPA 鱼油补充 ≥8 周` · `C: 安慰剂` · `O: 抑郁量表评分 (HAMD/PHQ-9)` · `S: 随机对照试验`.
+> - Do **not** accept a "P:… I:… C:… O:…" free-text sentence as the PICOS input — the `P:`/`I:` markers are dimension *labels*, not part of the value. (The workbench topic box no longer parses them either; see the 2026-10-25 fix.)
+> - These confirmed dimensions become the basis for the search terms at the 检索前置门 (below); they must be specific enough to drive a real query, not just a vague direction.
 - **Gate 2**: self-check list all pass → Stage 3.
 
 ### Stage 3 — Four-dimension scoring + meta type selection
 Score with anchors, run R1–R6, choose meta type via decision tree.
 - **Gate 3**: total + veto rules applied; type chosen → Stage 4.
 
+### 检索前置门 — 英文翻译确认 + PICOS 检索词（Stage 4 之前必做，2026-10-25 对齐工作台）
+
+Meta 选题检索与查重走的是英文库（Europe PMC / Cochrane 索引英文摘要，PROSPERO 亦为英文注册库），中文主题 / 中文 PICOS 直接送检索会明显漏检。因此**在跑任何探针（Stage 4）或生成报告 `search_strategy` 之前**，必须先完成两步：
+
+1. **自动翻译 + 确认**：把用户的中文主题与中文 PICOS 自动翻成英文（可借 `adapters/topic_translate.py` 的 `translate_to_english` / `translate_picos`；无密钥时走本地对照表 + 在线兜底），把「英文主题 + 英文 PICOS」**完整呈现给用户确认 / 可编辑**后再使用——不要拿一份未经核对的译文白跑一轮（对齐工作台「翻译确认前置」）。用户可直接改英文、或声明用原文。
+2. **PICOS 派生检索式**：最终送检索 / 查重的检索词必须是**确认的 PICOS 五维英文值拼接**，而非原始主题原句。拼接规则与 `adapters/block_a.py` 的 `picos_dict_to_query` 一致——只取各维**值**拼接、丢弃 `P:/I:` 这类维度字母（字母送自由文本库会当字面 token 匹配、反而漏检）；某维缺失则跳过。示例：P/I/C/O/S 英文值 → `adults major depressive disorder DHA EPA fish oil supplementation placebo depressive symptom scale scores randomized controlled trial`。若用户只给了主题、未填 PICOS，则用翻译后的英文主题作为检索词，并在报告中标注「未提供结构化 PICOS」。
+
+- **Gate（检索前置）**：英文主题 + 英文 PICOS 已确认（或用户明确跳过翻译）→ 才能进入 Stage 4 跑探针；探针 keyword 用上述 PICOS 派生检索式（或英文主题），保证缺口证据 / 新颖性评分反映的是用户**真实的**研究问题，而非一句模糊的中文方向。
+
 ### Stage 4 — Dedup search + PRISMA/AMSTAR-2 pre-check
 See `dedup-search.md` and `compliance-precheck.md`.
-**Which dedup source to use is decided by the Topic Gating (见上文「选题门控」)**:
+**Which dedup source to use is decided by the Topic Gating (见上文「选题门控」)**; the probe keyword / report `search_strategy` MUST be the **PICOS-derived English query confirmed at the 检索前置门** (values only, dimension letters dropped), not the raw topic sentence.
 - **ct-literature installed** → use its `.merged.json` (full 6-source retrieval + dedup) as the dedup evidence.
 - **ct-literature NOT installed, user chose simple analysis** → use the **ct-search remote** probe `python adapters/ctsearch_client.py search --source europepmc --keyword "<topic>" --run` (real `hit_count` + top titles).
 - **Absolute fallback** (ct-search unreachable) → run the in-skill Europe PMC probe `adapters/literature_probe.py` (`dedup_probe`) for the **Cochrane (CDSR)** and **PubMed/MEDLINE** layers — live, no other skill required.

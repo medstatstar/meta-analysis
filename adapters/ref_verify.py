@@ -421,6 +421,7 @@ def verify_references(references: list, delay: float = 0.25) -> list:
 # CLI（调试用）
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    import argparse
     import sys
     ap = argparse.ArgumentParser(description="参考文献真实核验（CrossRef/PubMed）")
     ap.add_argument("--doi", help="DOI")

@@ -139,6 +139,12 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 
 按**分析目的**分组（7 大类）。每行给典型临床场景 + 可直接抄写的自然语言。同一分析可能从多个入口到达（如"森林图"既可从"两组 Meta"进入，也可从"可视化"直接触发）。
 
+> **📌 与工作台框架对应（2026-10-27 对齐）**：本菜单分类与已发布工作台（`meta.app.workbuddy.host`）的五大模块同源——**选题评估**（对话态走 §1 例 6 / Topic Selection）、**文献准备**（检索/初筛/PDF 下载，工作台 A2/A3 专属，对话态不提供）、**Meta 分析**（下表 ①②③④⑤⑥⑦ 全部走云端 coze R 引擎）、**样本估算**（开发中，未开放）、**论文撰写**（⛔ 对话态屏蔽，见下）。
+>
+> **⛔ 论文撰写模块屏蔽（2026-10-27，用户裁定）**：初稿撰写 / AI 评审 / 参考核验 / 投稿前 QA / 发表建议（writing advisor）暂时**仅在工作台提供**，对话态不提供、不调用（`advise=True` 不传）。如需论文撰写请使用工作台网页。
+>
+> **⛔ 无引擎支持的条目已移除**：ROBINS-I、RoB 交通灯图、不一致性热图、AI 辅助文献筛选、PDF 批量下载、图形数字化、缺失值插补——这些在 R 引擎中**不存在对应 task**（调用会返回 `unknown_task`），此前菜单列出属于虚标，已全部删除；对话态不得承诺或尝试调用。文献检索/筛选/PDF 下载请使用工作台「文献准备」模块。
+
 > 底层 R 包名（metafor / meta / netmeta …）见进阶参考表；普通用户无需关心。
 
 ### ① 两组 Meta 分析
@@ -178,7 +184,7 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 | 多变量 Meta | "合并多个相关结局的 Meta" |
 | IPD Meta | "我有患者个体数据，做 IPD Meta" |
 | 剂量反应 | "做剂量反应 Meta，dosresmeta" |
-| 生存 Meta | "用 metafor 合并生存 HR（survmeta 已移除）" |
+| 生存 Meta | "合并 8 项研究的 HR（生存数据）" |
 | 试验序贯分析 | "做 TSA，看还需要多少研究" |
 | Bootstrap Meta | "用 Bootstrap 做非参数 DL 估计" |
 
@@ -202,17 +208,14 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 | GOSH 图 | "画 GOSH 图" |
 | 网络图 | "画网络 Meta 的网络图" |
 | 联赛表 | "画 NMA 联赛表" |
-| RoB 交通灯图 | "画偏倚风险交通灯图" |
 | 功效曲线 | "画功效曲线" |
 | Drapery 图 | "画 Drapery 图" |
-| 不一致性热图 | "画 NMA 不一致性热图" |
 
 ### ⑥ 研究质量
 | 场景 | 试试这样说 |
 |:---|:---|
 | RoB 2.0 | "用 RoB 2.0 评估偏倚风险" |
 | RoB 1.0 | "用 Cochrane RoB 1.0 评估" |
-| ROBINS-I | "非随机研究，用 ROBINS-I" |
 | GRADE | "做 GRADE 证据质量评价" |
 | PRISMA 检查表 | "PRISMA 检查表" |
 
@@ -220,10 +223,8 @@ Each example shows **"You say"**, a sketch of **"The assistant replies"**, and h
 | 场景 | 试试这样说 |
 |:---|:---|
 | PRISMA 流程图 | "帮我生成 PRISMA 流程图" |
-| 文献筛选 | "标题摘要筛选，AI 辅助" |
-| PDF 批量下载 | "从 DOI 列表批量下载全文（需确认）" |
-| 图形数字化 | "从散点图提取数据" |
-| 缺失值插补 | "缺失标准差的插补" |
+
+> ⛔ 检索 / 初筛 / PDF 全文下载 / 数据提取属工作台「文献准备」模块，对话态不提供；原菜单的"文献筛选 / PDF 批量下载 / 图形数字化 / 缺失值插补"无引擎支持（调用返回 `unknown_task`），已移除（2026-10-27）。
 
 ---
 
