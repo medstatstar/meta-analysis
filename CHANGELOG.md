@@ -7,6 +7,10 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 ## [2.21.0] - 2026-10-27
 
 ### Added（结果解读强化：方案二「规则增强 + LLM 叙述层」，用户裁定）
+- **LLM prompt 路线 B+C 轻量版（2026-10-27 复查后追加，用户裁定）**：
+  - 路线 B：`_build_prompt` 从 params 提取 topic/title/outcome/intervention/comparison/population 等字段拼「# 主题上下文」段，指示模型据结局定义判断方向利弊；无主题时保留「方向的好坏取决于结局定义」兜底。运行时零外部依赖，**不调用 ct-advisor 资料库**（评估否决：叶子技能反向依赖总入口违反 ct-base 分层、延迟叠加、advisor 叙述性文本难过数字白名单）。
+  - 路线 C 轻量版（4 条口径对齐进硬约束，~200 token）：GRADE 四域锚点词汇（与 evidence_grade reasons 对齐防两处口径打架）、连续型结局报告惯例提示、禁语清单（证明/显著优于/安全有效）、CI 用「包含/不包含无效值」。
+  - 复查修正：`_guard_text` 句定位改顺序游标累计 offset（原 `text.find` 在重复子串时错位，可能漏放含编造数字的句子）；`_evidence_grade` sm 未知时跳过显著性降级因子（`_NULL_VALUE` 默认 0 会误判比值类 CI）。注：`adapters/coze/` 与 `tests/` 本在 .gitignore（coze 包走 pack_local.sh 独立交付），路线 B/C 改动以落盘文件为准，不进 git 主仓。
 - **规则层四件套（`adapters/coze/src/interpretation.py`，单一真相源，已同步 `adapters/interpretation.py`）**：
   - `_cohen_text()`：效应量临床幅度分级——SMD/MD 按 Cohen 标准（|0.2| 小 / |0.5| 中 / |0.8| 大），OR/RR 按距无效值 1 的距离粗分（<1.2 边缘 / 1.5-2.5 中等 / >2.5 强），插入 caveats 首位；
   - `_evidence_grade()`：证据强度综合评级 High/Moderate/Low/VeryLow（研究数不精确性 + I² 异质性 + CI 跨无效值三因子降级）；
