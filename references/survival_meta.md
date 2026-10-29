@@ -1,5 +1,11 @@
 # Survival Meta-Analysis / 生存数据Meta分析
 
+> ⚠️ **先读这个（用户面格式，防混淆 2026-10-27）**：面向用户推荐的数据格式是
+> **`study,hr,ci_low,ci_high`（原始尺度 HR + 95% CI）**，由 `block_a.parse_raw_csv`
+> 自动换算为对数尺度合并——权威模板见 `references/data_templates.md` §Type 3f。
+> 本文档的 `loghr/seloghr`（及 `run_surv_meta` 的 `yi/vi`）是 **R 引擎内部形态**，
+> 仅对话态直连底层任务（`task="survival_meta"`）时出现，**不要作为用户输入模板推荐**。
+
 ## run_surv_meta() — Combine Survival Effects (logHR) / 合并生存效应量（logHR）
 
 > ℹ️ **实现说明**：`survmeta` 已从 CRAN 下架，故 `run_surv_meta()` 现**直接调用 `metafor::rma.uni`**

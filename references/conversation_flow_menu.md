@@ -22,7 +22,7 @@
 
 ## 0. 它解决什么问题
 
-工作台（`adapters/workbench/`）已有完整的 11 节点渲染契约（`form_schema.py`）与 HITL 状态机
+工作台（`workbench/`）已有完整的 11 节点渲染契约（`form_schema.py`）与 HITL 状态机
 （`fullflow.py`），但**对话侧没有菜单**：每轮展示什么、闸位有哪些选项，全靠 LLM 即兴，
 同一节点两次渲染可能不一致。
 
@@ -236,7 +236,7 @@ $PY scripts/flow_menu.py decide [--session P] --option 1 [--set k=v ... | --revi
 $PY scripts/flow_menu.py rewind [--session P] --target A2.literature_search [--apply]
 ```
 
-- `--session` 省略时取 `adapters/workbench/runs/` 下 `updated_at` 最新的会话。
+- `--session` 省略时取 `workbench/runs/` 下 `updated_at` 最新的会话。
 - 退出码：`0` 成功 / `2` 用法或校验错误 / `3` 会话缺失或不可读。
 - `decide` / `rewind` 的校验**一律走 `fullflow._validate_decision`**，本层不复述规则。
 
@@ -275,7 +275,7 @@ $PY scripts/flow_menu.py rewind [--session P] --target A2.literature_search [--a
 | — | CLI dry-run 端到端（非法选项 / 非法回退目标被拒，且不落盘） | [13] |
 
 **未破坏既有回归**：`tests/test_a3_doc_type_confirm.py` **28 PASS / 0 FAIL**；
-`adapters/workbench/form_schema.py` 自检通过（新增 `TITLE_EN` / `title_for` 为纯增量）。
+`workbench/form_schema.py` 自检通过（新增 `TITLE_EN` / `title_for` 为纯增量）。
 
 ---
 
@@ -337,4 +337,4 @@ CCM **只做投影**，同一节点渲染是否可信取决于会话数据是不
 | `references/design/ccm/01_framework_v0.2_draft.md` | 三层菜单 + 操作四策略（原生迁移 / 降级简化 / 文件交接 / 跳过转出）+ 四问判定 |
 | `references/HANDOFF_2026-09-10.md` | A 阶段契约、18 项改动、静默失败模式、陷阱 A–H |
 | `references/systematic_review_fullflow.md` | 全流程轨道 playbook（Stage 3 文件交接 / Stage 4 按清单直下） |
-| `adapters/workbench/` | 工作台（同一套 schema 的 GUI 投影 + `/workbench` 逃生门） |
+| `workbench/` | 工作台（同一套 schema 的 GUI 投影 + `/workbench` 逃生门） |

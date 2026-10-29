@@ -4,7 +4,7 @@
 
 ## 2.5 Workbench — the HTML interactive frontend for full-flow
 
-> **Positioning:** `adapters/workbench/` holds the full workbench frontend (`workbench.html`, three-column layout) + backend (`server.py`) + launcher (`launch_workbench.py`).
+> **Positioning:** `workbench/` holds the full workbench frontend (`workbench.html`, three-column layout) + backend (`server.py`) + launcher (`launch_workbench.py`).
 > **Trigger:** the user mentions "工作台" / "workbench" / "meta 全流程" etc.
 
 **Published application (WorkBuddy Sites):** The workbench is published as a WorkBuddy online app. **When re-publishing, always reuse the existing `appId` to keep the share link stable — never create a new app.**
@@ -21,11 +21,11 @@
 | appId | `wbapp_hNZl928SI6wByvJt2COtcC` |
 | sandboxId | `a3c70e48be8f45019845b76383334bfc` |
 | Owner workspace | `2026-09-17-09-54-01` — holds `.wbapp_hNZl928SI6wByvJt2COtcC.genie` |
-| Metadata record | `adapters/workbench/app.config.json` (ct-base §16.12.1; excluded from the published package) |
+| Metadata record | `workbench/app.config.json` (ct-base §16.12.1; excluded from the published package) |
 | Runtime | Python (`pip install -r requirements.txt` + `python main.py`) |
 | Deploy directory | `meta-workbench-app/` (staging payload: `main.py` + `adapters/` + `scripts/` + `requirements.txt`) |
-| Publish toolchain | `adapters/workbench/publish-kit/` — `build_publish.py` (rebuilds the payload), `install_genie.py` (mints/installs `.wbapp_<appId>.genie` + the `applications.yaml` entry so re-publishing keeps the same share link), `check_py311.py`, `smoke_e2e.py`. **Infrastructure, not a deploy source** — excluded from every outbound artifact. |
-| ⛔ Deleted 2026-09-22 | `publish/` · `publish-backup/` · `publish-backup.rar` · `publish-preclean-20260917/` — frozen historical snapshots of the skill tree (~72 MB, untracked, **zero code references**). They predated `topic_translate.py` / `evidence_upload.py` / `reasons_en`, so they *looked* deployable but would have shipped the old version. Removed after the 2026-09-22 consistency audit (P2-12). Rebuild the payload any time with `python adapters/workbench/publish-kit/build_publish.py`. |
+| Publish toolchain | `workbench/publish-kit/` — `build_publish.py` (rebuilds the payload), `install_genie.py` (mints/installs `.wbapp_<appId>.genie` + the `applications.yaml` entry so re-publishing keeps the same share link), `check_py311.py`, `smoke_e2e.py`. **Infrastructure, not a deploy source** — excluded from every outbound artifact. |
+| ⛔ Deleted 2026-09-22 | `publish/` · `publish-backup/` · `publish-backup.rar` · `publish-preclean-20260917/` — frozen historical snapshots of the skill tree (~72 MB, untracked, **zero code references**). They predated `topic_translate.py` / `evidence_upload.py` / `reasons_en`, so they *looked* deployable but would have shipped the old version. Removed after the 2026-09-22 consistency audit (P2-12). Rebuild the payload any time with `python workbench/publish-kit/build_publish.py`. |
 
 > ⚠️ **appId 认领地**: the deploy tool only accepts an `appId` whose `.wbapp_<id>.genie` marker exists in the **current**
 > workspace. This app is registered in **`2026-09-17-09-54-01`** (verified 2026-09-22: `.wbapp_hNZl928SI6wByvJt2COtcC.genie`
@@ -42,10 +42,10 @@
 
 ```bash
 # Launch the workbench locally (default 127.0.0.1:8765, auto-opens the browser)
-python adapters/workbench/launch_workbench.py
+python workbench/launch_workbench.py
 
 # Or start the backend manually
-cd adapters/workbench && coze/.venv/Scripts/python.exe -m uvicorn server:app --host 127.0.0.1 --port 8765
+cd workbench && coze/.venv/Scripts/python.exe -m uvicorn server:app --host 127.0.0.1 --port 8765
 ```
 
 After launch, open the workbench in the preview panel with `present_files(["http://127.0.0.1:8765"])`.

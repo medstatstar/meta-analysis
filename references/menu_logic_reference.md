@@ -5,7 +5,7 @@
 >
 > 适用范围：HITL orchestrator 在 `adapters/fullflow.py` 状态机驱动下，由
 > `scripts/flow_menu.py` 渲染的**对话侧决策菜单**（L0 导航条 + L1 决策菜单）。
-> 工作台（adapters/workbench/）侧渲染契约见 `form_schema.py`，二者节点一一对应，
+> 工作台（workbench/）侧渲染契约见 `form_schema.py`，二者节点一一对应，
 > 但对话侧可窄化展示（见 §6）。
 
 ---
@@ -186,7 +186,7 @@
 ### 9.4 同步落点（实现时一并改）
 
 - `adapters/fullflow.py`：`run_fastpath` 新增 `data_mode="draft"` 分支（含 `b_env` 必填校验）+ docstring。
-- `adapters/workbench/server.py`：`/api/start_data` 新增 `b_env_text` Form 参数 + `data_mode="draft"` 分支（两种录入：粘贴 JSON / 上传 `.json` 文件）。
+- `workbench/server.py`：`/api/start_data` 新增 `b_env_text` Form 参数 + `data_mode="draft"` 分支（两种录入：粘贴 JSON / 上传 `.json` 文件）。
 - `scripts/flow_menu.py`：无需改（菜单层已 stage-agnostic）。
 - 回归：`tests/test_flow_menu.py` 189 PASS / 0 FAIL。
 
@@ -203,7 +203,7 @@
 - `scripts/flow_menu.py`：`_OPTION_BUILDERS` / `_SUMMARY_BUILDERS` / `_WARN_BUILDERS`（注册）
 - `scripts/flow_menu.py`：对应 `_aN_options` / `_aN_summary` 函数体，及 `_fallback_options`（兜底）
 - `adapters/fullflow.py`：`EDITABLE_KEYS`（revise 项键）、`DEFAULT_PAUSE_AT`（停靠点增删）、`GATE_TO_STAGE`/`STAGE_TO_GATE`（红线增删）
-- `adapters/workbench/form_schema.py`：`STAGE_ORDER`（节点数/顺序）、`SCHEMA` 各节点 `gate_type`
+- `workbench/form_schema.py`：`STAGE_ORDER`（节点数/顺序）、`SCHEMA` 各节点 `gate_type`
 - 节点数若变，同步本文件 §2 表与所有"11 节点"表述
 
 ---

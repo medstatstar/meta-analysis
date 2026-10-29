@@ -4,6 +4,37 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.21.2] - 2026-10-29 · 发布前检查整改 + 网页版入口（三平台发布）
+
+### Fixed
+- **Workbench 排除缺口（ct-base §16.12 红线）**：`.clawhubignore` 原只排除 `adapters/workbench/`，漏掉顶层 `workbench/` 整目录 → ClawHub 包会带上工作台源码。已补齐顶层 `workbench/` 及运行产物；`.gitattributes` 追加 `workbench/` export-ignore。GitHub / SkillHub / ClawHub 三个发布树现均不含工作台源码。
+- **CHANGELOG 竞品名（§9.1 / §21.9 红线）**：1.5.0 条目中的竞品统计软件名称已改为中性表述「Meta-regression / multivariate meta equivalents」。
+- **独立 `.R` 进发布集（§16.4）**：DEV-ONLY `scripts/nma_codex/nma_engine.R` 加入两份 ignore + `.gitattributes` export-ignore。
+- **顶层散件（§16.8）**：删除扫描残留 `_cjk_left.txt`；`browser_tests.py` / `ctqa.config.json` / `adapters/.search_cache/` 纳入发布排除。
+
+### Changed
+- **SKILL.md 精简至 192 行（§16.1 ≤ 200）**：§8.5 Deploy Retest Gate、§8.6 Workbench UI 自检、§10 Standard QA 迁至 `AGENTS.md`（英文），SKILL.md 仅留一行指针；正文中文清零（`## Language` 的「中文指南」按 §4 保留）。
+- **AGENTS.md** 承接发布/开发流程三节，版本头对齐 2.21.2。
+- **README 新增网页版入口与首页截图**（中英各一份，`assets/screenshots/{zh,en}/01-home.jpg`）。
+
+### Publish
+- 三平台（GitHub / SkillHub / ClawHub）发布；发布原因：**提供网页版使用方式**（https://meta.medstatstar.com）。
+
+## [2.21.1] - 2026-10-28 · ct-qa 接入配置收口（layers 死层清理 + SKILL 版本对齐）
+
+### Fixed
+- **`ctqa.config.json` 的 `layers.enable` 含 4 个注册表中不存在的层名**（`P1` / `P2` / `P4` / `P6`）。旧框架对 `enable` 里的未知层**静默丢弃**，配置看着「提示词全系列已启用」，实际只跑了 `P3`。现收敛为 `["W0","W1","W2I","W2B","P3","C0"]`（全部为 ct-base §27.3 已注册层）。
+- **SKILL.md `version` 与 CHANGELOG 顶条目脱节**：SKILL 仍写 `2.20.3`，而 CHANGELOG 已记到 `[2.21.0]`。同步为 `2.21.1`。
+
+### 关联：由 ct-base 侧修复暴露出的 2 个真实缺陷（本次跑测才首次可见）
+- 原先 C0 层恒为 `SKIP`（ct-base 框架把状态文件写到了错误目录），**掩盖**了 `adapters/coze/tests/` 下两份测试副本执行必失败：`test_envelope_guard.py`（`ModuleNotFoundError: coze_contract_validate`）、`test_hr_format_drift.py`（`FileNotFoundError: references/...`）。根因：副本在 `adapters/coze/tests/` 下，`ROOT=dirname(dirname(__file__))` 被算成 `adapters/coze`，`sys.path` 与 `open()` 基准全错。框架侧已按「镜像副本归位权威位置 + cwd 用技能根」修复，现 C0 **4/4 PASS**（含 `test_stage_envelope.py`）。
+
+### 验证
+- `python -m ctqa run --skill <meta-analysis>`：**PASS 257 / FAIL 0 / WARN 1 / SKIP 1 / ERROR 0 → 绿灯**（exit 0）。
+  - WARN 1 = `W2B-016 资源级 404`：ct-qa 的 W2B/W2I 用框架内置静态服务起页面，后端 `/api/features`、`/health` 必然 404（已实测真实后端 `server.py` 两端点均 200），属环境噪音、非缺陷。
+
+---
+
 ## [2.21.0] - 2026-10-27
 
 ### Added（结果解读强化：方案二「规则增强 + LLM 叙述层」，用户裁定）
@@ -4438,7 +4469,7 @@ R 引擎各自独立分支只渲染一种图。本次**直接改 coze 端 R 代�
 ### Added / 新增
 - Initial public release on GitHub / ClawHub / SkillHub.
 - Full RevMan 5.x 1:1 code mapping.
-- Stata `metareg` / `mvmeta` equivalents.
+- Meta-regression / multivariate meta equivalents (`metareg` / `mvmeta`).
 - Network meta: `netmeta` + `gemtc` + `multinma`.
 - Single-group meta: `metaprop` / `metamean` / `metainc` / `metacor`.
 - Diagnostic meta: `mada::reitsma` bivariate + SROC.

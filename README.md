@@ -6,7 +6,11 @@
   <img src="assets/icon.svg" width="240" height="240" alt="meta-analysis logo"/>
 </div>
 
-> **Works without installation:** If you'd rather not install and just want to quickly use this skill's basic features, you can also visit the ct-series unified web portal **https://ct.medstatstar.com** directly.
+> **Works without installation:** If you'd rather not install and just want to quickly use this skill's basic features, you can also visit the web version **https://meta.medstatstar.com** directly.
+
+<p align="center">
+  <img src="assets/screenshots/en/01-home.jpg" width="760" alt="meta-analysis Workbench home page (English UI)">
+</p>
 
 > **Easy-to-use R-based Meta-Analysis for Clinical Researchers**
 >
@@ -24,147 +28,33 @@ meta-analysis is part of the CT-series skill family, built for three groups:
 
 ---
 
-## 1. How to Use It in a Chat (the Core)
+## 1. What You Can Do — Scenario Index
 
-meta-analysis is a **conversational skill**: you simply tell the assistant what you want in natural language — no commands, no parameter names to remember. As a WorkBuddy skill it **auto-loads with no extra installation**.
-
-Below are 8 real conversational examples — **one per category** in the Scenario Index (§2): ① systematic-review workflow, ② pairwise meta, ③ heterogeneity & bias, ④ advanced models, ⑤ effect-size conversion, ⑥ visualization, ⑦ study quality, ⑧ sample size & power. Examples 1 and 8 are the two **upstream gates** — topic selection before you start, and sample-size planning before you commit. Each shows **"You say"** and a sketch of **"The assistant replies"**, plus how to get the actual number.
-
-### Example 1 · ① Systematic review workflow: topic selection
-**You say:**
-> I'm interested in SGLT2 inhibitors for renoprotection and cardiovascular benefit in chronic kidney disease (CKD), but I haven't decided which specific meta-analysis direction to pursue. Can you help me shortlist candidate directions?
-
-**Assistant replies (sketch):**
-> Sure — I'll use a **topic-selection approach** to lock down the direction. First I run the **in-skill dedup probe (Cochrane + PubMed real hit counts)**, then shortlist — otherwise a saturated direction can be wrongly pushed as top pick.
->
-> **First, rule out the saturated directions**: the generic "SGLT2i on cardiorenal outcomes in CKD" is Cochrane 23 / PubMed 2785 — highly saturated. **Counter-intuitively**, the seemingly niche **non-diabetic CKD (Cochrane 20 / PubMed 2402)** and **dialysis / advanced CKD (Cochrane 22 / PubMed 1067)** are also heavily covered (DAPA-CKD / EMPA-KIDNEY spawned many reviews) — also not recommended.
->
-> Re-shortlisting 3 candidates by **evidence gap + novelty** (I'll produce 1–3 directions; I won't decide for you):
->
-> **Candidate ① Renoprotection in IgA nephropathy (top pick)**
-> - Cochrane 4 / PubMed 224 (≈1/10 of the broad direction) → **real gap**
-> - Most common primary GN; SGLT2i already a guideline adjunct; many RCTs, data available
->
-> **Candidate ② Net benefit / benefit–risk framework**
-> - Cochrane 5 / PubMed 442 → gap
-> - Pools renal + cardiac benefit with safety events (DKA / infection / volume depletion) in one framework — strong methodological differentiation
->
-> **Candidate ③ Specific glomerular diseases (FSGS / membranous / ADPKD / lupus)**
-> - FSGS Cochrane 0, ADPKD 2, membranous 1, lupus 3 → **very deep gap**
-> - ⚠️ but sparse RCTs → power risk; better as a **scoping review** than a hard efficacy MA
->
-> **Suggestion**: Start with ① (real gap, high clinical need); ② as the methodological-differentiation alternative; ③ conditional. Next step: a **full topic assessment** (PICO + dedup search + PRISMA/AMSTAR-2 pre-check), and **run ct-literature first for a full dedup confirmation** (the probe is a quick signal; FSGS=0 may include index-phrasing variance, don't rely on it alone).
-
-**📌 Note:** When you have a direction but are unsure which specific meta to run, the assistant uses the topic-selection framework to produce **1–3 candidate directions + a 4-dim score + meta type**, instead of deciding for you or giving a single answer. This is the **topic-selection gate** before analysis — no R computation is invoked. Candidates are stratified by **evidence gap / novelty**, each backed by the **in-skill dedup probe (Cochrane + PubMed real hit counts)** — so a saturated generic direction (including the "intuitively niche" non-diabetic CKD or dialysis) is no longer mis-pushed as the top pick.
-
-### Example 2 · ② Pairwise meta: two-group binary (most common)
-**You say:**
-> Combine the OR across these 5 binary studies:
-> Study A: experimental 30/100, control 20/100
-> Study B: experimental 45/120, control 30/100
-> ...
-
-**Assistant replies (sketch):**
-> ✅ 5 studies, random-effects (DL), OR = 1.52 (95%CI: 1.18–1.96), I² = 34%
-> (Ask for the full reproducible R code at any time.)
-
-**📌 Auto-execution:** Once you describe the request, the assistant **auto-executes** and returns the real result; ask for the reproducible code by saying **"give me the full R code"**.
-
-### Example 3 · ③ Heterogeneity & bias: I² + subgroup
-**You say:**
-> I did a continuous meta with 8 studies, SMD pooled, but I² is high — I want to subgroup by region
-
-**Assistant replies (sketch):**
-> ✅ 8 studies, SMD = 0.42 (95%CI: 0.15–0.69), I² = 78%
-> Subgroup by region:
-> - Asia (k=4): SMD = 0.55, I² = 45%
-> - Euro-US (k=4): SMD = 0.28, I² = 62%
-> - Between-group Q = 4.12, p = 0.04
-
-### Example 4 · ④ Advanced models: network meta with multiple decisions
-**You say:**
-> I want to do a network meta with 4 interventions, but I haven't decided whether to use frequentist or Bayesian, and I'm not sure if I should include dose-response
-
-**Assistant replies (sketch):**
-> 4 interventions clear. Two key choices to clarify:
->
-> **① Which analysis framework?**
-> - (a) Frequentist — `netmeta`, inverse-variance based, good for consistent networks
-> - (b) Bayesian — `gemtc` (JAGS) or `multinma` (Stan) **local only** (a known coze limitation: the container has no root to install JAGS; on the cloud use (a) netmeta); `bayesmeta` supports Bayesian pairwise comparisons locally
->
-> **② Include dose-response?**
-> - (a) No — pure pairwise comparison network
-> - (b) Yes — needs dose-effect parameters, Bayesian framework preferred
->
-> **③ Can't decide?** → say "explain the differences between these choices in detail", and I'll clarify the clinical/statistical meaning before you choose
-
-**📌 Note:** When you've **named the test type but are stuck on "which option / design family"**, the assistant **pops a routing menu** to confirm step by step — instead of deciding for you or dumping the full menu. The menu also offers an "explain the differences" option — when you're unsure, it explains before you decide.
-
-### Example 5 · ⑤ Effect size conversion
-**You say:**
-> Convert Cohen's d = 0.8 to logOR
-
-**Assistant replies (sketch):**
-> ✅ d = 0.8 → logOR ≈ 1.45 (SE ≈ 0.38), based on logOR = d × π/√3
-
-### Example 6 · ⑥ Visualization
-**You say:**
-> Draw a forest plot, lancet theme
-
-**Assistant replies (sketch):**
-> ✅ Forest plot generated (lancet theme, with summary diamond and I² label). [SVG output]
-
-### Example 7 · ⑦ Study quality
-**You say:**
-> Assess risk of bias with RoB 2.0
-
-**Assistant replies (sketch):**
-> ✅ RoB 2.0 assessment complete. Please provide the risk-of-bias judgment (Low / Some concerns / High) for each study — I'll generate the traffic-light plot and stacked summary bar. [SVG output]
-
-### Example 8 · ⑧ Sample size & power: how many studies does this meta need
-**You say:**
-> I'm planning a meta on SGLT2 inhibitors for renoprotection in CKD. Expected effect SMD ≈ 0.5, about 50 patients per study, heterogeneity assumed at I² = 50% — roughly how many studies do I need for 80% power? And if I can only include 8 studies, what's the power?
-
-**Assistant replies (sketch):**
-> ✅ Computed with **random-effects meta planning** (Hedges & Pigott, 2001):
->
-> **Required number of studies** (SMD = 0.5, N = 50 per study, I² = 50%, α = 0.05 two-sided, target power 80%)
-> - **Required K ≈ 3 studies**
->
-> **Power back-solve** (fix K = 8, everything else unchanged)
-> - **Power ≈ 0.9985** — 8 studies are quite generous for this effect size
->
-> Comes with a planning figure (SVG) and reproducible R code — say **"give me the R code for the sample-size estimate"** to get it.
-
-**📌 Note:** This is the newly added **sample-size estimation** capability, computed by the ct-samplesize coze R engine (`meta_planning` test; Hedges & Pigott 2001 random-effects model). Two question forms are supported — **leave K blank to solve for the required number of studies**, or **fill K to solve for power** (switches automatically). Effect types cover SMD / OR / RR / correlation / paired difference / cluster-randomized (cluster needs ICC and cluster size m). A **web UI** is also available: open the workbench → click the **"Sample Size"** tab on the left → pick the effect type and fill in parameters → compute. Inputs and results persist when switching tabs.
-
----
-
-## 2. What You Can Do — Scenario Index
-
-Categories are grouped by **workflow stage first, then analysis purpose** (8 below). The systematic-review workflow comes first as the upstream gate, followed by seven analysis-purpose categories. Each row gives the typical **clinical scenario** and a line you can **copy verbatim** under "Try saying". The same test may be reached from multiple entry points.
+The **systematic-review workflow** (upstream gate) comes first; everything else is grouped by **analysis purpose**. Each row gives the typical **clinical scenario** plus a line you can **copy verbatim**. The same analysis may be reached from several entry points.
 
 > The underlying R packages (metafor / meta / netmeta …) are listed in Section 6 "Advanced Reference"; ordinary users don't need to care.
 
+> **📌 Mapping to the five Workbench modules (aligned 2026-10-27)**: this index is co-designed with the published workbench (`https://meta.medstatstar.com`) — **Topic Assessment** (in chat: Case 6 / topic framework), **Literature Prep** (retrieval / screening / PDF download / data extraction — workbench-only, not available in chat), **Meta Analysis** (tables ①–⑤ below, all through the cloud coze R engine), **Sample Size**, **Manuscript** (currently not offered).
+>
+> **⛔ Manuscript writing is not offered at present**: drafting / AI review / reference verification / pre-submission QA are all unavailable — do not look for them in chat or in the workbench.
+>
+> **⛔ Entries with no engine support have been removed**: ROBINS-I, RoB traffic-light plot, inconsistency heatmap, AI-assisted screening, graph digitization, missing-value imputation — these have **no corresponding task** in the R engine (calls return `unknown_task`), so never promise or attempt them in chat. For literature retrieval / screening / PDF download use the workbench **Literature Prep** module. RoB 2.0 / RoB 1.0 are provided as **narrative assessments only** (no traffic-light plot).
+
 ### ① Systematic Review Workflow
+
 | Scenario | Try saying in chat |
 |:---|:---|
 | Topic feasibility check | "Judge my topic: efficacy of ×××" (real literature hit counts + 4-dim score verdict) |
 | Full topic report | "Produce the full topic-assessment report" (PICO → scoring → dedup → compliance pre-check → 11-section report) |
-| Literature retrieval | "Run a systematic search on this topic" (multi-source + dedup + Excel/HTML, delegated to ct-literature) |
-| Title/abstract screening | "Screen the search results" (machine pre-screen + per-record human verdict, PRISMA counts bridged) |
+| Literature retrieval | "Run a systematic search on this topic" (**workbench Literature Prep**: multi-source + dedup + report, delegated to ct-literature) |
+| Title/abstract screening (PRISMA) | "Screen the search results" (**workbench**: machine pre-screen + per-record human verdict, PRISMA counts produced automatically) |
 | PRISMA flow | "Help me generate a PRISMA flow diagram" |
 | PRISMA checklist | "Generate the PRISMA 2020 checklist (27 items)" |
-| Data-extraction assistant | "Give me an extraction sheet to fill from the papers" (blank sheet → LLM draft → **line-by-line human verification** → stamp to release) |
-| Quality gate | "Run the quality gate" (k count / I² / missing bias check — red cards block presentation) |
-| Overclaim check | "Check whether the conclusions overclaim" (abstract claims vs pooled evidence) |
-| Manuscript drafting | "Draft a submission manuscript from my analysis" (methods/results auto-filled from real data; background/discussion expanded by LLM; journal-fit advice) |
-| Author-supplied evidence | "I have my own reference list — use it" (xlsx/csv/RIS/BibTeX/PDF bundle as the draft's evidence base) |
-| Reference verification | "Verify every citation in the draft" (DOI/title reverse lookup — no hallucinated references) |
+| Data-extraction assistant | "Give me an extraction sheet to fill from the papers" (**in chat**: blank sheet → LLM draft → **line-by-line human verification** → stamp to release; workbench A4 currently not open) |
+| Quality gate before pooling | "Run the quality gate" (k count / I² / missing bias check — red cards block) |
+| Overclaim check | "Check whether the conclusions overclaim" (abstract claims vs actual evidence) |
 | Pre-submission QA | "Run pre-submission evidence QA" (numbers reconciled against statistics, red-line gate) |
-| PDF batch download | "Batch download full texts from a DOI list (needs confirmation)" |
-| Graph digitize | "Extract data from a scatter plot" |
-| Missing value imputation | "Impute missing standard deviations" |
+| PDF batch download | "Batch download full texts from a DOI list" (**workbench Literature Prep A3**, not available in chat) |
 
 ### ② Pairwise Meta-Analysis
 | Scenario | Try saying in chat |
@@ -232,18 +122,14 @@ Categories are grouped by **workflow stage first, then analysis purpose** (8 bel
 | GOSH plot | "Plot a GOSH graph" |
 | Network plot | "Draw the network meta graph" |
 | League table | "Draw the NMA league table" |
-| RoB traffic-light | "Draw a risk-of-bias traffic-light plot" |
-| Power curve | "Draw a power curve" |
+| Power curve | "Draw a power curve" (→ workbench **Sample Size** module) |
 | Drapery plot | "Plot a Drapery graph" |
-| Inconsistency heatmap | "Plot an NMA inconsistency heatmap" |
 
 ### ⑦ Study Quality
 | Scenario | Try saying in chat |
 |:---|:---|
-| RoB 2.0 | "Assess risk of bias with RoB 2.0" |
-| RoB 1.0 | "Assess with Cochrane RoB 1.0" |
-| ROBINS-I | "Non-randomized study — use ROBINS-I" |
-| RoB summary plot | "Draw the stacked risk-of-bias summary bar plot" |
+| RoB 2.0 | "Assess risk of bias with RoB 2.0" (narrative assessment, no traffic-light plot) |
+| RoB 1.0 | "Assess with Cochrane RoB 1.0" (narrative assessment) |
 | GRADE | "Do a GRADE evidence-quality assessment" |
 | CINeMA (network evidence) | "Assess the NMA with the CINeMA six domains" |
 | PRISMA checklist | "PRISMA checklist" |
@@ -251,18 +137,15 @@ Categories are grouped by **workflow stage first, then analysis purpose** (8 bel
 ### ⑧ Sample Size & Power
 | Scenario | Try saying in chat |
 |:---|:---|
-| Required number of studies (K) | "Roughly how many studies does this meta need for 80% power" (leave K blank; solved by the random-effects model) |
+| Required number of studies (K) | "Roughly how many studies does this meta need for 80% power" (→ workbench **Sample Size** module; leave K blank and it solves in real time) |
 | Power back-solve | "Fix 8 studies — what's the power" (fill K to solve for power) |
 | Heterogeneity sensitivity | "Assume I² = 50% and compute the required K" / "Scan I² from 0% to 90% and see how K changes" |
 | All effect types | "OR = 1.5, 60 patients per study — how many studies do I need" (SMD/OR/RR/r/paired/cluster) |
 | Cluster-randomized design | "Cluster-randomized, ICC = 0.05, 30 per cluster — estimate the number of clusters needed" |
-| Reproducible code | "Give me the R code for the sample-size estimate" |
 
 ---
 
----
-
-## 2.1 Supported Figures (23)
+## 1.1 Supported Figures (23 defined, 22 available in the cloud)
 
 The skill renders **23 analysis figures** on the cloud coze R engine. Pass the plot type via the `plots` field. `prisma_flow` / `prisma` and `rob` / `rob2` resolve to the same figure.
 
@@ -271,7 +154,7 @@ The skill renders **23 analysis figures** on the cloud coze R engine. Pass the p
 | 1 | `forest` | 森林图 | Forest plot | Pairwise / NMA | Pooled effect-size summary |
 | 2 | `funnel` | 漏斗图 | Funnel plot | Pairwise | Publication-bias visual |
 | 3 | `prisma_flow` | PRISMA 流程图 | PRISMA flow diagram | Systematic review | Four-stage screening flow |
-| 4 | `rob` / `rob2` | 偏倚风险图 | RoB traffic-light / summary | Study quality | Cochrane RoB 1.0 / 2.0 |
+| 4 | `rob` / `rob2` | 偏倚风险图 | RoB traffic-light / summary | Study quality | Cochrane RoB 1.0 / 2.0 (⚠️ currently unavailable: the cloud engine has no plot task — narrative assessment only) |
 | 5 | `cumulative` | 累积 Meta 图 | Cumulative meta plot | Pairwise | Accumulated by study order |
 | 6 | `baujat` | Baujat 图 | Baujat plot | Heterogeneity | Heterogeneity contributor |
 | 7 | `labbe` | L'Abbe 图 | L'Abbe plot | Pairwise (binary) | Effect-consistency check |
@@ -293,11 +176,281 @@ The skill renders **23 analysis figures** on the cloud coze R engine. Pass the p
 | 23 | `trimfill` | 剪补法漏斗图 | Trim-and-fill funnel plot | Bias | Bias-corrected funnel |
 
 > Note: `netleague` (NMA league table) is a **tabular** output, not a figure, so it is excluded from the count of 23.
+> ⚠️ **Figure availability**: item 4 `rob` / `rob2` (RoB traffic-light) has no corresponding task in the cloud engine yet (calls return `unknown_task`) and is **currently unavailable**; RoB 2.0 / RoB 1.0 are provided as narrative assessments only. The remaining 22 figures are available on the cloud coze R engine.
+
+## 2. Case Collection (in a Chat)
+
+meta-analysis is a **conversational skill**: you simply tell the assistant what you want in natural language — no commands, no parameter names to remember. As a WorkBuddy skill it **auto-loads with no extra installation**.
+
+Below are **16 real cases**, graded by difficulty (★ basic / ★★ advanced / ★★★ professional), matching the Scenario Index in §1. Each case has three parts: **"You say"**, **"Assistant replies (sketch)"** and **"🖥️ Workbench"**; illustrative numbers follow real computation conventions (random-effects REML / DL etc.), and actual values depend on your data.
+
+> **Computation runs on the cloud coze R engine by default** (outbound disclosure in Section 5). **Not available in chat**: literature retrieval / screening / PDF download / data extraction (use the workbench **Literature Prep** module) and manuscript writing (currently not offered).
+
+## ★ Basic usage
+
+### Case 1 · Two-group binary meta (the most common)
+
+**You say:**
+
+> Combine the OR across these 5 binary studies:
+> Study A: experimental 30/100, control 20/100
+> Study B: experimental 45/120, control 30/120
+> Study C: experimental 25/90, control 18/85
+> Study D: experimental 40/110, control 28/105
+> Study E: experimental 35/95, control 22/92
+
+**Assistant replies (sketch):**
+
+> ✅ 5 studies, random-effects model (REML), OR = 1.52 (95%CI: 1.18–1.96), I² = 34%.
+> Forest plot generated (summary diamond and I² label included). (Say "give me the full R code" anytime to get reproducible code.)
+
+**🖥️ Workbench:**
+
+> Open the **Meta Analysis** module → upload a CSV (columns `study / ai / bi / ci / di`, or paste the 2×2 tables) → choose "OR" → click **Start flow** (with no data, click "Demo data" to run the whole chain end to end).
+
+### Case 2 · Continuous meta + subgroup (heterogeneity)
+
+**You say:**
+
+> I ran a continuous meta on 8 studies with SMD pooling, but I² is fairly high — I want to subgroup by region.
+
+**Assistant replies (sketch):**
+
+> ✅ 8 studies, SMD = 0.42 (95%CI: 0.15–0.69), I² = 78%.
+> Subgroup analysis (region):
+>
+> - Asia (k=4): SMD = 0.55, I² = 45%
+> - Europe/US (k=4): SMD = 0.28, I² = 62%
+> - Between-group Q = 4.12, p = 0.04
+
+**🖥️ Workbench:**
+
+> The **Meta Analysis** module currently does **basic pooling only**: upload data (mean / sd / n for both arms) → choose "Continuous / SMD" → click **Run** to get the pooled effect and forest plot. **The module has no subgroup entry** (there is no "subgroup variable" field). For subgroup splits, say "run subgroup analysis by region" in chat — the cloud engine computes along the subgroup dimension; the workbench does not offer that interaction yet.
+
+### Case 3 · Effect-size conversion (d → logOR)
+
+**You say:**
+
+> Convert Cohen's d = 0.8 to logOR.
+
+**Assistant replies (sketch):**
+
+> ✅ d = 0.8 → logOR ≈ 1.45 (SE ≈ 0.38), based on logOR = d × π/√3.
+
+**🖥️ Workbench:**
+
+> The workbench **does not provide** an effect-size converter. Lightweight conversions like this are computed instantly in **chat** — just say "convert d to logOR" (SE included).
+
+### Case 4 · Visualization (forest plot, specified theme)
+
+**You say:**
+
+> Draw a forest plot, lancet theme.
+
+**Assistant replies (sketch):**
+
+> ✅ Forest plot generated (Lancet theme, summary diamond and I² label included). [SVG output, inlined into a single-file HTML report]
+
+**🖥️ Workbench:**
+
+> After any pooling run, the **Meta Analysis** result area **automatically shows a forest plot** (summary diamond + I² label); however it **does not support choosing a theme / style** (lancet / jama / nejm / bmj etc.). For a specific journal theme or an enhanced funnel plot, say "draw a forest plot, lancet theme" in chat.
+
+### Case 5 · Pooling pre-computed effect sizes (yi + CI → forest plot)
+
+**You say:**
+
+> I have 5 studies with ready-made effect sizes and confidence intervals — pool them and draw a forest plot: OR with 95%CI are 1.52[1.18,1.96], 1.31[1.02,1.69], 1.88[1.40,2.53], 1.47[1.13,1.91], 1.66[1.29,2.14].
+
+**Assistant replies (sketch):**
+
+> ✅ 5 studies, random-effects (REML), pooled OR = 1.57 (95%CI: 1.33–1.85), I² = 32%. Forest plot generated (summary diamond and I² label included).
+> (Say "give me the full R code" anytime for reproducible code.)
+
+**🖥️ Workbench:**
+
+> The **Meta Analysis** module accepts **pre-computed data**: use columns `study / te / sete` (te = log effect size, sete = standard error), or supply `te / ci_low / ci_high` and the system derives SE → choose the matching effect measure → click **Start flow**; the result area then shows the forest plot. This is the other mainstream input route besides raw 2×2 tables.
+
+## ★★ Advanced usage
+
+### Case 6 · Topic assessment (upstream gate, real dedup probe)
+
+**You say:**
+
+> I'm interested in SGLT2 inhibitors for renal protection in chronic kidney disease (CKD), but I haven't settled on which specific meta direction to pursue. Can you help me sort out candidate directions?
+
+**Assistant replies (sketch):**
+
+> I'll use the **topic-assessment** framework to pin down the direction. First I run the **in-skill dedup probe (real Cochrane + PubMed hit counts)** to check the evidence gap, then propose candidates — a saturated direction is never pushed as the top pick.
+>
+> **First, cross out the saturated directions**: the generic "SGLT2i on cardiorenal outcomes in CKD" is highly saturated.
+> **Candidate ① Meta specific to non-diabetic CKD (top recommendation)**: Cochrane 1 / PubMed (last 5 years) 38 — about 1/11 of the broad direction → a real gap; initial 4-dim score: clinical 5 / feasibility 4 / data 4 / novelty 5.
+> **Candidate ② Net-benefit / benefit–risk framework**: Cochrane 5 / PubMed 442 → a gap.
+> **Candidate ③ Specific glomerular diseases (FSGS / membranous / ADPKD / lupus)**: FSGS Cochrane 0 → a very deep gap, but RCTs are sparse and power risk is high.
+> **Suggestion**: take ① first. Next step: a full topic assessment (PICO breakdown + dedup search + PRISMA / AMSTAR-2 pre-check).
+
+**🖥️ Workbench:**
+
+> Open the **Topic Assessment** module → enter the research topic (Chinese is auto-translated to English and the query is shown) → click **Assess topic**. If the probe fails, the page shows "temporarily unreachable + reason + ↻ retry" instead of silently pretending success.
+> ⚠️ The workbench **Topic Assessment** only does a **feasibility quick look** (real hit-count probe + local PICOS scoring); the full assessment (structured PICO, PROSPERO/Cochrane dedup, AMSTAR-2 pre-check, 11-section decision report) requires the skill installed in **chat**.
+
+### Case 7 · Network meta capability routing menu (frequentist vs Bayesian)
+
+**You say:**
+
+> I want to run a network meta with 4 interventions, but I haven't decided between frequentist and Bayesian, and I don't know whether to include dose-response.
+
+**Assistant replies (sketch):**
+
+> 4 interventions is clear. Two key choices remain:
+> **① Analysis framework?** (a) Frequentist — `netmeta` (inverse-variance, suits consistent networks, available in the cloud); (b) Bayesian — `gemtc` (JAGS) / `multinma` (Stan), but **JAGS cannot be installed in the cloud container without root**, so use (a) netmeta in the cloud; Bayesian is available locally.
+> **② Dose-response?** (a) No (pure pairwise comparison); (b) Yes (needs dose-effect parameters, Bayesian is more suitable).
+> **③ Unsure?** → say "explain the differences between these choices in detail" and I'll clarify before you decide.
+
+**🖥️ Workbench:**
+
+> On the **Literature Prep** start page you can tick "Network meta-analysis (NMA)" to launch an NMA (needs 3+ interventions compared in the same network). But **frequentist-vs-Bayesian framework choice, dose-response and other advanced options are not offered in the workbench** — decide in chat (frequentist `netmeta` works in the cloud; Bayesian `gemtc` / `multinma` depend on JAGS, usually unavailable in the container without root, available locally).
+
+### Case 8 · Publication-bias diagnosis (Egger + trim-and-fill)
+
+**You say:**
+
+> I ran a meta; I² isn't high, but I'm worried about publication bias — run Egger's test and correct with trim-and-fill.
+
+**Assistant replies (sketch):**
+
+> ✅ Egger regression intercept = 1.83 (SE 0.61), p = 0.006 → signs of small-study bias.
+> Trim-and-fill estimate: after imputing 3 "missing" studies, the adjusted OR = 1.31 (from 1.52) — the direction is unchanged but the effect size shrinks.
+
+**🖥️ Workbench:**
+
+> After pooling, the result area **only produces basic figures such as the forest plot**; it **does not provide** Egger / Begg / trim-and-fill entries. Say "run Egger's test and correct with trim-and-fill" in chat to compute on the cloud engine.
+
+### Case 9 · Meta-regression (continuous covariate)
+
+**You say:**
+
+> Use age as a continuous covariate in a meta-regression and see whether it explains part of the heterogeneity.
+
+**Assistant replies (sketch):**
+
+> ✅ Meta-regression (age continuous): slope β = 0.012/year (95%CI 0.003–0.021), p = 0.009; age explains part of the heterogeneity (R² ≈ 0.41).
+
+**🖥️ Workbench:**
+
+> The **Meta Analysis** module **does not provide** a meta-regression (metareg) entry (no "covariate" field). Say "use age as a continuous covariate in a meta-regression" in chat to compute on the cloud engine; the bubble plot comes back with the result.
+
+### Case 10 · Full systematic-review workflow (workbench Literature Prep: search → screen → PDF → extract)
+
+**You say:**
+
+> I want to go all the way from search to meta: systematic search, screening, download PDFs, extract data.
+
+**Assistant replies (sketch):**
+
+> This end-to-end flow is best run in the **workbench Literature Prep** module (search / screening / PDF download happen in the workbench; data extraction is not open in the workbench yet and is provided in chat). The flow is: A1 topic contract → A2 cross-database search (OpenAlex + Europe PMC, Cochrane optional) → A3 full-text PDF download → A4 data extraction (LLM draft + **line-by-line human verification gate**). Every stage stops automatically at its human gate and never skips silently. Shall I walk you through the workbench?
+
+**🖥️ Workbench:**
+
+> Open the **Literature Prep** module → enter the topic → choose data sources (Cochrane is linked with "include reviews") → click **Start flow**; A2 search → A3 PDF download → screening verdicts (export an xlsx verdict sheet with DOI + document-type confirmation columns).
+> ⚠️ **A4 data extraction is currently not open**: the workbench does not extract 2×2 data from PDFs automatically; extract in chat or supply your own verified CSV. The "nothing enters pooling unverified" red line applies in chat / local flows.
+
+### Case 11 · Trial sequential analysis (TSA — how many more studies for a robust conclusion)
+
+**You say:**
+
+> This meta only has 4 studies so far — I want a trial sequential analysis (TSA) to see how stable the conclusion is and how many more studies are needed.
+
+**Assistant replies (sketch):**
+
+> ✅ TSA (alpha-spending 0.05, power 80%, expected effect based on the current pooled HR = 0.82): current information ≈ 38% of required; the boundary has not been crossed, so about 7 more comparable studies (total k ≈ 11) are needed before a "robust conclusion" can be drawn. Current evidence **suggests a direction but is not yet sufficient**.
+
+**🖥️ Workbench:**
+
+> TSA is an advanced model and the **Meta Analysis** module **does not provide** a TSA entry. Say "run TSA and see how many more studies are needed" in chat to compute on the cloud engine (the `meta` package TSA flow); the result includes the information curve and the required number of studies.
+
+### Case 12 · Study-quality assessment (RoB 2.0 + GRADE, narrative)
+
+**You say:**
+
+> Assess risk of bias for this batch of RCTs and give me a GRADE evidence-quality rating.
+
+**Assistant replies (sketch):**
+
+> ✅ **RoB 2.0** (5 domains: randomization, deviations from intended interventions, missing data, outcome measurement, selective reporting): 3 low risk, 2 some concerns. This is a **narrative assessment** (per-domain judgments and overall risk in chat, no traffic-light visualization).
+> ✅ **GRADE**: starts high for randomized trials; downgraded for inconsistency (I² = 55%) and imprecision (k = 5, wide CI) → final **moderate** certainty.
+
+**🖥️ Workbench:**
+
+> RoB 2.0 / RoB 1.0 / GRADE assessments are **not available** in the workbench (the manuscript module is closed overall). Say "assess risk of bias with RoB 2.0 and run GRADE" in chat — note this is a **narrative assessment** without ROBINS-I or the traffic-light plot (neither has a corresponding engine task; both were removed).
+
+## ★★★ Professional usage
+
+### Case 13 · Survival meta (pooled HR)
+
+**You say:**
+
+> Pool the HR across 8 studies (survival data; each study gives logHR and SE).
+
+**Assistant replies (sketch):**
+
+> ✅ 8 studies, random-effects (REML), pooled HR = 0.82 (95%CI: 0.71–0.95), I² = 41%. Forest plot generated (HR scale).
+
+**🖥️ Workbench:**
+
+> In the **Meta Analysis** module choose "HR" → upload data containing `hr / ci_low / ci_high` (or pre-computed `te / sete`) → click **Start flow**; demo data works too. The result area then shows the forest plot on the HR scale.
+
+### Case 14 · Single-group rate / diagnostic-accuracy meta
+
+**You say:**
+
+> Pool the incidence rates across these studies (single-group rate); separately, I have a batch of diagnostic studies with tp / fp / fn / tn — run a diagnostic-accuracy meta.
+
+**Assistant replies (sketch):**
+
+> ✅ Single-group rate meta: pooled incidence = 0.23 (95%CI: 0.17–0.30), I² = 55%.
+> ✅ Diagnostic-accuracy meta: pooled sensitivity = 0.86 (95%CI: 0.80–0.91), specificity = 0.79 (95%CI: 0.72–0.85); SROC curve AUC = 0.89.
+
+**🖥️ Workbench:**
+
+> The workbench **Meta Analysis** module **supports only OR / RR / SMD / MD / HR pooling** and has **no** "single-group rate" or "diagnostic accuracy" entry (the effect-measure dropdown has no proportion / diagnostic option). Run single-group-rate and diagnostic-accuracy metas (tp / fp / fn / tn) in **chat**; the SROC curve comes back with the result.
+
+### Case 15 · Sample-size estimation (workbench "Sample Size" module)
+
+**You say:**
+
+> I'm planning a meta on "SGLT2 for renal protection in CKD", expecting SMD ≈ 0.5, about 50 patients per study, I² = 50% — roughly how many studies do I need for 80% power?
+
+**Assistant replies (sketch):**
+
+> Sample-size estimation runs in the **workbench "Sample Size" module** (not open in chat yet). In the web UI pick the effect type (SMD / OR / RR / r / paired / cluster) and fill in the parameters to solve in real time: leave K blank to solve for the required number of studies, fill K to solve for power. Example (SMD = 0.5, N = 50, I² = 50%, α = 0.05 two-sided, target power 80%) → required studies K ≈ 3; fixing K = 8 → power ≈ 0.99.
+
+**🖥️ Workbench:**
+
+> Open the **Sample Size** module → pick the effect type → fill in SMD / N per study / I² / α / target power → compute; inputs and results persist when switching tabs.
+
+### Case 16 · Cross-turn continuity (echo-block inheritance, no silent mismapping)
+
+**You say:**
+
+> (Turn 1) Pool these 5 ORs. (Turn 2) Subgroup by age. (Turn 3) Drop the largest study for a sensitivity analysis.
+
+**Assistant replies (sketch):**
+
+> After each analysis I echo a `## Current analysis settings` block (data / measure / model / method / yi / sei / slab / subgroup / task). Follow-up questions change only the fields that differ; the column mapping (yi / sei / slab) is inherited as-is — avoiding the silent failure where "it computed but the columns were mismapped".
+>
+> - Turn 2: the subgroup (age) automatically reuses Turn 1's column mapping.
+> - Turn 3: the sensitivity analysis re-runs as `task = pairwise_meta` with the largest study dropped (the cloud has no standalone sensitivity task); the subgroup framework is retained.
+
+**🖥️ Workbench:**
+
+> The cross-turn "Current analysis settings" echo block and column-mapping inheritance are **chat-only** capabilities; each pooling run in the workbench **starts independently**, with no echo block and no automatic inheritance of the previous column mapping (yi / sei / slab). Re-upload / re-paste the data for repeated analyses to avoid mismapped columns.
+
+---
 
 ## 3. First-Time FAQ
 
 **Q: I only gave effect size and study count, no other parameters — will it still compute?**
-A: Yes. Most analyses need only 3 items — effect size (or rate / HR) + α + power. Omitted parts (two-sided α=0.05, 1:1 randomization, follow-up) are filled with sensible defaults; if something truly required is missing, the assistant will ask.
+A: Yes. Pooling analyses only need the **per-study effect data** (binary `ai/bi/ci/di`, continuous `mean/sd/n`, or pre-computed `te/seTE`); unspecified options are filled with sensible defaults (random-effects REML/DL, two-sided α = 0.05, 1:1 allocation, etc.). If a **required** parameter is missing (e.g. mean or sd for two-arm continuous data), the assistant asks first and then computes.
 
 **Q: Is the n in the result per group or total?**
 A: By default it's **per group**; paired / crossover designs report per-sequence, and survival often reports total events needed. The output always labels this clearly.
@@ -325,6 +478,9 @@ A: This skill follows the standard bug-report workflow. If you suspect the resul
 4. **Receive an acknowledgment** — including whether a previously submitted report from your source has already been fixed (with the fix note) or is still pending.
 
 You stay in full control: the report is shown to you **before** anything is sent, and nothing is transmitted without your explicit "send" confirmation.
+
+**Q: I see an error in the workbench (web UI) — what do I do?**
+A: In the workbench, the result area states the specific cause and offers a **Retry** entry — follow the prompt to retry or adjust the input. If you suspect the **analysis result is wrong** or it is an engine-logic issue, say "report a bug" in chat (see the previous item) — bug reporting is a chat-only capability; the workbench has no reporting entry.
 
 ---
 
@@ -370,7 +526,7 @@ CLI examples, bidirectional solving, curve mode, core formulas, system requireme
 
 ---
 
-**Version**: v2.20.1 | **License**: MIT | **Authors**: medstatstar, phoe-zip
+**Version**: v2.21.1 | **License**: MIT | **Authors**: medstatstar, phoe-zip
 
 For feature requests, bug reports, or other feedback, please contact the author directly at medstatstar@gmail.com (Wintone Zhang / 张文彤).
 

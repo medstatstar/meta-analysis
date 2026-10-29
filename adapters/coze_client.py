@@ -716,6 +716,20 @@ def sanitize_payload(payload: dict) -> dict:
     return _clean(payload)
 
 
+def _preserve_interp_fields(target: dict, original: dict) -> dict:
+    """2026-10-27 v13 回归修复：`_fetch_full_json` 用云端 `_coze_full` 快照整体替换
+    parsed，而该快照在 coze 端 enrich（_interpretation / 极端警告 / 红灯防御，见
+    main.py `_parse_inner_result` 层级修复）**之前**生成、不含这些字段——整体替换
+    会把解读静默丢掉。此 helper 把原内层的 `_` 前缀解读键回补到替换后的 dict。
+    """
+    if not isinstance(target, dict) or not isinstance(original, dict):
+        return target
+    for _k, _v in original.items():
+        if _k.startswith("_") and _k not in target:
+            target[_k] = _v
+    return target
+
+
 def _fill_external_svgs(parsed: dict, timeout: int = 30) -> dict:
     """coze 返回体重组**兜底**入口（2026-08-28 manifest 方案重构，2026-08-29 起降级为 fallback）。
 
@@ -1060,7 +1074,7 @@ def run_meta(task: str, data: dict, params: dict | None = None,
     # 旧 figures[].url / repro.url 回填），保持对老 coze 响应向后兼容。
     full = _fetch_full_json(parsed, timeout=30)
     if full is not None:
-        parsed = full
+        parsed = _preserve_interp_fields(full, parsed)
     else:
         _fill_external_svgs(parsed)
     # 契约漂移检测 + 自适应（coze 响应结构与本地技能"对不上"时，自动归一化；
@@ -1180,6 +1194,11 @@ def build_stage_payload(env: dict, debug: bool = False,
     + skill_version（顶层）/ user_language（params 内，ct-base §1.1/§1.2）；
     coze 恒只返 SVG（2026-08-20 收紧）；byvar→subgroup 归一化。"""
     env = dict(env)
+    # 2026-10-28 修复：env=dict(env) 仅浅拷贝，下列 byvar→subgroup / effect_measure→sm
+    # 归一化里的 .pop 会就地修改【调用方】env["params"]（仍是共享对象），导致多阶段流水线
+    # （run_pipeline 对同一 env 复跑）第 1 轮后调用方 env 永久丢失 byvar/effect_measure，
+    # 第 2 阶段起 sm 归一化失效 → R 引擎走默认 OR/报错。深拷贝 params 一层以隔离调用方。
+    env["params"] = dict(env.get("params") or {})
     # figure 兼容三种形态：None/空 → {}；dict（如 {"plots":["forest"]}）→ 原样；
     # str（如 "forest"，run_analysis 公共 API 默认 figure="forest"）→ 单图 {"plots":[s]}；
     # list（如 ["forest","funnel"]）→ {"plots": list}。避免对字符串/列表直接 dict()
@@ -1321,7 +1340,7 @@ def parse_stage_response(outer, request_id, elapsed: float = 0.0) -> dict:
             inner = {"status": "error", "notes": f"coze 返回非 JSON 结果：{result_str[:500]}"}
         full = _fetch_full_json(inner, timeout=30) if isinstance(inner, dict) else None
         if full is not None:
-            inner = full
+            inner = _preserve_interp_fields(full, inner)
         else:
             _fill_external_svgs(inner)
         if isinstance(inner, dict):

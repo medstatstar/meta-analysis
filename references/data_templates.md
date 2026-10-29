@@ -156,6 +156,44 @@
 
 ---
 
+## Type 3f: Survival Data (HR) / 生存数据（风险比）
+
+> ⚠️ **这是 HR 的用户面格式（权威口径）**，与工作台「Meta分析」页演示示例
+> （workbench `DEMO_BY_EM.HR` ≡ `block_a.DEMO_RAW_CSV_BY_EM["HR"]`）完全一致。
+> `loghr/seloghr` 列名是 R 引擎 `survival_meta` 任务的**内部形态**，不要推荐给用户。
+
+**Required columns / 必填列**:
+
+| study | hr | ci_low | ci_high |
+|-------|----|--------|---------|
+
+**Example / 示例**:
+
+```csv
+study,hr,ci_low,ci_high
+KEYNOTE-189,0.62,0.48,0.80
+KEYNOTE-407,0.72,0.54,0.96
+CheckMate-9LA,0.68,0.54,0.86
+```
+
+**Column descriptions / 列名说明**:
+- `study`：研究名称/ID（必填；别名见下）
+- `hr`：风险比（**原始尺度**，非对数；必填；别名 `hazard_ratio` / `风险比` / `adj_hr` / `hr_adj` / `调整hr`）
+- `ci_low` / `ci_high`：95% CI 下限/上限（与 hr 同为原始尺度；别名 `ci_lower/ci_upper` / `lower/upper` / `lcl/ucl` / `下限/上限`）
+- 或改给 `se` / `sete` 一列标准误替代 CI（HR 不可与 logHR 混填）
+
+**Auto-calculation / 自动计算**（`block_a.parse_raw_csv` HR 分支，全部上传/粘贴路径通用）:
+- `te = ln(hr)`
+- `sete = (ln(ci_high) − ln(ci_low)) / (2 × 1.96)`（给了 `se` 则直接用）
+- 原始 `hr` 保留在行内回显
+
+**Notes / 说明**:
+- 合并在对数尺度进行（metagen, `sm="HR"`），结果自动回乘为 HR + 95% CI 呈现
+- CI 必须跨正数（`ci_low > 0`），否则该行剔除
+- 效应方向：HR < 1 = 试验组事件（如死亡）更少；方向利弊由结果解读层结合研究主题判定
+
+---
+
 ## Type 4: File Upload / 文件上传
 
 **Supported formats / 支持格式**: `.csv`, `.xlsx`, `.xls`

@@ -35,6 +35,25 @@ so `generate_topic_report.py` can render it directly.
 """
 import datetime
 
+# 输出语言（2026-10-29）：仅影响叙述文案，不影响任何评分口径。
+import contextvars as _ctxvars
+
+_LANG = _ctxvars.ContextVar("topic_assess_lang", default="zh")
+
+
+def _tr(zh: str, en: str) -> str:
+    """按当前语言取文案。"""
+    return en if str(_LANG.get() or "zh").lower().startswith("en") else zh
+
+
+GAP_EN = {
+    "real_gap": "Real gap (this narrow question is still under-studied within the broader field)",
+    "saturated": "Saturated (many similar meta-analyses; the increment must be explicit)",
+    "caution": "Caution (the direction is already covered; differentiate it)",
+    "empty": "Near-empty (novel but possibly under-powered; watch out for k<2)",
+    "unverified": "Unverified (probe unavailable)",
+}
+
 GAP_ZH = {
     "real_gap": "真实缺口（该窄方向在大类中仍欠研究）",
     "saturated": "已饱和（已有大量同类 Meta，须明确增量）",
@@ -103,7 +122,8 @@ def _score_data(registry_total, pubmed_hits, cochrane_hits):
     elif pubmed_hits is not None:
         t, conf = pubmed_hits, "pubmed_proxy"
     else:
-        return 0, "unverified", "无真实探针数据（注册库/文献均未返回）"
+        return 0, "unverified", _tr("无真实探针数据（注册库/文献均未返回）",
+                                    "no real probe data (neither registry nor literature returned results)")
     if t >= 50:
         s = 5
     elif t >= 20:
@@ -117,28 +137,37 @@ def _score_data(registry_total, pubmed_hits, cochrane_hits):
     else:
         s = 0
     if degraded:
-        note = ("注册库未命中但文献库有 %d 篇同类 SR/MA → 按文献代理估计（原始研究数需人工核实）"
-                % t)
+        note = _tr("注册库未命中但文献库有 %d 篇同类 SR/MA → 按文献代理估计（原始研究数需人工核实）" % t,
+                   "no registry hits, but %d similar SR/MA in the literature → literature-proxy estimate (primary-study count needs manual verification)" % t)
     elif registry_total is not None:
         # 文案修正：0~9 项时不能说「原始研究充足」（此前 s=0 仍输出「充足」，与分数打脸）
-        note = ("注册库 %d 项 → 原始研究充足" % registry_total if registry_total >= 10
-                else "注册库仅 %d 项 → 原始研究可能不足，需人工核实" % registry_total)
+        note = (_tr("注册库 %d 项 → 原始研究充足" % registry_total,
+                    "%d registry records → primary studies are plentiful" % registry_total)
+                if registry_total >= 10 else
+                _tr("注册库仅 %d 项 → 原始研究可能不足，需人工核实" % registry_total,
+                    "only %d registry records → primary studies may be insufficient; verify manually" % registry_total))
     else:
-        note = "PubMed SR/MA %d 篇（代理，置信低于注册库）" % pubmed_hits
+        note = _tr("PubMed SR/MA %d 篇（代理，置信低于注册库）" % pubmed_hits,
+                   "%d PubMed SR/MA (proxy; lower confidence than the registry)" % pubmed_hits)
     return s, conf, note
 
 
 def _score_novelty(pubmed_hits, cochrane_hits):
     n = (pubmed_hits or 0) + (cochrane_hits or 0)
     if n == 0:
-        return 5, "empty", "近无同类综述（新颖，但需警惕原始研究不足）"
+        return 5, "empty", _tr("近无同类综述（新颖，但需警惕原始研究不足）",
+                               "almost no similar reviews (novel, but watch out for too few primary studies)")
     if n >= 20:
-        return 1, "saturated", "已有大量同类 SR/MA，必须明确差异化增量"
+        return 1, "saturated", _tr("已有大量同类 SR/MA，必须明确差异化增量",
+                                   "many similar SR/MA already exist; a clear differentiating increment is essential")
     if n >= 10:
-        return 2, "saturated", "同类综述较多，须找新颖角度"
+        return 2, "saturated", _tr("同类综述较多，须找新颖角度",
+                                   "quite a few similar reviews; find a fresh angle")
     if n >= 5:
-        return 3, "caution", "方向已有覆盖，须差异化"
-    return 4, "real_gap", "同类综述较少，存在真实缺口空间"
+        return 3, "caution", _tr("方向已有覆盖，须差异化",
+                                 "the direction is already covered; differentiate it")
+    return 4, "real_gap", _tr("同类综述较少，存在真实缺口空间",
+                              "few similar reviews — there is room for a genuine gap")
 
 
 def _score_feasibility(registry_total, pubmed_hits, missing):
@@ -166,10 +195,10 @@ def _score_feasibility(registry_total, pubmed_hits, missing):
     if len(missing or []) >= 3:
         s = min(s, 2)
     if _proxy:
-        note = ("注册库未命中，但文献库已有 %d 篇同类 SR/MA → 原始研究数按「可纳入、待核实」"
-                "处理，不判空白方向" % pubmed_hits)
+        note = _tr("注册库未命中，但文献库已有 %d 篇同类 SR/MA → 原始研究数按「可纳入、待核实」处理，不判空白方向" % pubmed_hits,
+                   "no registry hits, but %d similar SR/MA in the literature → treat the primary-study count as \"includable, pending verification\" rather than a blank direction" % pubmed_hits)
     else:
-        note = ("预期可纳入研究数 k=%s" % k)
+        note = _tr("预期可纳入研究数 k=%s" % k, "expected includable studies k=%s" % k)
     return s, note
 
 
@@ -188,9 +217,10 @@ def _score_clinical(topic, override):
         except (TypeError, ValueError):
             score = None
     if score is not None:
-        return score, False, "由 LLM/Coze 评估覆盖", rationale
+        return score, False, _tr("由 LLM/Coze 评估覆盖", "assessed by LLM/Coze"), rationale
     # 本地默认中值：临床价值是判断项，无公开 API 可算，明确标注需人工确认。
-    return 3, True, "本地默认中值；临床价值属判断项，建议人工/LLM 确认", None
+    return 3, True, _tr("本地默认中值；临床价值属判断项，建议人工/LLM 确认",
+                        "local default mid-point; clinical value is a judgement item — confirm manually or with an LLM"), None
 
 
 # ---------------------------------------------------------------------------
@@ -198,14 +228,19 @@ def _score_clinical(topic, override):
 # ---------------------------------------------------------------------------
 def _verdict(total, scores):
     if scores.get("data", 5) <= 1:
-        return "veto:data", "数据不足以支撑 meta（预期研究数 k<2）"
+        return "veto:data", _tr("数据不足以支撑 meta（预期研究数 k<2）",
+                                "not enough data to support a meta-analysis (expected studies k<2)")
     if total >= 17:
-        return "strongly_recommend", "证据充分、缺口明确，可推进"
+        return "strongly_recommend", _tr("证据充分、缺口明确，可推进",
+                                         "adequate evidence with a clear gap — proceed")
     if total >= 14:
-        return "recommend", "总体可行，推进前补齐缺口说明"
+        return "recommend", _tr("总体可行，推进前补齐缺口说明",
+                                "generally feasible; document the gap before proceeding")
     if total >= 10:
-        return "hold", "存在短板，建议先补强再启动"
-    return "not_recommended", "多项偏弱，暂不建议启动"
+        return "hold", _tr("存在短板，建议先补强再启动",
+                           "there are weak points — strengthen them before starting")
+    return "not_recommended", _tr("多项偏弱，暂不建议启动",
+                                  "several dimensions are weak — starting is not recommended yet")
 
 
 # ---------------------------------------------------------------------------
@@ -215,19 +250,24 @@ def _cross_checks(picos, missing, pubmed_hits, cochrane_hits, novelty_label):
     n_sr = (pubmed_hits or 0) + (cochrane_hits or 0)
     checks = [
         {"rule": "R1", "triggered": bool(missing),
-         "note": ("PICO 可分解" if not missing else
-                  "缺失维度 %s，须先明确研究问题" % "、".join(missing))},
+         "note": (_tr("PICO 可分解", "PICO can be decomposed") if not missing else
+                  _tr("缺失维度 %s，须先明确研究问题" % "、".join(missing),
+                      "missing dimension(s): %s — clarify the research question first" % ", ".join(missing)))},
         {"rule": "R2", "triggered": False,
-         "note": "默认 pairwise；若涉及 ≥3 同时干预需评估 NMA"},
+         "note": _tr("默认 pairwise；若涉及 ≥3 同时干预需评估 NMA",
+                     "default is pairwise; if ≥3 interventions are compared concurrently, consider NMA")},
         {"rule": "R3", "triggered": novelty_label in ("saturated",),
-         "note": ("新颖性已复核，同类 SR/MA=%d，须明确增量" % n_sr
-                  if novelty_label in ("saturated",) else "新颖性合理")},
+         "note": (_tr("新颖性已复核，同类 SR/MA=%d，须明确增量" % n_sr,
+                      "novelty reviewed: %d similar SR/MA — the increment must be explicit" % n_sr)
+                  if novelty_label in ("saturated",) else _tr("新颖性合理", "novelty is reasonable"))},
         {"rule": "R4", "triggered": False,
-         "note": "异质性预案（I²>50% 触发亚组）由技能提供"},
+         "note": _tr("异质性预案（I²>50% 触发亚组）由技能提供",
+                     "heterogeneity contingency (subgroup analysis triggered at I²>50%) is provided by the skill")},
         {"rule": "R5", "triggered": False,
-         "note": "结局-效应量对齐（时间-事件→HR，二分类→RR/OR）"},
+         "note": _tr("结局-效应量对齐（时间-事件→HR，二分类→RR/OR）",
+                     "outcome–effect-measure alignment (time-to-event → HR, binary → RR/OR)")},
         {"rule": "R6", "triggered": False,
-         "note": "PROSPERO 注册列入后续动作"},
+         "note": _tr("PROSPERO 注册列入后续动作", "PROSPERO registration is listed as a follow-up action")},
     ]
     return checks
 
@@ -238,16 +278,16 @@ def _cross_checks(picos, missing, pubmed_hits, cochrane_hits, novelty_label):
 def _compliance():
     return {
         "prisma": [
-            {"item": "1", "status": "ok", "note": "标题将标识为系统评价/Meta"},
-            {"item": "5", "status": "plan", "note": "纳入标准草案（选题阶段）"},
-            {"item": "9", "status": "gap", "note": "提取表待方案阶段构建"},
+            {"item": "1", "status": "ok", "note": _tr("标题将标识为系统评价/Meta", "the title will identify this as a systematic review/meta-analysis")},
+            {"item": "5", "status": "plan", "note": _tr("纳入标准草案（选题阶段）", "draft eligibility criteria (topic stage)")},
+            {"item": "9", "status": "gap", "note": _tr("提取表待方案阶段构建", "extraction form to be built at the protocol stage")},
         ],
         "amstar2": [
-            {"domain": "protocol", "status": "plan", "note": "PROSPERO 注册应在数据提取前完成"},
-            {"domain": "publication_bias", "status": "ok", "note": "Egger/Begg/trim-fill 由技能提供"},
+            {"domain": "protocol", "status": "plan", "note": _tr("PROSPERO 注册应在数据提取前完成", "PROSPERO registration should be completed before data extraction")},
+            {"domain": "publication_bias", "status": "ok", "note": _tr("Egger/Begg/trim-fill 由技能提供", "Egger/Begg/trim-and-fill are provided by the skill")},
         ],
         "overall_risk": "yellow",
-        "note": "选题阶段预检：2 项待补，方案阶段复检",
+        "note": _tr("选题阶段预检：2 项待补，方案阶段复检", "topic-stage pre-check: 2 items outstanding, re-check at the protocol stage"),
     }
 
 
@@ -255,7 +295,8 @@ def _compliance():
 # Public API
 # ---------------------------------------------------------------------------
 def assess(topic, picos=None, missing=None, dedup=None, registry=None,
-           clinical_override=None, prospero=None, curation=None, topic_en=None):
+           clinical_override=None, prospero=None, curation=None, topic_en=None,
+           lang="zh"):
     """Build the full local topic assessment.
 
     Args:
@@ -275,6 +316,7 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
 
     Returns: assessment dict aligned with generate_topic_report schema.
     """
+    _LANG.set("en" if str(lang or "zh").lower().startswith("en") else "zh")
     picos = picos or {}
     missing = missing or []
     cochrane_hits, pubmed_hits = _extract_dedup_counts(dedup)
@@ -303,45 +345,49 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
                          "error": "probe import failed: %s" % _pe,
                          "manual_url": None, "note": ""}
     if _prospero.get("status") == "available":
-        _prospero_line = "已自动检索：命中 %s 项已注册方案（来源 %s）" % (
-            _prospero.get("hit_count"), _prospero.get("source"))
+        _prospero_line = _tr("已自动检索：命中 %s 项已注册方案（来源 %s）" % (
+            _prospero.get("hit_count"), _prospero.get("source")),
+            "auto-searched: %s registered protocols found (source: %s)" % (
+            _prospero.get("hit_count"), _prospero.get("source")))
     else:
         _pu = _prospero.get("manual_url") or (
             "https://www.crd.york.ac.uk/prospero/#searchadvanced?search="
             + __import__("urllib.parse").parse.quote(topic))
-        _prospero_line = "自动检索暂不可用（%s）；手动核查：%s" % (
-            (_prospero.get("error") or "上游故障"), _pu)
+        _prospero_line = _tr("自动检索暂不可用（%s）；手动核查：%s" % (
+            (_prospero.get("error") or "上游故障"), _pu),
+            "auto-search unavailable (%s); check manually: %s" % (
+            (_prospero.get("error") or "upstream failure"), _pu))
 
     # dedup paragraph
-    cochrane_txt = ("%s Cochrane reviews" % cochrane_hits) if cochrane_hits is not None else "未探针"
-    pubmed_txt = ("%s 篇 SR/MA（近 5 年）" % pubmed_hits) if pubmed_hits is not None else "未探针"
+    cochrane_txt = ("%s Cochrane reviews" % cochrane_hits) if cochrane_hits is not None else _tr("未探针", "not probed")
+    pubmed_txt = _tr("%s 篇 SR/MA（近 5 年）" % pubmed_hits, "%s SR/MA (last 5 years)" % pubmed_hits) if pubmed_hits is not None else _tr("未探针", "not probed")
     pros_url = ("https://www.crd.york.ac.uk/prospero/#searchadvanced"
                 "?search=%s" % urllib_parse_quote(topic))
     if nov_label == "saturated":
-        near_dup = "高饱和，须明确增量以避免近重复拒稿"
-        increment = "需提出既往综述未覆盖的亚组/人群/结局作为增量"
+        near_dup = _tr("高饱和，须明确增量以避免近重复拒稿", "highly saturated; a clear increment is needed to avoid rejection for near-duplication")
+        increment = _tr("需提出既往综述未覆盖的亚组/人群/结局作为增量", "propose a subgroup/population/outcome not covered by existing reviews as the increment")
     elif nov_label == "caution":
-        near_dup = "存在同类综述，须差异化"
-        increment = "明确与现有综述的差异点"
+        near_dup = _tr("存在同类综述，须差异化", "similar reviews exist; differentiate")
+        increment = _tr("明确与现有综述的差异点", "state explicitly how this differs from existing reviews")
     elif nov_label == "empty":
-        near_dup = "暂无近重复风险（但需警惕数据不足）"
-        increment = "空白方向，先确认是否有足够原始研究（k≥2）"
+        near_dup = _tr("暂无近重复风险（但需警惕数据不足）", "no near-duplication risk (but watch out for insufficient data)")
+        increment = _tr("空白方向，先确认是否有足够原始研究（k≥2）", "blank direction — first confirm there are enough primary studies (k≥2)")
     else:
-        near_dup = "暂无近重复风险"
-        increment = "真实缺口方向，常规推进"
+        near_dup = _tr("暂无近重复风险", "no near-duplication risk")
+        increment = _tr("真实缺口方向，常规推进", "genuine gap — proceed as usual")
 
     dedup = {
         "prospero": _prospero_line,
         "cochrane": cochrane_txt,
         "pubmed": pubmed_txt,
-        "non_english": "未覆盖（英文文献为主，按需手动补中文库）",
+        "non_english": _tr("未覆盖（英文文献为主，按需手动补中文库）", "not covered (English literature dominates; add Chinese databases manually if needed)"),
         "near_duplicate": near_dup,
         "increment": increment,
     }
 
     gap = {
         "verdict": nov_label,
-        "label": GAP_ZH.get(nov_label, nov_label),
+        "label": _tr(GAP_ZH.get(nov_label, nov_label), GAP_EN.get(nov_label, nov_label)),
         "probe_used": (cochrane_hits is not None or pubmed_hits is not None),
         "summary": nov_note,
     }
@@ -350,11 +396,13 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
     # 与「同类 SR/MA 已饱和」并列会自相矛盾，改为如实标注待核实。
     _sr_n = (pubmed_hits or 0) + (cochrane_hits or 0)
     if registry_total == 0 and _sr_n >= 20:
-        expected = "待核实（注册库未命中，但文献库已有 %d 篇同类 SR/MA）" % _sr_n
+        expected = _tr("待核实（注册库未命中，但文献库已有 %d 篇同类 SR/MA）" % _sr_n,
+                       "to be verified (no registry hits, but %d similar SR/MA in the literature)" % _sr_n)
     elif registry_total is not None:
-        expected = "约 %s 项注册试验 / 预期可纳入研究" % registry_total
+        expected = _tr("约 %s 项注册试验 / 预期可纳入研究" % registry_total,
+                       "about %s registered trials / expected includable studies" % registry_total)
     else:
-        expected = "注册库未探针，预期研究数未知"
+        expected = _tr("注册库未探针，预期研究数未知", "registry not probed; expected study count unknown")
 
     compliance = _compliance()
 
@@ -393,16 +441,24 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
             "query_used": _prospero.get("query_used"),
             "manual_url": _prospero.get("manual_url"),
             "note": _prospero.get("note") or "",
-            "register_before_extraction": "PROSPERO 注册应在数据提取前完成（AMSTAR-2 要求）",
+            "register_before_extraction": _tr("PROSPERO 注册应在数据提取前完成（AMSTAR-2 要求）",
+                                              "PROSPERO registration should be completed before data extraction (AMSTAR-2 requirement)"),
         },
         "curation": curation,
         "assessed_on": datetime.date.today().isoformat(),
         "local": True,
-        "note": ("本地确定性评估：数据/新颖性/方法可行性由真实探针（Europe PMC + "
-                 "ClinicalTrials.gov）驱动；临床价值维度"
-                 + ("已由 Coze/LLM 评估覆盖" if not cli_needs else
-                    "属判断项，默认中值并标注需人工/LLM 确认（可用 clinical_override 由 Coze 覆盖）")
-                 + "。"),
+        "note": _tr(
+            "本地确定性评估：数据/新颖性/方法可行性由真实探针（Europe PMC + "
+            "ClinicalTrials.gov）驱动；临床价值维度"
+            + ("已由 Coze/LLM 评估覆盖" if not cli_needs else
+               "属判断项，默认中值并标注需人工/LLM 确认（可用 clinical_override 由 Coze 覆盖）")
+            + "。",
+            "Local deterministic assessment: data / novelty / feasibility are driven by real probes "
+            "(Europe PMC + ClinicalTrials.gov); the clinical-value dimension "
+            + ("was assessed by Coze/LLM" if not cli_needs else
+               "is a judgement item, defaulted to the mid-point and flagged for manual/LLM confirmation "
+               "(Coze can override it via clinical_override)")
+            + "."),
     }
     return assessment
 

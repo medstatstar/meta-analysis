@@ -251,7 +251,11 @@ def _llm_clinical_fallback(topic, picos, missing, draft):
         return None
 
 
-def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_assessment=True, topic_en=None, picos_override=None):
+def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_assessment=True, topic_en=None, picos_override=None, lang="zh"):
+    _en = str(lang or "zh").lower().startswith("en")
+
+    def _tr(zh, en):
+        return en if _en else zh
     picos, missing = _infer_picos(topic)
     # 2026-10-25：人工确认的 PICOS 覆盖启发式推断（工作台「PICOS 推断」面板可编辑后回传）。
     # 只接受非空字符串；未提供/空白的维度保留推断值，缺失维度按合并结果重算。
@@ -316,24 +320,35 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
                 # 矛盾态：不以注册库计数推断空白，改为「未知」并把矛盾写进 risk_alert
                 report["feasibility"]["crowding"] = "unknown"
                 report["feasibility"]["expected_studies"] = None
-                report["feasibility"]["risk_alert"] = (
+                report["feasibility"]["risk_alert"] = _tr(
                     "⚠️ 注册库探针 0 命中，但文献库已有 %d 篇同类 SR/MA —— "
                     "两者矛盾，按「探针未命中」处理（多为检索词/语言与注册库不匹配），"
-                    "不据此判定为空白方向；原始研究数建议人工核查。" % _sr_total)
+                    "不据此判定为空白方向；原始研究数建议人工核查。" % _sr_total,
+                    "⚠️ The registry probe returned 0 hits, but the literature already contains %d similar SR/MA — "
+                    "the two conflict, so this is treated as a probe miss (usually a query/language mismatch with the registry) "
+                    "rather than a blank direction; verify the primary-study count manually." % _sr_total)
                 report["registry_probe"] = dict(registry_probe, note=(
                     (registry_probe.get("note") or "")
                     + " ⚠ 与文献库命中数矛盾（同类 SR/MA %d 篇），本次结论不以注册库计数为准。"
                     % _sr_total))
             elif total == 0:
-                report["scope_warning"] = (report["scope_warning"] or "") + " 注册库未检索到相关试验，属空白/新兴方向。"
+                report["scope_warning"] = (report["scope_warning"] or "") + _tr(
+                    " 注册库未检索到相关试验，属空白/新兴方向。",
+                    " No related trials were found in the registry — a blank/emerging direction.")
                 report["feasibility"]["crowding"] = "empty"
-                report["feasibility"]["risk_alert"] = "⚠️ 方向空白，可能原始研究极少，预期可纳入研究数量不足（meta 至少 k≥2）。"
+                report["feasibility"]["risk_alert"] = _tr(
+                    "⚠️ 方向空白，可能原始研究极少，预期可纳入研究数量不足（meta 至少 k≥2）。",
+                    "⚠️ Blank direction — primary studies may be very scarce, so the expected number of includable studies may be insufficient (a meta-analysis needs at least k≥2).")
             elif total < 5:
                 report["feasibility"]["crowding"] = "low"
                 report["feasibility"]["expected_studies"] = total
-                report["feasibility"]["risk_alert"] = f"⚠️ 注册库仅 {total} 项，预期可纳入研究较少，meta 分析效能可能不足。"
+                report["feasibility"]["risk_alert"] = _tr(
+                    f"⚠️ 注册库仅 {total} 项，预期可纳入研究较少，meta 分析效能可能不足。",
+                    f"⚠️ Only {total} registry records — few expected includable studies; the meta-analysis may be under-powered.")
             elif total >= 200:
-                report["scope_warning"] = (report["scope_warning"] or "") + f" 注册库已检索到 {total} 项相关试验，方向可能已较拥挤，建议明确差异化角度。"
+                report["scope_warning"] = (report["scope_warning"] or "") + _tr(
+                    f" 注册库已检索到 {total} 项相关试验，方向可能已较拥挤，建议明确差异化角度。",
+                    f" {total} related trials were found in the registry — the direction may already be crowded; define a clear differentiation.")
                 report["feasibility"]["crowding"] = "high"
                 report["feasibility"]["expected_studies"] = total
             else:
@@ -346,7 +361,7 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
             _assess = topic_assess.assess(
                 topic=topic, picos=picos, missing=missing,
                 dedup=dedup_probe, registry=registry_probe, prospero=_prospero,
-                topic_en=topic_en,
+                topic_en=topic_en, lang=lang,
             )
             # 2026-09-24：coze 临床价值判断 + 选题策展（P1 结构就位，默认关；
             # META_TOPIC_COZE=1 且 coze 节点就绪后启用；失败自动降级默认中值）
@@ -365,7 +380,7 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
                 _assess = topic_assess.assess(
                     topic=topic, picos=picos, missing=missing,
                     dedup=dedup_probe, registry=registry_probe, prospero=_prospero,
-                    clinical_override=_clinical, curation=_curation,
+                    clinical_override=_clinical, curation=_curation, lang=lang,
                 )
             report["topic_analysis"] = _assess
         except Exception as _ae:  # noqa: BLE001
@@ -506,7 +521,11 @@ def a2_build_tool_card(topic, max_results=50, year_from=None, out_dir=".",
         "need_tool": "ct-literature",
         "params": params,
         "sync": "blocking",
-        "timeout_sec": 120,
+        # 2026-10-29 修「检索状态误报 error」：实测 ct-literature 全库检索 ~110s，
+        # 逼近旧上限 120s —— 网络稍慢 / 勾选库多 / max_results 大即 TimeoutExpired →
+        # status="error"（云端回退再失败时用户看到检索状态 error）。放宽到 300s。
+        # 工作台检索走 /api/start_stream 后台线程 + SSE 心跳，不受网关 60s 线约束。
+        "timeout_sec": 300,
     }
 
 
@@ -3254,6 +3273,15 @@ def _a2_coverage_nha(studies, outs2, card, max_results, year_from, strategy=None
     status = (outs2[0].get("status") if outs2 and isinstance(outs2[0], dict) else "n/a")
     core_missing = [s for s in CORE_SOURCES if by_source.get(s, 0) <= 0]
     search_ok = (not core_missing) and len(studies) > 0
+    # 2026-10-29：本地 CLI 异常（典型 = 检索超时）但结果已由云端回退补齐时，
+    # 明示「回退救回」，不再让用户只看到 error 而不知数据从何而来。
+    cli_note = ""
+    if status != "ok" and search_ok:
+        _res = (outs2[0].get("result") or {}) if outs2 and isinstance(outs2[0], dict) else {}
+        _why = (_res.get("exception") or _res.get("stderr")
+                or _res.get("error") or "unknown")
+        cli_note = (f"本地检索引擎异常（{_why}），结果已由云端检索回退补齐；"
+                    "如需本地复跑请检查网络后重试。")
     retracted = sum(1 for s in studies if isinstance(s, dict) and s.get("is_retracted"))
     params = (card or {}).get("params") or {}
     raw_topic = strategy.get("raw_topic") or params.get("topic")
@@ -3272,6 +3300,7 @@ def _a2_coverage_nha(studies, outs2, card, max_results, year_from, strategy=None
         warn = " ⚠️ 本次检索未返回任何结果，请核查检索配置。"
     prompt = (f"检索策略确认（软停）：{'; '.join(bits)} → 合并 {len(studies)} 篇（{src_str}）。"
               + warn
+              + (f" ℹ️ {cli_note}" if cli_note else "")
               + (f" 含撤稿 {retracted} 篇。" if retracted else "")
               + ("" if fully else
                  " ⚠️ 检索式未完整翻译为英文（残留：%s）：请自行翻译为英文检索词，"
@@ -3288,6 +3317,8 @@ def _a2_coverage_nha(studies, outs2, card, max_results, year_from, strategy=None
         "search_status": "ok" if search_ok else ("error" if status != "ok" else "partial"),
         # 原始 CLI 返回码与核心源缺位清单（审计用，不参与告警判定）
         "cli_status": status,
+        # 2026-10-29：本地引擎异常但已回退救回时的明示说明（search_status=ok 时也有值）
+        "cli_note": cli_note,
         "core_sources": list(CORE_SOURCES),
         "core_missing": core_missing,
         "retracted": retracted,

@@ -2,7 +2,7 @@
 
 > This file is the detailed companion to the "Language" section in SKILL.md. Applicability: this policy applies to **ct- skills that are statistical-analysis related AND intended for GitHub publication** (e.g. ct-samplesize). The ct-base scaffold itself ships the bilingual setup for library consistency; ct- skills that are NOT published / for internal use only default to Chinese-only and need no bilingual content. / 本文件是 `SKILL.md` 中「Language / 语言」段的详版补充。适用范围：本策略适用于 **ct- 系列中统计分析相关、且准备发布到 GitHub 的技能**（如 ct-samplesize）。ct-base 作为库底座采用双语脚手架以保持一致；不发布、仅自用的 ct- 技能默认纯中文，无需双语。
 >
-> **Web 工作台（本地浏览器 UI）场景落地细则**：凡技能附带本地 Web 操作界面（如 ct-samplesize `adapters/workbench/`），界面文本双语化的完整方案见 `ct-base/references/workbench_ui.md` —— 静态 chrome 走 `data-i18n`+`localize()`、schema 反射的动态表单走「按请求 lang 生成 + 前端按 LANG 取 + `setLang` 重建」三段链路、JS 动态文案走 `T.*` 键、计数/单位后缀特例双语同显。本文件仍为总策略权威，二者不冲突。
+> **Web 工作台（本地浏览器 UI）场景落地细则**：凡技能附带本地 Web 操作界面（如 ct-samplesize `workbench/`），界面文本双语化的完整方案见 `ct-base/references/workbench_ui.md` —— 静态 chrome 走 `data-i18n`+`localize()`、schema 反射的动态表单走「按请求 lang 生成 + 前端按 LANG 取 + `setLang` 重建」三段链路、JS 动态文案走 `T.*` 键、计数/单位后缀特例双语同显。本文件仍为总策略权威，二者不冲突。
 
 ## Three core rules / 三条核心规则
 

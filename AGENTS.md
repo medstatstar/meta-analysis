@@ -1,4 +1,4 @@
-# AGENTS.md — meta-analysis v2.20.2 (R-based Meta-Analysis Skill)
+# AGENTS.md — meta-analysis v2.21.2 (R-based Meta-Analysis Skill)
 
 > This skill is a published skill (A-tier equivalent). Its AGENTS.md is **English-only** (SKILL.md body + references + AGENTS.md are English-only for published skills). Compute is delegated to a coze workflow (coze-only); no local R engine is shipped or advertised.
 
@@ -193,6 +193,46 @@ meta-analysis/
 - **Seam trap (do not automate)**: `ct-literature`'s `included_records` (machine screen pass) ≠ `included` (human final). `prisma_bridge.py` forces `included`/`assessed`/`excluded_elig` as `[MANUAL]`; never map machine screen counts directly into the compute track.
 - **PDF data extraction** (`adapters/pdf_extractor.py` v0.4.1, 2026-09-14): table + narrative templates for extracting meta-analysis data from PDFs. Templates: T_DICHOT, T_CONTINUOUS, T_EFFECT_TABLE, T_CONT_TABLE, T_FOREST_TABLE, T_META_TABLE, T_POOLED_EFFECT, T_SUBGROUP_EFFECT, T_OR_CI, T_HR_CI, T_RR_CI. Benchmarked on 78 real PDFs from `adapters/pdf_cache`. Human-in-the-loop review gate via `extract_assist.py`.
 - **Full-flow mode entry (`@skill` trigger)**: when the user invokes meta-analysis with a full-flow intent (`系统综述全流程` / `systematic review workflow` / `从检索到meta分析` / etc., see SKILL.md `triggers`), follow `references/systematic_review_fullflow.md` — a 5-stage playbook (Stage 0 launch gate → ① topic → ② ct-literature retrieval → ③ screening+PRISMA → ④ extraction → ⑤ compute) with two non-skippable human gates (Stage 3 final `included` count, Stage 4 `stamp --confirm`). It does NOT add a new `classify.py` task class; it sequences the existing topic + compute tracks.
+
+## Deploy Retest Gate (mandatory before publish / deploy)
+
+**Freeze check FIRST**: before any publish attempt to GitHub → SkillHub → ClawHub, run `python adapters/publish_guard.py` — exit code 2 means a dev-period publish freeze is active (`adapters/DEV_POLICY.json`) and publishing is blocked; do NOT proceed and do NOT bypass it. This check is part of the gate, not optional advice.
+
+**Mandatory before publishing / deploying** to GitHub → SkillHub → ClawHub: run `python tests/deploy_retest.py` (`--live` to actually hit the network; publish allowed only on all-green). This gate strictly verifies that the coze response is **genuinely valid** (HTTP 200 ≠ success; it rejects `status=ok` empty shells / `NaN` / no-figure (svg/url) false greens — coze externalizes SVG to S3 `url`, so a present+reachable `url` counts as a valid figure), writes `tests/deploy_retest_report.json`, and exits non-zero on any failure to block publishing. Use `--mock` for local logic self-check (no network) and `--offline` for envelope-contract validation. Full rules and red lines → `outputs/deploy_retest_gate.md`.
+
+## Workbench UI Detail Self-Check (mandatory before publish; aligns ct-base §21)
+
+> The topic-assessment UI has repeatedly shown detail defects even after multiple automated checks (copy drifting from backend logic, a seemingly redundant button silently dropping PICOS, ambiguous toggle names, missing-dimension placeholders with no guidance). The unified spec and machine-check list live in ct-base `references/workbench_ui.md` §21. After every change to this skill's workbench, in addition to the coze regression gate (SKILL.md §8.5), run the following UI detail audit:
+
+1. **Copy vs. code**: if a topic-box / PICOS hint claims "what the system will do" (e.g. "you can write `P:…` directly"), grep the backend logic (`adapters/block_a.py:_infer_picos` etc.) and verify live — meta-analysis `_infer_picos` only splits on semicolons and does **not** parse `P:/I:` labels, so the topic-box hint must not invite users to write labels (the structured entry point is each page's "PICOS enhancement" collapsible block).
+2. **Similar controls → read the handler**: the result-page "✓ Confirm PICOS and re-assess" (`confirmPicos`) and "↻ Re-assess" (`reassess`) must each be checked against the DOM range they read — the former reads `result`, and the latter must also read `result` (an old `↻` silently dropped `result` edits; already fixed); before declaring one redundant, disprove it with real input.
+3. **Self-explanatory labels**: the PICOS bilingual toggle is named "显示中英文对照" (not the vague "中英对照").
+4. **Placeholders give examples**: missing-dimension placeholders use the `PICOS_EG_ZH/EN` examples ("e.g. …"), never a bare "to be filled".
+5. **Dynamic-DOM live browser test**: all of the above must be asserted on real values after a full Playwright interaction path (missing-dimension placeholder = example, red-border class present, still correct after switching language); never rely on static grep or jsdom alone.
+
+Full methodology + machine-check list (red lines / delivery gates / acceptance) → ct-base `references/workbench_ui.md` §21.
+
+### Automated detail-check gate (executable; aligns §21 machine-check catalog)
+
+> The main purpose of §21 is **automated bug checking**, not human review alone. The machine-check engine is the **ct-family shared engine**: `ct-base/scripts/wb_detail_check.py` (zero leaf hard-coding); meta-analysis ships a **byte-identical copy** `scripts/wb_detail_check.py` plus a leaf-specific `scripts/wb_detail_check.rules.json`. Any FAIL = delivery forbidden.
+
+- **Run**: `python scripts/wb_detail_check.py` (auto-locates `workbench.html` and the co-located `wb_detail_check.rules.json`; or `--html <path>` / `--root <dir>` / `--rules <path>`). Note this is a **different script** from the §18.3 structural gate `wb_ui_check.py` (C1–C7, with `--set-version`) — do not confuse or overwrite one with the other.
+- **Implemented checks (§21.3.1)**: `C-detail-label` (vague name → FAIL), `C-detail-placeholder` (generic placeholder → FAIL / empty-state generic word → WARN), `C-detail-claim` (input-syntax promise WARN→FAIL), `C-detail-i18n-ph` (single-language static placeholder → WARN), `C-detail-scope` (form-state scope coverage → FAIL, rules-driven).
+- **Rule-driven, reusable with zero engine change**: the engine knows none of meta's classes; `scope.selectors=[".picos-in"]`, `scope.values=["seed","result"]` etc. live in `wb_detail_check.rules.json`, enabled item by item. `C-detail-dupctl` is implemented (driven by rules `dupctl.pairs`) but currently off for this skill — enable once the two buttons gain the `dup-verified:` loop.
+- **Layered word lists**: family-level default word lists are built into the engine's top constants; meta-specific additions go through rules.json `*_add` / `i18n_whitelist_force`.
+- **Regression defense**: temporarily re-inject the "中英对照" label + a "待填" placeholder → 2 FAIL + 1 WARN block (exit 1); real `workbench.html` → 0 FAIL / 0 WARN (incl. scope, exit 0).
+- **Live-test fallback** (items the script does not cover): dynamic DOM / similar controls silently dropping data / empty-state guidance — these "no-signal failures" still require the §8.6 item 5 Playwright live-browser assertion.
+
+## Standard QA
+
+> ⚠️ **Migrated to the unified test framework** (2026-10-29): meta-analysis's `tests/qa/` directory has been cleaned up. Testing is now handled by the CT-family unified `ctqa` framework (at `ct-base/testing/ctqa/`), configured in `ctqa.config.json`, entry point `python -m ctqa run --skill meta-analysis`. Implemented layers: **W0** (static analysis, incl. `wb_detail_check.rules.json` rule-driven checks) and **P3** (prompt fidelity, incl. `build_stage_payload` shallow-copy guard, outbound-envelope redaction, parameterized `sample_builder` sampling). Full spec → ct-base `references/workbench_ui.md` §23.
+
+meta-analysis uses the ctqa framework's W0 + P3 two-layer automated tests as the **standard regression gate before publish / after refactor**:
+
+- **W0 static layer**: `wb_detail_check.py` engine + `wb_detail_check.rules.json` rule-driven — covers UI details (label names / placeholder text / input-syntax promises / scope coverage, etc.).
+- **P3 prompt-fidelity layer**: offline replica of the outbound pipeline, covering placeholder/literal leakage, literature truncation, k self-consistency, i18n structure, and `build_stage_payload` not mutating the caller's env (a real-bug sentinel; coze_client fixed 2026-10-28).
+
+> Historical value: P3 caught and located a real bug — `coze_client.build_stage_payload` shallow copy + `.pop` (the multi-stage pipeline lost `sm` normalization from stage 2 on, so the R engine fell back to default OR / errored) — fixed 2026-10-28.
 
 ## Changelog Sync / 变更日志同步
 

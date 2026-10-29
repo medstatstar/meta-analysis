@@ -19,7 +19,8 @@ quality_advice.py — 质量评估引擎（B2/B3/B4 解耦版）
 
 from __future__ import annotations
 
-from block_b import b2_grade, detect_overclaims, b4_quality_gate
+import interpretation
+from block_b import b2_grade, detect_overclaims, b4_quality_gate, _LANG, _t, _is_en
 
 
 def _infer_risk_of_bias(stats: dict) -> str:
@@ -88,7 +89,7 @@ def _infer_imprecision(stats: dict) -> str:
     return "none"
 
 
-def evaluate_quality(stats: dict | None, task: str = "") -> dict:
+def evaluate_quality(stats: dict | None, task: str = "", lang: str = None) -> dict:
     """综合质量评估。
 
     - **网络 Meta（nma / nma_rank / cnma）→ CINeMA 六域**（见 `cinema_grade`）。
@@ -99,6 +100,8 @@ def evaluate_quality(stats: dict | None, task: str = "") -> dict:
     Args:
         stats: coze 返回的 stats 字典。
         task: 任务类型。
+        lang: 输出语言（"en" 开头=英文，其余=中文）。None = 继承当前 _LANG（由调用方
+              如 run_block_b / demo_b_env 预先设置），不覆盖。
 
     Returns:
         quality_advice 字典：
@@ -107,11 +110,14 @@ def evaluate_quality(stats: dict | None, task: str = "") -> dict:
           - quality_gate: dict，质量门评估。
           - summary: str，一句话总结。
     """
+    if lang is not None:
+        _LANG.set("en" if str(lang).lower().startswith("en") else "zh")
+        interpretation.set_lang(lang)
     if not isinstance(stats, dict):
         return {"grade": {}, "overclaims": [], "quality_gate": {}, "summary": ""}
 
     if _is_netmeta_stats(stats, task):
-        return _evaluate_quality_cinema(stats, task)
+        return _evaluate_quality_cinema(stats, task, lang=lang)
 
     # 构建 pairwise 格式的输入（b2_grade 需要）
     het = stats.get("heterogeneity") or {}
@@ -170,22 +176,26 @@ def evaluate_quality(stats: dict | None, task: str = "") -> dict:
     critical = qg_report.get("critical", False)
 
     if critical:
-        summary = f"GRADE={grade}，存在 {n_high} 条高危过度声明，证据质量极低，结论需谨慎。"
+        summary = _t(f"GRADE={grade}，存在 {n_high} 条高危过度声明，证据质量极低，结论需谨慎。",
+                    f"GRADE={grade}; {n_high} high-risk overclaim(s) found; very low-certainty evidence — interpret with caution.")
     elif n_high > 0 or n_med > 0:
-        summary = f"GRADE={grade}，检出 {n_high + n_med} 条过度声明，建议修改后再投稿。"
+        summary = _t(f"GRADE={grade}，检出 {n_high + n_med} 条过度声明，建议修改后再投稿。",
+                    f"GRADE={grade}; {n_high + n_med} overclaim(s) detected — revise before submission.")
     else:
-        summary = f"GRADE={grade}，未检出明显过度声明，证据质量可接受。"
+        summary = _t(f"GRADE={grade}，未检出明显过度声明，证据质量可接受。",
+                    f"GRADE={grade}; no obvious overclaim detected; evidence quality acceptable.")
 
     # 2026-09-14：部分 task（diagnostic_meta / dose_resp / bayesian_pairwise）的 stats
     # 不含 pooled / CI（只有 k + notes）→ GRADE 只能在研究数与异质性上评估。显式标注
     # 不完整，避免"数据缺失"被读成"质量很好"（这些任务此前质量评估整体抛异常，
     # 本改动是净新增，标注不构成对既有行为的改变）。
     if _ci is None:
-        summary += "（注：本任务未返回合并效应/CI，评估仅基于研究数，不完整。）"
+        summary += _t("（注：本任务未返回合并效应/CI，评估仅基于研究数，不完整。）",
+                     "(Note: this task returned no pooled effect/CI; the assessment is based on study count only and is incomplete.)")
         if isinstance(grade_report, dict):
             grade_report["note"] = (str(grade_report.get("note") or "")
-                                    + " ⚠ 缺合并效应/CI，GRADE 评估不完整；"
-                                      "该 task 的统计量不在通用 stats.pooled 契约内。").strip()
+                                    + _t(" ⚠ 缺合并效应/CI，GRADE 评估不完整；该 task 的统计量不在通用 stats.pooled 契约内。",
+                                        " ⚠ Missing pooled effect/CI — GRADE assessment incomplete; this task's statistics are outside the common stats.pooled contract.")).strip()
 
     return {
         "grade": grade_report,
@@ -216,6 +226,14 @@ _CINEMA_LABELS = {
     "imprecision": "不精确性",
     "heterogeneity": "异质性",
     "incoherence": "不一致性",
+}
+_CINEMA_LABELS_EN = {
+    "within_study_bias": "Within-study bias",
+    "reporting_bias": "Reporting bias",
+    "indirectness": "Indirectness",
+    "imprecision": "Imprecision",
+    "heterogeneity": "Heterogeneity",
+    "incoherence": "Incoherence",
 }
 _CINEMA_SEV = {"no_concerns": 0, "unclear": 1, "some_concerns": 2, "major_concerns": 3}
 _RATIO_SM = ("OR", "RR", "HR", "PLO", "PLOGIT", "IRR", "RRR")
@@ -267,7 +285,7 @@ def _cin_ci_pairs(pooled: dict):
     return pairs, unit
 
 
-def cinema_grade(stats: dict, task: str = "") -> dict:
+def cinema_grade(stats: dict, task: str = "", lang: str = None) -> dict:
     """按 CINeMA 六域评估网络 Meta 的证据置信度（半自动启发式）。
 
     返回 {rating, domains{域:{rating,reason}}, domain_ratings, reasons,
@@ -288,8 +306,10 @@ def cinema_grade(stats: dict, task: str = "") -> dict:
     # ---- 1. 研究内偏倚 ----
     dom["within_study_bias"] = {
         "rating": "unclear",
-        "reason": "stats 未携带偏倚风险评估结果（RoB2 / ROBINS-I）；"
-                  "该域须人工按纳入研究逐条评级后填入。",
+        "reason": _t("stats 未携带偏倚风险评估结果（RoB2 / ROBINS-I）；"
+                     "该域须人工按纳入研究逐条评级后填入。",
+                     "stats did not carry a risk-of-bias assessment (RoB2 / ROBINS-I); "
+                     "this domain must be rated per included study by a human."),
     }
 
     # ---- 2. 报告偏倚 ----
@@ -298,42 +318,54 @@ def cinema_grade(stats: dict, task: str = "") -> dict:
     if eg is None:
         dom["reporting_bias"] = {
             "rating": "unclear",
-            "reason": "未提供小样本效应检验；网络层面宜用比较调整漏斗图"
-                      "（comparison-adjusted funnel plot）评估，须人工补做。",
+            "reason": _t("未提供小样本效应检验；网络层面宜用比较调整漏斗图"
+                         "（comparison-adjusted funnel plot）评估，须人工补做。",
+                         "No small-study-effect test provided; at the network level use a "
+                         "comparison-adjusted funnel plot, which must be done manually."),
         }
     elif eg < 0.10:
         dom["reporting_bias"] = {
             "rating": "major_concerns",
-            "reason": f"Egger 检验 p = {eg:.3f} < 0.10，提示可能存在报告偏倚。"}
+            "reason": _t(f"Egger 检验 p = {eg:.3f} < 0.10，提示可能存在报告偏倚。",
+                        f"Egger's test p = {eg:.3f} < 0.10, suggesting possible reporting bias.")}
     else:
         dom["reporting_bias"] = {
             "rating": "no_concerns",
-            "reason": f"Egger 检验 p = {eg:.3f}，未见明显报告偏倚信号。"}
+            "reason": _t(f"Egger 检验 p = {eg:.3f}，未见明显报告偏倚信号。",
+                        f"Egger's test p = {eg:.3f}, no obvious signal of reporting bias.")}
 
     # ---- 3. 间接性 ----
     pd = _cnum_list(net.get("prop_direct"))
     if not pd:
         dom["indirectness"] = {
             "rating": "unclear",
-            "reason": "缺各对比直接证据占比（prop_direct），间接性无法量化；"
-                      "须人工核查各对比的人群 / 干预定义 / 结局是否可比。",
+            "reason": _t("缺各对比直接证据占比（prop_direct），间接性无法量化；"
+                         "须人工核查各对比的人群 / 干预定义 / 结局是否可比。",
+                         "Proportion of direct evidence per comparison (prop_direct) missing; "
+                         "indirectness cannot be quantified — manually verify that populations, "
+                         "interventions and outcomes are comparable across comparisons."),
         }
     else:
         mn = min(pd)
         if mn < 0.25:
             dom["indirectness"] = {
                 "rating": "major_concerns",
-                "reason": f"最低直接证据占比仅 {mn * 100:.0f}%，"
-                          "部分对比几乎完全依赖间接证据。"}
+                "reason": _t(f"最低直接证据占比仅 {mn * 100:.0f}%，"
+                             "部分对比几乎完全依赖间接证据。",
+                             f"Lowest proportion of direct evidence is only {mn * 100:.0f}%; "
+                             f"some comparisons rely almost entirely on indirect evidence.")}
         elif mn < 0.50:
             dom["indirectness"] = {
                 "rating": "some_concerns",
-                "reason": f"最低直接证据占比 {mn * 100:.0f}%，"
-                          "存在对间接证据的实质依赖。"}
+                "reason": _t(f"最低直接证据占比 {mn * 100:.0f}%，"
+                             "存在对间接证据的实质依赖。",
+                             f"Lowest proportion of direct evidence is {mn * 100:.0f}%; "
+                             f"there is substantial reliance on indirect evidence.")}
         else:
             dom["indirectness"] = {
                 "rating": "no_concerns",
-                "reason": f"各对比直接证据占比均 ≥ {mn * 100:.0f}%。"}
+                "reason": _t(f"各对比直接证据占比均 ≥ {mn * 100:.0f}%。",
+                             f"All comparisons have >= {mn * 100:.0f}% direct evidence.")}
 
     # ---- 4. 不精确性 ----
     # 无效值：log 尺度为 0（netmeta 输出 TE=log OR/RR/HR）；比值尺度为 1；差值尺度为 0
@@ -342,22 +374,27 @@ def cinema_grade(stats: dict, task: str = "") -> dict:
     n_cross = sum(1 for lo, hi in pairs if lo <= null <= hi)
     if k is not None and k < 3:
         dom["imprecision"] = {"rating": "major_concerns",
-                              "reason": f"仅 {int(k)} 项研究，网络估计极不精确。"}
+                              "reason": _t(f"仅 {int(k)} 项研究，网络估计极不精确。",
+                                          f"Only {int(k)} studies — the network estimate is very imprecise.")}
     elif not pairs:
         dom["imprecision"] = {"rating": "unclear",
-                              "reason": "无可解析的效应量 / CI，不精确性无法评估。"}
+                              "reason": _t("无可解析的效应量 / CI，不精确性无法评估。",
+                                          "No parsable effect size / CI — imprecision cannot be assessed.")}
     elif n_cross == len(pairs):
         dom["imprecision"] = {
             "rating": "major_concerns",
-            "reason": f"{len(pairs)} 个对比的 95% CI 全部跨无效值。"}
+            "reason": _t(f"{len(pairs)} 个对比的 95% CI 全部跨无效值。",
+                        f"All {len(pairs)} comparisons have a 95% CI that crosses the null.")}
     elif n_cross > 0:
         dom["imprecision"] = {
             "rating": "some_concerns",
-            "reason": f"{len(pairs)} 个对比中 {n_cross} 个的 95% CI 跨无效值。"}
+            "reason": _t(f"{len(pairs)} 个对比中 {n_cross} 个的 95% CI 跨无效值。",
+                        f"{n_cross} of {len(pairs)} comparisons have a 95% CI crossing the null.")}
     else:
         dom["imprecision"] = {
             "rating": "no_concerns",
-            "reason": f"{len(pairs)} 个对比的 95% CI 均未跨无效值。"}
+            "reason": _t(f"{len(pairs)} 个对比的 95% CI 均未跨无效值。",
+                        f"None of the {len(pairs)} comparisons has a 95% CI crossing the null.")}
 
     # ---- 5. 异质性 ----
     i2 = _cnum(het.get("I2"))
@@ -365,18 +402,23 @@ def cinema_grade(stats: dict, task: str = "") -> dict:
     if i2 is None:
         dom["heterogeneity"] = {
             "rating": "unclear",
-            "reason": "未返回网络整体异质性（I² / τ²），该域无法评估。"}
+            "reason": _t("未返回网络整体异质性（I² / τ²），该域无法评估。",
+                        "Network-wide heterogeneity (I² / τ²) not returned — this domain cannot be assessed.")}
     elif i2 >= 75:
         dom["heterogeneity"] = {"rating": "major_concerns",
-                                "reason": f"网络整体 I² = {i2:.0f}%，异质性很高。"}
+                                "reason": _t(f"网络整体 I² = {i2:.0f}%，异质性很高。",
+                                            f"Network-wide I² = {i2:.0f}% — high heterogeneity.")}
     elif i2 >= 50:
         dom["heterogeneity"] = {"rating": "some_concerns",
-                                "reason": f"网络整体 I² = {i2:.0f}%，存在中等异质性。"}
+                                "reason": _t(f"网络整体 I² = {i2:.0f}%，存在中等异质性。",
+                                            f"Network-wide I² = {i2:.0f}% — moderate heterogeneity.")}
     else:
         dom["heterogeneity"] = {
             "rating": "no_concerns",
-            "reason": f"网络整体 I² = {i2:.0f}%"
-                      + (f"，τ = {tau:.3f}" if tau is not None else "") + "。"}
+            "reason": _t(f"网络整体 I² = {i2:.0f}%"
+                        + (f"，τ = {tau:.3f}" if tau is not None else "") + "。",
+                        f"Network-wide I² = {i2:.0f}%"
+                        + (f", τ = {tau:.3f}" if tau is not None else "") + ".")}
 
     # ---- 6. 不一致性 ----
     p_inc = _cnum(inc.get("p"))
@@ -385,28 +427,39 @@ def cinema_grade(stats: dict, task: str = "") -> dict:
     if p_add is not None and p_add < 0.05:
         dom["incoherence"] = {
             "rating": "major_concerns",
-            "reason": f"加性假设被拒绝（Q.diff p = {p_add:.3f} < 0.05）——"
-                      "成分效应不可加，成分模型自身即不自洽。"}
+            "reason": _t(f"加性假设被拒绝（Q.diff p = {p_add:.3f} < 0.05）——"
+                         "成分效应不可加，成分模型自身即不自洽。",
+                         f"Additivity rejected (Q.diff p = {p_add:.3f} < 0.05) — component effects "
+                         f"are not additive, so the component model is itself inconsistent.")}
     elif p_inc is None or (df_inc is not None and df_inc <= 0):
         dom["incoherence"] = {
             "rating": "unclear",
-            "reason": "设计-治疗交互检验不可得（网络可能仅含单一设计，或结构不足以"
-                      "分解直接/间接证据）——不可检验 ≠ 已证明一致。"}
+            "reason": _t("设计-治疗交互检验不可得（网络可能仅含单一设计，或结构不足以"
+                         "分解直接/间接证据）——不可检验 ≠ 已证明一致。",
+                         "Design-by-treatment interaction test unavailable (the network may contain a "
+                         "single design, or its structure is insufficient to split direct/indirect "
+                         "evidence) — untestable is not the same as proven consistent.")}
     elif p_inc < 0.05:
         dom["incoherence"] = {
             "rating": "major_concerns",
-            "reason": f"显著不一致性（设计-治疗交互 p = {p_inc:.3f} < 0.05），"
-                      "直接与间接证据冲突。"}
+            "reason": _t(f"显著不一致性（设计-治疗交互 p = {p_inc:.3f} < 0.05），"
+                         "直接与间接证据冲突。",
+                         f"Significant incoherence (design-by-treatment interaction p = {p_inc:.3f} < 0.05) "
+                         f"— direct and indirect evidence conflict.")}
     elif p_inc < 0.10:
         dom["incoherence"] = {
             "rating": "some_concerns",
-            "reason": f"不一致性边缘（设计-治疗交互 p = {p_inc:.3f}），"
-                      "建议核查直接/间接差异。"}
+            "reason": _t(f"不一致性边缘（设计-治疗交互 p = {p_inc:.3f}），"
+                         "建议核查直接/间接差异。",
+                         f"Borderline incoherence (design-by-treatment interaction p = {p_inc:.3f}) — "
+                         f"check the direct/indirect discrepancy.")}
     else:
         dom["incoherence"] = {
             "rating": "no_concerns",
-            "reason": f"未见显著不一致性（设计-治疗交互 p = {p_inc:.3f}）。"
-                      + ("加性假设未被拒绝。" if p_add is not None else "")}
+            "reason": _t(f"未见显著不一致性（设计-治疗交互 p = {p_inc:.3f}）。"
+                         + ("加性假设未被拒绝。" if p_add is not None else ""),
+                         f"No significant incoherence (design-by-treatment interaction p = {p_inc:.3f})."
+                         + (" Additivity not rejected." if p_add is not None else ""))}
 
     # ---- 汇总 ----
     n_major = sum(1 for d in dom.values() if d["rating"] == "major_concerns")
@@ -426,7 +479,10 @@ def cinema_grade(stats: dict, task: str = "") -> dict:
     else:
         overall = "no_concerns"
 
-    reasons = [f"{_CINEMA_LABELS[name]}：{d['rating']} —— {d['reason']}"
+    _labels = _CINEMA_LABELS_EN if _is_en() else _CINEMA_LABELS
+    _sep = " — " if _is_en() else " —— "
+    reasons = [f"{_labels[name]}: {d['rating']}{_sep}{d['reason']}" if _is_en()
+               else f"{_CINEMA_LABELS[name]}：{d['rating']} —— {d['reason']}"
                for name, d in dom.items()]
     return {
         "rating": overall,
@@ -437,13 +493,20 @@ def cinema_grade(stats: dict, task: str = "") -> dict:
         "n_some": n_some,
         "n_unclear": n_unclear,
         "framework": "CINeMA",
-        "note": "CINeMA 六域为半自动启发式评估，须人工确认；本评级是**网络整体**的"
-                "域评级，不等于 CINeMA 的逐对比（per-comparison）置信度。",
+        "note": _t(
+            "CINeMA 六域为半自动启发式评估，须人工确认；本评级是**网络整体**的"
+            "域评级，不等于 CINeMA 的逐对比（per-comparison）置信度。",
+            "CINeMA six domains are semi-automated heuristic ratings and require "
+            "human confirmation; this rating covers the **network as a whole** and "
+            "does not equal CINeMA's per-comparison confidence."),
     }
 
 
-def _evaluate_quality_cinema(stats: dict, task: str) -> dict:
+def _evaluate_quality_cinema(stats: dict, task: str, lang: str = None) -> dict:
     """网络 Meta（nma / nma_rank / cnma）的质量评估：CINeMA 六域 + B3/B4 复用。"""
+    if lang:
+        _LANG.set("en" if str(lang).lower().startswith("en") else "zh")
+        interpretation.set_lang(lang)
     cg = cinema_grade(stats, task)
     pooled = stats.get("pooled") or {}
     het = stats.get("heterogeneity") or {}
@@ -491,14 +554,27 @@ def _evaluate_quality_cinema(stats: dict, task: str) -> dict:
         qg_report["critical"] = True
     qg_report["framework"] = "CINeMA"
 
-    label = {"major_concerns": "存在重大关切", "some_concerns": "存在一些关切",
-             "no_concerns": "未见明显关切", "unclear": "各域均数据不足"}[cg["rating"]]
-    n_judged = len(cg["domains"]) - cg["n_unclear"]
-    summary = (f"CINeMA 六域：{label}（可评估 {n_judged}/6 域——"
-               f"重大关切 {cg['n_major']}、一些关切 {cg['n_some']}；"
-               f"另有 {cg['n_unclear']} 域数据不足，须人工补做）。")
-    if qg_report.get("n_high"):
-        summary += f"另检出 {qg_report['n_high']} 条高危过度声明。"
+    if _is_en():
+        label = {"major_concerns": "major concerns present",
+                 "some_concerns": "some concerns present",
+                 "no_concerns": "no obvious concerns",
+                 "unclear": "insufficient data in all domains"}[cg["rating"]]
+        n_judged = len(cg["domains"]) - cg["n_unclear"]
+        summary = (f"CINeMA six domains: {label} ({n_judged}/6 domains assessable — "
+                   f"major concerns {cg['n_major']}, some concerns {cg['n_some']}; "
+                   f"{cg['n_unclear']} domain(s) lack data and need manual work-up).")
+        if qg_report.get("n_high"):
+            summary += (f" {qg_report['n_high']} high-severity overclaim(s) "
+                        "additionally detected.")
+    else:
+        label = {"major_concerns": "存在重大关切", "some_concerns": "存在一些关切",
+                 "no_concerns": "未见明显关切", "unclear": "各域均数据不足"}[cg["rating"]]
+        n_judged = len(cg["domains"]) - cg["n_unclear"]
+        summary = (f"CINeMA 六域：{label}（可评估 {n_judged}/6 域——"
+                   f"重大关切 {cg['n_major']}、一些关切 {cg['n_some']}；"
+                   f"另有 {cg['n_unclear']} 域数据不足，须人工补做）。")
+        if qg_report.get("n_high"):
+            summary += f"另检出 {qg_report['n_high']} 条高危过度声明。"
 
     return {
         "framework": "CINeMA",

@@ -130,3 +130,24 @@ cases/
 # ── 2026-10-27 内部测试资产（offline 校验器+复现分析）：纯测试用途，不随任何发布版本出去 ──
 scripts/offline_verify_meta.py
 references/repro_academic_kernel_ANALYSIS.md
+
+# ── 2026-10-29 发布前检查补齐（F12 / F14 / F20）──
+# F12：顶层 workbench/ 整目录与运行产物（与 .gitignore 对齐；ClawHub 不读 .gitignore，须自列）
+workbench/
+workbench/runs/
+workbench/.merged.json
+workbench/europepmc.json
+workbench/openalex.json
+workbench/evidence_log.*
+workbench/references*
+workbench/lit_report.*
+workbench/pdfs/
+workbench/workbench_server.log
+workbench/driver_demo.py
+# F14：DEV-ONLY 本地 netmeta 验证器（§16.4 发布集不得含独立 .R）
+scripts/nma_codex/*.R
+# F20：顶层 ctqa 测试框架资产（不进发布包）
+browser_tests.py
+ctqa.config.json
+# 检索缓存（运行时生成，不进发布包）
+adapters/.search_cache/

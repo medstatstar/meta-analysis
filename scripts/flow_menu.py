@@ -4,7 +4,7 @@
 
 定位
 ----
-工作台（adapters/workbench/）已有完整的 11 节点渲染契约（form_schema）与 HITL
+工作台（workbench/）已有完整的 11 节点渲染契约（form_schema）与 HITL
 状态机（fullflow），但**对话侧没有菜单**：每轮展示什么、闸位有哪些选项，全靠 LLM
 即兴，同一节点两次渲染可能不一致。本模块给同一套 schema 加一层「对话投影」，
 **不新建第二套流程定义**。

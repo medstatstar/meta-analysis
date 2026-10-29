@@ -19,8 +19,33 @@ interpretation.py — 结果解读引擎（统计顾问层）
 
 from __future__ import annotations
 
+import contextvars
 import math
 from typing import Any
+
+# 输出语言（2026-10-29）：只影响**叙述文案**，不影响任何统计口径。
+# 用 contextvar 而非模块级变量：工作台在线程池里并发跑请求，全局变量会串语言。
+_LANG = contextvars.ContextVar("meta_interp_lang", default="zh")
+
+
+def _is_en() -> bool:
+    return str(_LANG.get() or "zh").lower().startswith("en")
+
+
+def _t(zh: str, en: str) -> str:
+    """按当前语言取文案。"""
+    return en if _is_en() else zh
+
+
+def set_lang(lang) -> None:
+    """设置本模块叙述层语言（zh/en）。
+
+    2026-10-29 i18n 链路补全：本模块与 block_b 各持一个独立 _LANG ContextVar，
+    此前 block_b.run_block_b 只设自己的 → _interpretation 块恒为中文（英文界面
+    下 B1/B2/B3 页面的结论/建议/关键数字整块中文泄漏）。所有语言入口
+    （run_block_b / demo_b_env / evaluate_quality）必须**同时**调用本函数。
+    """
+    _LANG.set("en" if str(lang or "zh").lower().startswith("en") else "zh")
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -57,26 +82,37 @@ def _safe_float(v: Any) -> float | None:
 def _sig_text(p: float | None) -> str:
     """p 值文本化（p < 0.001 简写）。"""
     if p is None:
-        return "p 值缺失"
+        return _t("p 值缺失", "p value missing")
     if p < 0.001:
         return "p < 0.001"
     return f"p = {p:.3f}"
+
+
+def _norm_i2(i2: float | None) -> float | None:
+    """I² 百分比归一化（2026-10-27 端到端 bug 修复）。
+
+    R 引擎（meta 包）按**比例**返回 I²（如 0.8879 = 88.79%），此前直接 {i2:.0f}%
+    会把 0.8879 四舍五入成 1% 并误判「低异质性」。0≤i2≤1 视为比例 ×100。
+    """
+    if i2 is None:
+        return None
+    return i2 * 100.0 if 0.0 <= i2 <= 1.0 else i2
 
 
 def _direction_text(sm: str, est: float) -> str:
     """效应量方向描述（OR/RR/SMD 等）。"""
     if sm in _RATIO_SM:
         if est > 1:
-            return "提示暴露/干预组事件风险更高"
+            return _t("提示暴露/干预组事件风险更高", "indicating a higher event risk in the exposed/intervention group")
         if est < 1:
-            return "提示暴露/干预组事件风险更低（保护效应）"
-        return "提示两组无差异"
+            return _t("提示暴露/干预组事件风险更低（保护效应）", "indicating a lower event risk in the exposed/intervention group (protective effect)")
+        return _t("提示两组无差异", "indicating no difference between groups")
     if sm in _SM_SM:
         if est > 0:
-            return "提示实验组效应高于对照组"
+            return _t("提示实验组效应高于对照组", "indicating a higher effect in the experimental group than in the control group")
         if est < 0:
-            return "提示实验组效应低于对照组"
-        return "提示两组无差异"
+            return _t("提示实验组效应低于对照组", "indicating a lower effect in the experimental group than in the control group")
+        return _t("提示两组无差异", "indicating no difference between groups")
     return ""
 
 
@@ -97,21 +133,27 @@ def _cohen_text(sm: str, est: float | None) -> str:
     if sm in _SM_SM:
         a = abs(est)
         if a < 0.2:
-            return f"效应幅度很小（|{sm}| = {a:.2f} < 0.2，Cohen 标准下限）"
+            return _t(f"效应幅度很小（|{sm}| = {a:.2f} < 0.2，Cohen 标准下限）",
+                      f"very small effect magnitude (|{sm}| = {a:.2f} < 0.2, below Cohen's threshold)")
         if a < 0.5:
-            return f"小效应（|{sm}| = {a:.2f}，Cohen 标准：0.2 小 / 0.5 中 / 0.8 大）"
+            return _t(f"小效应（|{sm}| = {a:.2f}，Cohen 标准：0.2 小 / 0.5 中 / 0.8 大）",
+                      f"small effect (|{sm}| = {a:.2f}; Cohen: 0.2 small / 0.5 medium / 0.8 large)")
         if a < 0.8:
-            return f"中等效应（|{sm}| = {a:.2f}，Cohen 标准：0.5 中）"
-        return f"大效应（|{sm}| = {a:.2f} ≥ 0.8，Cohen 标准）"
+            return _t(f"中等效应（|{sm}| = {a:.2f}，Cohen 标准：0.5 中）",
+                      f"medium effect (|{sm}| = {a:.2f}; Cohen: 0.5 medium)")
+        return _t(f"大效应（|{sm}| = {a:.2f} ≥ 0.8，Cohen 标准）",
+                  f"large effect (|{sm}| = {a:.2f} ≥ 0.8; Cohen)")
     if sm in _RATIO_SM:
         d = est / 1.0 if est >= 1 else 1.0 / est if est > 0 else 0.0
         if d < 1.2:
-            return f"效应接近无效值（{sm} = {est:.2f}，与 1 的距离不足 20%）"
+            return _t(f"效应接近无效值（{sm} = {est:.2f}，与 1 的距离不足 20%）",
+                      f"effect close to the null value ({sm} = {est:.2f}, less than 20% away from 1)")
         if d < 1.5:
-            return f"边缘效应（{sm} = {est:.2f}）"
+            return _t(f"边缘效应（{sm} = {est:.2f}）", f"marginal effect ({sm} = {est:.2f})")
         if d < 2.5:
-            return f"中等强度关联（{sm} = {est:.2f}）"
-        return f"强关联（{sm} = {est:.2f}，距无效值 1 较远，需复核数据真实性）"
+            return _t(f"中等强度关联（{sm} = {est:.2f}）", f"moderate association ({sm} = {est:.2f})")
+        return _t(f"强关联（{sm} = {est:.2f}，距无效值 1 较远，需复核数据真实性）",
+                  f"strong association ({sm} = {est:.2f}, far from the null value of 1 — verify data integrity)")
     return ""
 
 
@@ -125,43 +167,52 @@ def _evidence_grade(k: float | None, i2: float | None,
     grade = "High"
     reasons: list[str] = []
     if k is not None and k < 5:
-        reasons.append(f"研究数少（k = {int(k)} < 5，不精确性）")
+        reasons.append(_t(f"研究数少（k = {int(k)} < 5，不精确性）",
+                          f"few studies (k = {int(k)} < 5, imprecision)"))
         grade = "VeryLow" if k < 3 else "Low"
     if i2 is not None and i2 >= 75:
-        reasons.append(f"高异质性（I² = {i2:.0f}%）")
+        reasons.append(_t(f"高异质性（I² = {i2:.0f}%）", f"high heterogeneity (I² = {i2:.0f}%)"))
         grade = {"High": "Low", "Moderate": "Low", "Low": "VeryLow", "VeryLow": "VeryLow"}[grade]
     elif i2 is not None and i2 >= 50:
-        reasons.append(f"中等异质性（I² = {i2:.0f}%）")
+        reasons.append(_t(f"中等异质性（I² = {i2:.0f}%）", f"moderate heterogeneity (I² = {i2:.0f}%)"))
         if grade == "High":
             grade = "Moderate"
     # sm 未知时不做显著性降级：_NULL_VALUE 默认 0 会把比值类 CI（如 0.5–2）误判为显著
     if sm in _ALL_KNOWN_SM and not _is_significant(ci_lo, ci_hi, sm):
-        reasons.append("95% CI 跨无效值（合并效应未达统计学显著）")
+        reasons.append(_t("95% CI 跨无效值（合并效应未达统计学显著）",
+                          "95% CI crosses the null value (pooled effect not statistically significant)"))
         if grade == "High":
             grade = "Moderate"
         elif grade == "Moderate":
             grade = "Low"
     if not reasons:
-        reasons.append("研究数、异质性与精度均未见明显降级因素")
+        reasons.append(_t("研究数、异质性与精度均未见明显降级因素",
+                          "no obvious downgrading factor in study count, heterogeneity or precision"))
     return grade, reasons
 
 
 def _ci_precision_text(ci_lo: float | None, ci_hi: float | None, sm: str) -> str:
     """CI 宽度 → 精度表述（通读段用）。"""
     if ci_lo is None or ci_hi is None:
-        return "区间精度不可评估"
+        return _t("区间精度不可评估", "precision cannot be assessed")
     w = ci_hi - ci_lo
     if sm in _RATIO_SM:
         if w > 10:
-            return f"95% CI 跨度很大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足"
+            return _t(f"95% CI 跨度很大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足",
+                      f"very wide 95% CI ({ci_lo:.2f}–{ci_hi:.2f}); insufficient precision")
         if w > 3:
-            return f"95% CI 跨度较大（{ci_lo:.2f}–{ci_hi:.2f}），精度有限"
-        return f"95% CI（{ci_lo:.2f}–{ci_hi:.2f}）跨度可接受，精度尚可"
+            return _t(f"95% CI 跨度较大（{ci_lo:.2f}–{ci_hi:.2f}），精度有限",
+                      f"wide 95% CI ({ci_lo:.2f}–{ci_hi:.2f}); limited precision")
+        return _t(f"95% CI（{ci_lo:.2f}–{ci_hi:.2f}）跨度可接受，精度尚可",
+                  f"acceptable 95% CI width ({ci_lo:.2f}–{ci_hi:.2f}); reasonable precision")
     if w > 3:
-        return f"95% CI 跨度很大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足"
+        return _t(f"95% CI 跨度很大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足",
+                  f"very wide 95% CI ({ci_lo:.2f}–{ci_hi:.2f}); insufficient precision")
     if w > 1:
-        return f"95% CI 跨度较大（{ci_lo:.2f}–{ci_hi:.2f}），精度有限"
-    return f"95% CI（{ci_lo:.2f}–{ci_hi:.2f}）较窄，精度较好"
+        return _t(f"95% CI 跨度较大（{ci_lo:.2f}–{ci_hi:.2f}），精度有限",
+                  f"wide 95% CI ({ci_lo:.2f}–{ci_hi:.2f}); limited precision")
+    return _t(f"95% CI（{ci_lo:.2f}–{ci_hi:.2f}）较窄，精度较好",
+              f"narrow 95% CI ({ci_lo:.2f}–{ci_hi:.2f}); good precision")
 
 
 def _is_significant(
@@ -399,7 +450,7 @@ def _interpret_netmeta(stats: dict, task: str, sm: str) -> dict:
                                "并说明差异的临床可比性。")
 
     # ---- 4) 异质性（CINeMA 第 5 域）----
-    i2 = _safe_float(het.get("I2"))
+    i2 = _norm_i2(_safe_float(het.get("I2")))
     tau = _safe_float(het.get("tau"))
     if i2 is None:
         caveats.append("未返回网络整体异质性（I²/τ²），该域无法评估——"
@@ -477,6 +528,7 @@ def interpret_result(
     stats: dict | None,
     task: str = "",
     params: dict | None = None,
+    lang: str = None,
 ) -> dict:
     """基于 coze stats 生成结构化解读。
 
@@ -484,6 +536,9 @@ def interpret_result(
         stats: coze 返回的 stats 字典（pooled/heterogeneity/bias/k/sm 等）。
         task: 任务类型（pairwise_meta / single_group_meta / nma / ...）。
         params: 请求参数（sm / model / subgroup 等），缺失时从 stats.sm 推断。
+        lang: 显式语言覆盖（zh/en）。None = **继承**当前 _LANG（由调用入口如
+              run_block_b / demo_b_env 预先 set_lang）。此前默认 "zh" 会在每次
+              调用时把语言重置回中文，英文界面下解读块整块泄漏中文（2026-10-29）。
 
     Returns:
         interpretation 字典：
@@ -492,6 +547,9 @@ def interpret_result(
           - suggestions: list[str]，后续分析或撰写建议。
           - reviewer_questions: list[str]，审稿人可能追问的问题。
     """
+    # 输出语言（2026-10-29）：仅影响叙述文案，不影响数值；lang=None 继承上下文
+    if lang is not None:
+        _LANG.set("en" if str(lang or "zh").lower().startswith("en") else "zh")
     # 初始化
     empty = {"conclusion": "", "narrative": "", "caveats": [], "suggestions": [],
              "reviewer_questions": [], "key_numbers": [], "evidence_grade": ""}
@@ -524,7 +582,7 @@ def interpret_result(
         ci_hi = _safe_float(pooled.get("ci_high_exp") or pooled.get("ci_high"))
 
     p = _safe_float(pooled.get("p") or pooled.get("pval"))
-    i2 = _safe_float(het.get("I2"))
+    i2 = _norm_i2(_safe_float(het.get("I2")))
     tau2 = _safe_float(het.get("tau2"))
     egger_p = _safe_float(
         bias.get("egger_p") or bias.get("reg_p") or bias.get("begg_p")
@@ -542,140 +600,167 @@ def interpret_result(
         ci_txt = (
             f"{ci_lo:.2f}–{ci_hi:.2f}"
             if ci_lo is not None and ci_hi is not None
-            else "不可用"
+            else _t("不可用", "not available")
         )
         p_txt = _sig_text(p)
 
         if sig:
-            conclusion = (
+            conclusion = _t(
                 f"合并 {sm} = {est:.2f}（95% CI {ci_txt}，{p_txt}），"
-                f"{direction}，差异有统计学显著性。"
+                f"{direction}，差异有统计学显著性。",
+                f"Pooled {sm} = {est:.2f} (95% CI {ci_txt}, {p_txt}), "
+                f"{direction}; the difference is statistically significant.",
             )
         else:
-            conclusion = (
+            conclusion = _t(
                 f"合并 {sm} = {est:.2f}（95% CI {ci_txt}，{p_txt}），"
-                f"{direction}，但差异无统计学显著性（CI 跨无效值）。"
+                f"{direction}，但差异无统计学显著性（CI 跨无效值）。",
+                f"Pooled {sm} = {est:.2f} (95% CI {ci_txt}, {p_txt}), "
+                f"{direction}; however the difference is not statistically significant (CI crosses the null value).",
             )
 
     # ---- 2. 异质性 ----
     if i2 is not None:
         if i2 >= 75:
-            caveats.append(
-                f"I² = {i2:.0f}%，研究间存在高异质性，结论的普适性受限。"
-            )
+            caveats.append(_t(
+                f"I² = {i2:.0f}%，研究间存在高异质性，结论的普适性受限。",
+                f"I² = {i2:.0f}% — high between-study heterogeneity; generalisability of the conclusion is limited.",
+            ))
             if k is not None and k >= 5:
-                suggestions.append(
-                    "建议进行亚组分析或 meta-regression 探索异质性来源"
-                    "（如地区、剂量、研究质量）。"
-                )
-            reviewer_questions.append(
-                f"高异质性（I² = {i2:.0f}%）的来源是什么？"
-                "是否进行了亚组分析或 meta-regression？"
-            )
+                suggestions.append(_t(
+                    "建议进行亚组分析或 meta-regression 探索异质性来源（如地区、剂量、研究质量）。",
+                    "Consider subgroup analysis or meta-regression to explore sources of heterogeneity (region, dose, study quality).",
+                ))
+            reviewer_questions.append(_t(
+                f"高异质性（I² = {i2:.0f}%）的来源是什么？是否进行了亚组分析或 meta-regression？",
+                f"What explains the high heterogeneity (I² = {i2:.0f}%)? Were subgroup analysis or meta-regression performed?",
+            ))
         elif i2 >= 50:
-            caveats.append(
-                f"I² = {i2:.0f}%，中等异质性，随机效应模型适用，"
-                "但讨论段需解释异质性可能来源。"
-            )
+            caveats.append(_t(
+                f"I² = {i2:.0f}%，中等异质性，随机效应模型适用，但讨论段需解释异质性可能来源。",
+                f"I² = {i2:.0f}% — moderate heterogeneity; a random-effects model is appropriate, but the Discussion should explain possible sources.",
+            ))
             if k is not None and k >= 8:
-                suggestions.append(
-                    "若存在可能的效应修饰因素，建议探索亚组分析。"
-                )
+                suggestions.append(_t(
+                    "若存在可能的效应修饰因素，建议探索亚组分析。",
+                    "If effect modifiers are plausible, consider exploring them with subgroup analysis.",
+                ))
         elif i2 < 25 and (k is not None and k > 10):
-            caveats.append(
-                f"I² = {i2:.0f}%，低异质性，结果稳健；"
-                "可考虑固定效应模型作敏感性分析。"
-            )
+            caveats.append(_t(
+                f"I² = {i2:.0f}%，低异质性，结果稳健；可考虑固定效应模型作敏感性分析。",
+                f"I² = {i2:.0f}% — low heterogeneity and robust results; consider a fixed-effect model as a sensitivity analysis.",
+            ))
 
     # ---- 3. 发表偏倚 ----
     if egger_p is not None:
         if egger_p < 0.10 and (k is not None and k >= 5):
-            caveats.append(
-                f"Egger 检验 p = {egger_p:.3f}，提示可能存在发表偏倚，"
-                "合并效应可能被高估。"
-            )
-            suggestions.append(
-                "建议做剪补法（trim-and-fill）校正，并检查漏斗图不对称原因。"
-            )
-            reviewer_questions.append(
-                "是否存在发表偏倚？是否进行了剪补法或失安全系数分析？"
-            )
+            caveats.append(_t(
+                f"Egger 检验 p = {egger_p:.3f}，提示可能存在发表偏倚，合并效应可能被高估。",
+                f"Egger's test p = {egger_p:.3f} — possible publication bias; the pooled effect may be overestimated.",
+            ))
+            suggestions.append(_t(
+                "建议做剪补法（trim-and-fill）校正，并检查漏斗图不对称原因。",
+                "Consider trim-and-fill correction and examine the cause of funnel-plot asymmetry.",
+            ))
+            reviewer_questions.append(_t(
+                "是否存在发表偏倚？是否进行了剪补法或失安全系数分析？",
+                "Is there publication bias? Were trim-and-fill or fail-safe N analyses performed?",
+            ))
         elif egger_p < 0.10 and (k is None or k < 5):
-            caveats.append(
-                f"Egger 检验 p = {egger_p:.3f}，但研究数不足（k = {k}），"
-                "检验效能低，结果仅供参考。"
-            )
+            caveats.append(_t(
+                f"Egger 检验 p = {egger_p:.3f}，但研究数不足（k = {k}），检验效能低，结果仅供参考。",
+                f"Egger's test p = {egger_p:.3f}, but too few studies (k = {k}); the test has low power — interpret with caution.",
+            ))
         elif egger_p >= 0.10 and (k is not None and k >= 10):
-            caveats.append(
-                f"Egger 检验 p = {egger_p:.3f}，未见明显发表偏倚信号。"
-            )
+            caveats.append(_t(
+                f"Egger 检验 p = {egger_p:.3f}，未见明显发表偏倚信号。",
+                f"Egger's test p = {egger_p:.3f} — no clear signal of publication bias.",
+            ))
 
     # ---- 4. 研究数 ----
     if k is not None:
         if k < 3:
-            caveats.append(
-                f"仅纳入 {int(k)} 项研究，证据体极小，合并效应不稳定，结果仅供参考。"
-            )
-            reviewer_questions.append(
-                f"研究数过少（k = {int(k)}），合并结果的稳健性如何？"
-            )
+            caveats.append(_t(
+                f"仅纳入 {int(k)} 项研究，证据体极小，合并效应不稳定，结果仅供参考。",
+                f"Only {int(k)} studies included — a very small evidence base; the pooled effect is unstable and indicative only.",
+            ))
+            reviewer_questions.append(_t(
+                f"研究数过少（k = {int(k)}），合并结果的稳健性如何？",
+                f"With so few studies (k = {int(k)}), how robust is the pooled result?",
+            ))
         elif k < 5:
-            caveats.append(
-                f"纳入 {int(k)} 项研究，研究数较少，GRADE 证据等级应降级。"
-            )
-            suggestions.append("建议明确标注为初步探索，并谨慎解读结果。")
+            caveats.append(_t(
+                f"纳入 {int(k)} 项研究，研究数较少，GRADE 证据等级应降级。",
+                f"{int(k)} studies included — few studies; the GRADE certainty rating should be downgraded.",
+            ))
+            suggestions.append(_t(
+                "建议明确标注为初步探索，并谨慎解读结果。",
+                "Label this as exploratory and interpret the results cautiously.",
+            ))
 
     # ---- 5. 效应量极端 ----
     if sm in _RATIO_SM and est is not None:
         if est > 10:
-            caveats.append(
-                f"{sm} = {est:.2f}，效应量极端偏大，请复核原始数据（尤其零单元格）。"
-            )
-            reviewer_questions.append(
-                "效应量极端偏大的原因是什么？是否由零单元格导致？"
-                "是否进行了连续性校正？"
-            )
+            caveats.append(_t(
+                f"{sm} = {est:.2f}，效应量极端偏大，请复核原始数据（尤其零单元格）。",
+                f"{sm} = {est:.2f} — extremely large effect; re-check the raw data (especially zero cells).",
+            ))
+            reviewer_questions.append(_t(
+                "效应量极端偏大的原因是什么？是否由零单元格导致？是否进行了连续性校正？",
+                "What explains the extremely large effect? Is it driven by zero cells? Was a continuity correction applied?",
+            ))
         elif est < 0.1:
-            caveats.append(
-                f"{sm} = {est:.2f}，效应量极端偏小，请复核原始数据。"
-            )
+            caveats.append(_t(
+                f"{sm} = {est:.2f}，效应量极端偏小，请复核原始数据。",
+                f"{sm} = {est:.2f} — extremely small effect; re-check the raw data.",
+            ))
     elif sm in _SM_SM and est is not None:
         if abs(est) > 3:
-            caveats.append(
-                f"{sm} = {est:.2f}，效应量极端偏大（|d| > 3），"
-                "请复核原始数据或考虑离群研究。"
-            )
-            suggestions.append("建议做逐一剔除敏感性分析，识别离群研究。")
+            caveats.append(_t(
+                f"{sm} = {est:.2f}，效应量极端偏大（|d| > 3），请复核原始数据或考虑离群研究。",
+                f"{sm} = {est:.2f} — extremely large effect (|d| > 3); re-check the raw data or consider outlier studies.",
+            ))
+            suggestions.append(_t(
+                "建议做逐一剔除敏感性分析，识别离群研究。",
+                "Consider a leave-one-out sensitivity analysis to identify outlier studies.",
+            ))
 
     # ---- 6. CI 跨度 ----
     if ci_lo is not None and ci_hi is not None:
         ci_width = ci_hi - ci_lo
         if sm in _RATIO_SM and ci_width > 10:
-            caveats.append(
-                f"95% CI 跨度大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足，结论需谨慎。"
-            )
-            suggestions.append("建议增加研究数或探索异质性来源以缩窄 CI。")
+            caveats.append(_t(
+                f"95% CI 跨度大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足，结论需谨慎。",
+                f"Wide 95% CI ({ci_lo:.2f}–{ci_hi:.2f}) — insufficient precision; interpret the conclusion cautiously.",
+            ))
+            suggestions.append(_t(
+                "建议增加研究数或探索异质性来源以缩窄 CI。",
+                "Consider adding studies or exploring heterogeneity to narrow the CI.",
+            ))
         elif sm in _SM_SM and ci_width > 3:
-            caveats.append(
-                f"95% CI 跨度大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足。"
-            )
+            caveats.append(_t(
+                f"95% CI 跨度大（{ci_lo:.2f}–{ci_hi:.2f}），估计精度不足。",
+                f"Wide 95% CI ({ci_lo:.2f}–{ci_hi:.2f}) — insufficient precision.",
+            ))
 
     # ---- 7. 敏感性分析建议 ----
     if k is not None and k >= 5:
-        suggestions.append(
-            "推荐做逐一剔除敏感性分析，识别对合并效应影响最大的研究。"
-        )
+        suggestions.append(_t(
+            "推荐做逐一剔除敏感性分析，识别对合并效应影响最大的研究。",
+            "A leave-one-out sensitivity analysis is recommended to identify the most influential study.",
+        ))
 
     # ---- 8. GRADE / 汇报建议 ----
     if task in ("pairwise_meta", "subgroup_analysis", "single_group_meta"):
         if i2 is not None and k is not None:
-            suggestions.append(
-                "正文应报告：合并效应、95% CI、I²、τ²（如有）、研究数、"
-                "GRADE 证据等级、发表偏倚检验结果。"
-            )
-        reviewer_questions.append(
-            "是否报告了 PRISMA 检索策略和筛选流程？是否进行了偏倚风险评估？"
-        )
+            suggestions.append(_t(
+                "正文应报告：合并效应、95% CI、I²、τ²（如有）、研究数、GRADE 证据等级、发表偏倚检验结果。",
+                "The manuscript should report: pooled effect, 95% CI, I², τ² (if any), number of studies, GRADE certainty, and publication-bias test results.",
+            ))
+        reviewer_questions.append(_t(
+            "是否报告了 PRISMA 检索策略和筛选流程？是否进行了偏倚风险评估？",
+            "Were the PRISMA search strategy and screening process reported? Was risk of bias assessed?",
+        ))
 
     # ---- 9. 解读强化（2026-10-27 方案二·规则层）：临床幅度 / 证据评级 / 通读段 / 关键数字 ----
     magnitude = _cohen_text(sm, est)
@@ -687,53 +772,67 @@ def interpret_result(
     # 通读段：统计顾问口吻的连贯叙述（数据 → 方向/显著性 → 幅度 → 异质性 → 精度 → 评级）
     narrative_parts: list[str] = []
     if k is not None:
-        narrative_parts.append(f"本次共纳入 {int(k)} 项研究")
+        narrative_parts.append(_t(f"本次共纳入 {int(k)} 项研究", f"{int(k)} studies were included"))
     if est is not None:
         sig = _is_significant(ci_lo, ci_hi, sm)
         narrative_parts.append(
-            f"合并 {sm} = {est:.2f}"
-            + (f"（95% CI {ci_lo:.2f}–{ci_hi:.2f}" if ci_lo is not None and ci_hi is not None else "")
-            + (f"，{_sig_text(p)}）" if (ci_lo is not None and p is not None) else
-               ("）" if ci_lo is not None else ""))
-            + f"，{_direction_text(sm, est)}"
-            + ("，差异有统计学显著性" if sig else "，但 CI 跨无效值，差异无统计学显著性")
+            _t(f"合并 {sm} = {est:.2f}", f"pooled {sm} = {est:.2f}")
+            + (_t("（95% CI ", " (95% CI ") + f"{ci_lo:.2f}–{ci_hi:.2f}"
+               if ci_lo is not None and ci_hi is not None else "")
+            + (_t(f"，{_sig_text(p)}）", f", {_sig_text(p)})")
+               if (ci_lo is not None and p is not None) else
+               (_t("）", ")") if ci_lo is not None else ""))
+            + f", {_direction_text(sm, est)}"
+            + _t("，差异有统计学显著性" if sig else "，但 CI 跨无效值，差异无统计学显著性",
+                 "; the difference is statistically significant" if sig
+                 else "; however the CI crosses the null value, so the difference is not statistically significant")
         )
         if magnitude:
-            narrative_parts.append(f"效应幅度判定：{magnitude}")
+            narrative_parts.append(_t(f"效应幅度判定：{magnitude}", f"effect magnitude: {magnitude}"))
     if i2 is not None:
         narrative_parts.append(
-            f"研究间异质性 I² = {i2:.0f}%"
-            + (f"，τ² = {tau2:.3f}" if tau2 is not None else "")
+            _t(f"研究间异质性 I² = {i2:.0f}%", f"between-study heterogeneity I² = {i2:.0f}%")
+            + (f", τ² = {tau2:.3f}" if tau2 is not None else "")
         )
-    narrative_parts.append(f"估计精度：{precision_txt}")
+    narrative_parts.append(_t(f"估计精度：{precision_txt}", f"precision: {precision_txt}"))
     if egger_p is not None:
         if egger_p < 0.10:
             narrative_parts.append(
-                f"发表偏倚信号：Egger p = {egger_p:.3f} < 0.10"
-                + ("（但研究数少、检验效能有限）" if k is not None and k < 5 else "")
+                _t(f"发表偏倚信号：Egger p = {egger_p:.3f} < 0.10",
+                   f"publication-bias signal: Egger p = {egger_p:.3f} < 0.10")
+                + _t("（但研究数少、检验效能有限）" if k is not None and k < 5 else "",
+                    " (but few studies and limited test power)" if k is not None and k < 5 else "")
             )
         elif k is not None and k >= 10:
-            narrative_parts.append(f"发表偏倚：Egger p = {egger_p:.3f}，未见明显不对称信号")
-    narrative_parts.append(f"综合证据强度：{grade}（{'；'.join(grade_reasons)}）")
-    narrative = "。".join(p.rstrip("。") for p in narrative_parts if p) + "。"
+            narrative_parts.append(_t(
+                f"发表偏倚：Egger p = {egger_p:.3f}，未见明显不对称信号",
+                f"publication bias: Egger p = {egger_p:.3f}, no clear asymmetry signal",
+            ))
+    narrative_parts.append(_t(
+        f"综合证据强度：{grade}（{'；'.join(grade_reasons)}）",
+        f"overall certainty: {grade} ({'; '.join(grade_reasons)})",
+    ))
+    _sep = _t("。", ". ")
+    _tail = _t("。", ".")
+    narrative = _sep.join(p.rstrip("。") for p in narrative_parts if p) + _tail
 
     # 关键数字：供前端高亮展示
     key_numbers: list[dict] = []
     if k is not None:
-        key_numbers.append({"label": "研究数", "value": int(k)})
+        key_numbers.append({"label": _t("研究数", "Studies"), "value": int(k)})
     if est is not None:
-        key_numbers.append({"label": f"合并 {sm}", "value": round(est, 3)})
+        key_numbers.append({"label": _t(f"合并 {sm}", f"Pooled {sm}"), "value": round(est, 3)})
     if ci_lo is not None and ci_hi is not None:
         key_numbers.append({"label": "95% CI", "value": f"{ci_lo:.2f}–{ci_hi:.2f}"})
     if p is not None:
-        key_numbers.append({"label": "p 值", "value": _sig_text(p).replace("p ", "").lstrip("= ")} )
+        key_numbers.append({"label": _t("p 值", "p value"), "value": _sig_text(p).replace("p ", "").lstrip("= ")} )
     if i2 is not None:
         key_numbers.append({"label": "I²", "value": f"{i2:.0f}%"})
     if tau2 is not None:
         key_numbers.append({"label": "τ²", "value": round(tau2, 4)})
     if egger_p is not None:
         key_numbers.append({"label": "Egger p", "value": round(egger_p, 3)})
-    key_numbers.append({"label": "证据强度", "value": grade})
+    key_numbers.append({"label": _t("证据强度", "Certainty"), "value": grade})
 
     return {
         "conclusion": conclusion,

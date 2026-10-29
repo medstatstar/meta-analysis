@@ -93,7 +93,7 @@ STAGE_TO_GATE = {v: k for k, v in GATE_TO_STAGE.items()}
 #       （C3 是 ref_verifications / refs_verified，C4 是 qa / evidence_table）。
 #   C1 保留 sections（stage_result 真实存在，可事后补丁）。
 EDITABLE_KEYS = {
-    "A1.topic_selection": ["report", "include_reviews"],
+    "A1.topic_selection": ["report", "include_reviews", "sources"],
     "A2.literature_search": ["query", "screened"],
     "A3.pdf_download": ["pdf_dir", "extracted_rows"],
     "A4.data_extraction": ["extracted_rows", "pdf_dir"],
@@ -610,7 +610,12 @@ def _run_block(letter, sess, debug, on_line=None, on_a4_event=None, start_stage=
             effect_measure=cfg.get("effect_measure", "OR"),
             nma=cfg.get("nma", False),
             human_decision=creds, pause_at=pause, debug=debug,
-            claims_text=_claims_text, claims_meta=_claims_meta)
+            claims_text=_claims_text, claims_meta=_claims_meta,
+            # 2026-10-29：B1–B4 叙述层随界面语言（此前漏传 → GRADE/过度声明页面整块中文）
+            lang=_sess_lang(sess),
+            # 2026-10-27 路线 B 透传：起始页「研究主题」→ B1 params → coze LLM
+            # 叙述层结合主题判定方向利弊（工作台此前发不出主题，LLM 只能兜底话术）。
+            topic=(sess.data.get("topic") or "").strip() or None)
     # C 档：把 Block A 的真实素材（文献集/PICOS/PRISMA 流/检索源 + PDF 章节切片）透传给 C1 写稿
     _ground = _extract_c_grounding(sess)
     # 真实文献接地（2026-09-22）：快速通道（draft / 无 A2 文献集）没有上游文献可引，
@@ -1021,12 +1026,18 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
                  session_dir: str = ".", debug: bool = False,
                  pdf_email: str = None, max_attempts: int = 12,
                  include_reviews: bool = False, picos=None, sources=None,
-                 on_line=None, on_a4_event=None, start_stage: str = None) -> dict:
+                 on_line=None, on_a4_event=None, start_stage: str = None,
+                 lang: str = "zh") -> dict:
     """启动 fullflow：跑 Block A，遇停靠点即停。返回 = 块信封 + fullflow 视图。
 
     pdf_email / max_attempts 透传给 Block A 的 A4 自动落盘（文献集门控 → OA PDF
     下载 → 抽取 2×2 表草稿）。live 路径默认开启 auto_fetch，使「检索→A4→B1」
     真正贯通：A4 产出的 extracted_rows 经 handoff.studies_for_b 直接喂给 B1。
+
+    lang（2026-10-29 i18n 链路补全）：工作台界面语言（zh/en），存入 cfg["language"]。
+    此前该值只被 Block C 消费，Block A/B 的 run_block_a / run_block_b 均取不到 ——
+    英文界面下 B2 GRADE / B3 过度声明页面整块输出中文。链路：server(req.lang) →
+    run_fullflow(lang) → cfg["language"] → _advance 各块 lang=… → 后端 _t() 双语。
     """
     # 入口标识：标记本次调用来自工作台 web 应用（2026-10-07）
     cc.set_entry_point("workbench")
@@ -1044,7 +1055,9 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
            # 2026-10-26：检索数据源（要检索的数据库清单）随启动请求下发，存入 cfg。
            # A2 检索时 _src 优先读 cfg["sources"]；为 None 时回落 block_a.DEFAULT_SOURCES。
            "sources": [str(s) for s in sources]
-                      if isinstance(sources, (list, tuple)) and sources else None}
+                      if isinstance(sources, (list, tuple)) and sources else None,
+           # 2026-10-29：界面语言随启动请求入 cfg（持久化），A/B/C 各块统一消费
+           "language": "en" if str(lang or "zh").lower().startswith("en") else "zh"}
     sess = FullflowSession.new(topic, cfg, session_dir)
     return _advance(sess, debug=debug, on_line=on_line, on_a4_event=on_a4_event,
                     start_stage=start_stage)
@@ -1053,7 +1066,8 @@ def run_fullflow(topic: str, *, max_results: int = 50, year_from=None,
 def run_fastpath(topic: str, data_mode: str, *, rows=None, a4_result=None,
                  b_env=None, effect_measure: str = "OR", nma: bool = False,
                  session_dir: str = ".", debug: bool = False, demo: bool = False,
-                 topic_en: str = None, defer_advance: bool = False) -> dict:
+                 topic_en: str = None, defer_advance: bool = False,
+                 lang: str = "zh") -> dict:
     """快速通道：跳过 Block A 的选题/检索/筛选，按 data_mode 直接进入分析起点。
 
     data_mode:
@@ -1087,7 +1101,9 @@ def run_fastpath(topic: str, data_mode: str, *, rows=None, a4_result=None,
            "effect_measure": effect_measure, "nma": nma,
            "pause_at": sorted(DEFAULT_PAUSE_AT), "extraction_table": None,
            "session_dir": session_dir, "pdf_email": None, "max_attempts": 0,
-           "include_reviews": False, "fast_path": data_mode}
+           "include_reviews": False, "fast_path": data_mode,
+           # 2026-10-29：快速通道同样落语言（B1–B4 面板 / C1 初稿随界面语言）
+           "language": "en" if str(lang or "zh").lower().startswith("en") else "zh"}
     sess = FullflowSession.new(topic, cfg, session_dir)
     pid = sess.data["pipeline_id"]
     # 英文题名（2026-09-22）：C 档初稿是英文稿件。显式传入优先；演示模式配套
@@ -1407,6 +1423,19 @@ def _validate_decision(sess, decision):
         if gate and gate in cc._REDLINE_GATES:
             return f"🔴 红线闸 {gate} 不接受 skipped（spec §8.2），请 approve/revise/reject"
     return None
+
+
+def _sess_lang(sess):
+    """会话界面语言（zh/en）——run_fullflow / run_fastpath 启动时写入 cfg["language"]。
+
+    2026-10-29 i18n 链路补全：此前该值只被 Block C 读取，B2 GRADE / B3 过度声明
+    等后端叙述层拿不到界面语言，英文模式下整块输出中文。所有块级调用统一经本
+    helper 取值，缺省 zh（与历史行为一致）。
+    """
+    try:
+        return (sess.data.get("cfg") or {}).get("language") or "zh"
+    except AttributeError:  # pragma: no cover - 非 FullflowSession 兜底
+        return "zh"
 
 
 def _advance(sess, debug=False, on_line=None, on_a4_event=None, start_stage=None):

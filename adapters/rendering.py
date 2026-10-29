@@ -54,7 +54,8 @@ def extract_svg(svg_str: str) -> tuple[str, str]:
 
 
 def content_bbox(
-    svg_inner: str, vb: str = "0 0 504 360", pad: float = 8.0, pad_y: float = 24.0
+    svg_inner: str, vb: str = "0 0 504 360", pad: float = 8.0, pad_y: float = 24.0,
+    rect_max_frac: float = 0.45,
 ) -> tuple[float, float, float, float]:
     """扫描 SVG 内容元素，返回 (min_x, min_y, max_x, max_y) 含 padding。
 
@@ -64,15 +65,23 @@ def content_bbox(
     translate 锚点双向扩展）、rect（跳过 width=100% 白底）、line、circle、
     polyline/polygon points、**path（解析 d 属性绝对坐标对）**。
 
-    2026-08-28 加固：将计算结果与**原始 viewBox** 取并集（union）。依据——
+    2026-08-28 加固：将计算结果与**原始 viewBox** 智能并集。依据——
     ① svglite 内容偶发超出 viewBox（如 forest 左右文字列 x∈[-140,644]），
       text 扫描已能捕获该溢出；
-    ② 但 ggplot2 / 网络图主内容多为 <path>（曲线、edge），若未被上列元素类型
-      完全捕获，union 原始 viewBox 可保证不裁掉 svglite 实际绘制的区域
-      （设备坐标恒落在原 viewBox 内，除已知的负坐标溢出）。
-    二者取并集 = 既不妨碍 forest 溢出扩展，也不因漏扫而裁图。
+    ② 大块「面板/背景」白底 rect（如漏斗图居中面板、Labbe/网络图绘图区）本身
+      是绘图留白，**不再计入** bbox（rect_max_frac 阈值跳过），避免上下/左右
+      大片白边；仅当扫描内容已触及/超出画布边缘时才将该方向撑满整画布（防漏
+      扫裁图），内容远小于画布时则紧贴内容裁剪。
     无内容且无合法 viewBox 时回退原画布 (0, 0, 504, 360)。
     """
+    # ---- 解析原始 viewBox（提前，供面板 rect 跳过与智能并集使用）----
+    try:
+        vbx, vby, vbw, vbh = (float(t) for t in str(vb).split())
+        vb_area = vbw * vbh
+    except (ValueError, AttributeError, TypeError):
+        vbx, vby, vbw, vbh = 0.0, 0.0, 504.0, 360.0
+        vb_area = vbw * vbh
+
     xs: list[float] = []
     ys: list[float] = []
 
@@ -83,15 +92,26 @@ def content_bbox(
         w = _num(tl.group(1)) if tl else 0.0
         tm = re.search(r"transform=['\"]([^'\"]+)['\"]", attrs)
         if tm:
-            # transform 文本（如漏斗图 y 轴旋转标签）：取 translate 锚点，沿 x/y
-            # 双向扩展 textLength（旋转方向不定，保守覆盖 → 保证不裁剪）
+            # transform 文本（如漏斗图 y 轴旋转标签）：取 translate 锚点定位。
+            # 旋转方向已知时精确覆盖，避免把 textLength 同时摊到 x/y 两侧造成
+            # 上下/左右虚高白边：rotate(±90/270) 文字竖向 → 横向仅半个字高、纵向
+            # 占 textLength；其余按横向占 textLength、纵向半个字高处理。
             t = re.search(
                 r"translate\(\s*([-0-9.]+)\s*,\s*([-0-9.]+)\s*\)", tm.group(1)
             )
             if t:
                 tx, ty = _num(t.group(1)), _num(t.group(2))
-                xs += [tx - w, tx + w]
-                ys += [ty - w, ty + w]
+                rot = re.search(r"rotate\(\s*(-?[0-9.]+)", tm.group(1))
+                ang = _num(rot.group(1)) if rot else 0.0
+                half_h = 6.0  # 约半个字号（12px）
+                hw = w / 2 if w else 12.0
+                vertical = abs(ang - 90) < 1 or abs(ang + 90) < 1 or abs(abs(ang) - 270) < 1
+                if vertical:
+                    xs += [tx - half_h, tx + half_h]
+                    ys += [ty - hw, ty + hw]
+                else:
+                    xs += [tx - hw, tx + hw]
+                    ys += [ty - half_h, ty + half_h]
                 continue
             continue  # 无 translate 的 transform（如纯 rotate）无法定位，跳过
         xm = re.search(rf"\bx={_Q}([^'\"]+)", attrs)
@@ -116,6 +136,11 @@ def content_bbox(
         if all(k in a for k in ("x", "y", "width", "height")) and a["width"] != "100%":
             x, y = _num(a["x"]), _num(a["y"])
             w, h = _num(a["width"]), _num(a["height"])
+            # 跳过大块「面板/背景」白底 rect（如 ggplot2 漏斗图居中面板、Labbe /
+            # 网络图绘图区），其本身是绘图留白，不可撑开 viewBox，否则会出现上下
+            # / 左右大片白边。仅保留真正的内容小 rect（如森林图 study 方块）。
+            if vb_area > 0 and (w * h) >= rect_max_frac * vb_area:
+                continue
             xs += [x, x + w]
             ys += [y, y + h]
 
@@ -147,8 +172,7 @@ def content_bbox(
     # ---- path（d 属性绝对坐标对） ----
     # svglite 对曲线 / 网络图 edge 多输出 <path d="M.. L.. C..">；低层命令字母与逗号
     # 非数值，直接抽全部浮点 token 按 (x,y) 配对即可覆盖 bounding box。相对坐标
-    # （小写命令）会被误当绝对、可能略放大，但仅增留白、绝不裁图（且下方 union
-    # 原始 viewBox 进一步兜底）。
+    # （小写命令）会被误当绝对、可能略放大，但仅增留白、绝不裁图。
     for m in re.finditer(r"<path\b([^>]*)/?>", svg_inner):
         a = dict(re.findall(r"([a-zA-Z:_-]+)=['\"]([^'\"]*)['\"]", m.group(1)))
         d = a.get("d")
@@ -160,13 +184,19 @@ def content_bbox(
             xs.append(coords[i])
             ys.append(coords[i + 1])
 
-    # ---- 与原始 viewBox 取并集（防漏扫裁图） ----
-    try:
-        vbx, vby, vbw, vbh = (float(t) for t in str(vb).split())
+    # ---- 与原始 viewBox 的「智能」并集 ----
+    # 仅当扫描到的内容已触及 / 超出画布边缘时，才向该方向撑满整画布
+    # （防止森林图左右文字列等溢出被裁）；内容明显小于画布（如漏斗图居中绘制、
+    # 四周留白）时不再强行撑满，从而避免上下 / 左右大片白边。完全未扫到有效内容
+    # 时回退整画布，保证不出现空图 / 裁图。
+    if xs and ys:
+        if min(xs) <= vbx + 1e-6 or max(xs) >= vbx + vbw - 1e-6:
+            xs += [vbx, vbx + vbw]
+        if min(ys) <= vby + 1e-6 or max(ys) >= vby + vbh - 1e-6:
+            ys += [vby, vby + vbh]
+    else:
         xs += [vbx, vbx + vbw]
         ys += [vby, vby + vbh]
-    except (ValueError, AttributeError, TypeError):
-        pass
 
     if not xs or not ys:
         return (0.0, 0.0, 504.0, 360.0)
