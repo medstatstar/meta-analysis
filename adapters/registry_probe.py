@@ -23,6 +23,7 @@ Degrades gracefully (status="error", total=None) on network failure — never
 aborts the topic-selection stage.
 """
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -33,6 +34,40 @@ UA = "meta-analysis-skill/2.1.1"
 
 # 仅取选题查重需要的字段，减小响应体
 _FIELDS = "NCTId,BriefTitle,OverallStatus,Condition,InterventionName"
+
+# 检索归一化停用词：仅去除连接词 / 方法学词 / 纯泛义词，保留药名、疾病名、
+# 器官名、结局词等医学核心词（如 disease / kidney / renal / cardiovascular 保留）。
+# 目的：把「SGLT2 inhibitors in chronic kidney disease: renal protection and
+# cardiovascular benefit」这类自动翻译长句归一成核心词 AND 检索式，避免 query.term
+# 整串短语精确匹配只命中 2 项的假阴性（2026-10-30 修复）。
+_CT_STOP = {
+    "in", "the", "and", "or", "of", "for", "with", "to", "a", "an", "on", "by",
+    "vs", "versus", "among", "between", "after", "before", "benefit", "benefits",
+    "protection", "protective", "effect", "effects", "efficacy", "safety",
+    "study", "studies", "trial", "trials", "review", "reviews", "meta",
+    "analysis", "randomized", "randomised", "controlled", "patients", "adults",
+    "impact", "impacts", "role", "roles", "use", "using", "used", "based",
+    "association", "risk", "prevention", "management", "compared", "outcome",
+    "outcomes", "treatment", "therapy", "therapies", "its", "their", "this",
+    "that", "whether", "which", "than", "against", "vs.",
+}
+
+
+def _normalize_ctgov_term(topic):
+    """把自由文本长句归一成 CT.gov 友好的检索式。
+
+    - 去标点（保留字母/数字/空格/连字符）；
+    - 去英文停用词；
+    - 核心词用空格连接（CT.gov 视作 AND）。
+    若归一化后词数 <=2（已是简短检索式或去得太狠），退回原词以避免过度收窄。
+    """
+    if not topic or not topic.strip():
+        return topic
+    raw = re.sub(r"[^a-z0-9\s-]", " ", topic.lower())
+    words = [w.strip("-") for w in raw.split() if w.strip("-") and w not in _CT_STOP]
+    if len(words) <= 2:
+        return topic.strip()
+    return " ".join(words)
 
 
 def _get_json(url, timeout=30, max_retries=3, backoff=2.0):
@@ -96,7 +131,7 @@ def probe(topic, max_results=5, condition=None, intervention=None):
         if intervention:
             params["query.int"] = intervention
     else:
-        params["query.term"] = topic
+        params["query.term"] = _normalize_ctgov_term(topic)
 
     url = BASE + "?" + urllib.parse.urlencode(params)
     try:

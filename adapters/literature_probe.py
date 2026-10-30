@@ -623,6 +623,48 @@ def search_evidence(topic, n_primary=12, n_synthesis=5, year_from=None):
     }
 
 
+def rct_probe(topic, topic_en=None, max_results=1, year_from=None, year_to=None):
+    """查「已发表 RCT 原始研究」数（Europe PMC PUB_TYPE:"Randomized Controlled Trial"）。
+
+    WHY（2026-10-30 修复）：选题评估此前用 ClinicalTrials.gov 注册库计数充当
+    「预期可纳入原始研究数 k」。但注册库记录的是试验方案 / 进行中 / 已完成未必然
+    发表的研究，≠ 可纳入 Meta 的已发表原始 RCT。SGLT2-CKD 这类成熟方向已有
+    CREDENCE / DAPA-CKD / EMPA-KIDNEY 等多篇已发表大型 RCT，注册库短语检索却因
+    检索词过窄只命中 2 项，导致误判「数据不足以支撑 meta」。已发表 RCT 文献数才是
+    k 的更可靠代理。本探针即补上这一路。
+
+    返回 dict（与 registry_probe 同构，便于 block_a / topic_assess 直接消费）：
+        {status, total, note, query, sample}
+      - status: "ok" | "error" | "partial"
+      - total : 已发表 RCT 的 hit_count（可为 0，0 也是有效信号）
+      - note  : 人类可读说明（标注数据源为「已发表 RCT」）
+      - query : 实际生效检索式（便于用户核对口径）
+      - sample: []（本探针只取计数，不取记录，减小响应体）
+    优雅降级：网络/解析失败 → status="error", total=None，绝不中断选题流程。
+    """
+    q_topic = (topic_en or "").strip() or (topic or "").strip()
+    if not q_topic or _has_cjk(q_topic):
+        return {"status": "error", "total": None,
+                "note": "无英文检索词（或仍为中文），无法查已发表 RCT；"
+                        "请在「英文题名」填写英文表达后重试。",
+                "query": None, "sample": []}
+    try:
+        q = to_search_query(q_topic) or q_topic
+        _, query, hits, err = _search_once(q, "rct", max_results, year_from, year_to)
+    except Exception as e:  # noqa: BLE401 - 降级，不中断选题
+        return {"status": "error", "total": None, "note": "已发表 RCT 探针失败: %s" % e,
+                "query": None, "sample": []}
+    if err:
+        return {"status": "error", "total": None, "note": "已发表 RCT 探针失败: %s" % err,
+                "query": query, "sample": []}
+    if hits is None:
+        return {"status": "partial", "total": None,
+                "note": "已发表 RCT 探针未返回计数（响应异常）。", "query": query,
+                "sample": []}
+    note = "已发表 RCT（Europe PMC）%d 篇。" % hits
+    return {"status": "ok", "total": hits, "note": note, "query": query, "sample": []}
+
+
 _STOP = {"the", "and", "for", "with", "of", "in", "on", "a", "an", "to", "vs",
          "versus", "randomized", "controlled", "trial", "trials", "study",
          "studies", "analysis", "meta", "systematic", "review", "adults",

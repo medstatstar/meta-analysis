@@ -34,6 +34,7 @@ import features  # 网页功能开关（2026-09-17：A4 数据提取可隐藏，
 import registry_probe as _registry_probe
 import topic_assess
 import prospero_probe as _prospero_probe
+import literature_probe as _literature_probe
 
 # A2 检索式翻译关联 ct-base 权威 kw_localize（ct-base 规范 bilingual_retrieval.md）：
 # 本模块不重复实现翻译，仅在首次需要时把「ct-base/scripts → ct-literature/scripts
@@ -130,7 +131,7 @@ def _infer_picos(topic):
     return picos, missing
 
 
-def _try_coze_topic_assessment(topic, picos, missing, assess_draft, registry_probe, dedup_probe, prospero):
+def _try_coze_topic_assessment(topic, picos, missing, assess_draft, registry_probe, dedup_probe, prospero, rct_probe=None):
     """P1 结构：调用 coze topic_assessment 节点取临床价值判断 + 选题策展。
 
     默认关闭（META_TOPIC_COZE 未置 1）。待 coze 侧 topic_assessment 节点就绪（P2/P3）
@@ -152,6 +153,10 @@ def _try_coze_topic_assessment(topic, picos, missing, assess_draft, registry_pro
                              "total": (registry_probe or {}).get("total")},
                 "prospero": {"status": (prospero or {}).get("status"),
                              "error": (prospero or {}).get("error")},
+                # 2026-10-30：已发表 RCT 计数（Europe PMC）——k 估算的优先数据源，
+                # 让 coze LLM 看到「可纳入原始研究」的真实体量而非仅注册试验数。
+                "rct": {"status": (rct_probe or {}).get("status"),
+                        "total": (rct_probe or {}).get("total")},
             },
             "deterministic_scores": {
                 "method": assess_draft.get("scores", {}).get("feasibility"),
@@ -251,7 +256,7 @@ def _llm_clinical_fallback(topic, picos, missing, draft):
         return None
 
 
-def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_assessment=True, topic_en=None, picos_override=None, lang="zh"):
+def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_assessment=True, topic_en=None, picos_override=None, lang="zh", rct_probe=None):
     _en = str(lang or "zh").lower().startswith("en")
 
     def _tr(zh, en):
@@ -302,58 +307,74 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
     except Exception as _pe:  # noqa: BLE001
         _prospero = {"status": "unavailable", "hit_count": None, "sample": [],
                      "error": f"PROSPERO 探针失败: {_pe}", "manual_url": None, "note": ""}
-    # A1 查重探针：真实调 ct-registry（CT.gov 来源）已注册试验数，供选题拥挤度判断
+    # 2026-10-30：rct_probe 为 None 时本地直连 Europe PMC 取已发表 RCT 数
+    if rct_probe is None:
+        try:
+            rct_probe = _literature_probe.rct_probe(topic_en or topic)
+        except Exception as _re:  # noqa: BLE001
+            rct_probe = {"status": "error", "total": None, "note": "本地 rct 探针失败: %s" % _re}
+    # 2026-10-30：统一「可纳入原始研究数」代理——已发表 RCT 文献数优先，交叉
+    # ClinicalTrials.gov 注册数；两者都不可用则 unknown。注册数仅作辅助展示。
+    _rt = (rct_probe or {}).get("total")
+    try:
+        _rt = int(_rt) if _rt is not None else None
+    except (TypeError, ValueError):
+        _rt = None
+    _reg = registry_probe.get("total") if isinstance(registry_probe, dict) else None
+    try:
+        _reg = int(_reg) if _reg is not None else None
+    except (TypeError, ValueError):
+        _reg = None
+    if _rt is not None:
+        primary_total, primary_src = _rt, _tr("已发表 RCT", "published RCT")
+    elif _reg is not None:
+        primary_total, primary_src = _reg, _tr("注册试验", "registered trials")
+    else:
+        primary_total, primary_src = None, None
+
     if registry_probe:
         report["registry_probe"] = registry_probe
-        total = registry_probe.get("total")
-        # 2026-10-25：用文献库命中数交叉校验注册库结论。
-        # 「注册库 0 命中」有两种含义：真的没有注册试验，或探针没打中（检索词/语言不匹配）。
-        # 后者在中文主题上很常见。若文献库已有大量同类 SR/MA，却判定「空白方向」，
-        # 两段结论会直接打脸（用户实际反馈的就是这个）。故此处优先判「探针未命中」。
-        try:
-            _co_n, _pm_n = topic_assess._extract_dedup_counts(dedup_probe)
-        except Exception:  # noqa: BLE001
-            _co_n, _pm_n = None, None
-        _sr_total = (_co_n or 0) + (_pm_n or 0)
-        if total is not None:
-            if total == 0 and _sr_total >= 20:
-                # 矛盾态：不以注册库计数推断空白，改为「未知」并把矛盾写进 risk_alert
-                report["feasibility"]["crowding"] = "unknown"
-                report["feasibility"]["expected_studies"] = None
-                report["feasibility"]["risk_alert"] = _tr(
-                    "⚠️ 注册库探针 0 命中，但文献库已有 %d 篇同类 SR/MA —— "
-                    "两者矛盾，按「探针未命中」处理（多为检索词/语言与注册库不匹配），"
-                    "不据此判定为空白方向；原始研究数建议人工核查。" % _sr_total,
-                    "⚠️ The registry probe returned 0 hits, but the literature already contains %d similar SR/MA — "
-                    "the two conflict, so this is treated as a probe miss (usually a query/language mismatch with the registry) "
-                    "rather than a blank direction; verify the primary-study count manually." % _sr_total)
-                report["registry_probe"] = dict(registry_probe, note=(
-                    (registry_probe.get("note") or "")
-                    + " ⚠ 与文献库命中数矛盾（同类 SR/MA %d 篇），本次结论不以注册库计数为准。"
-                    % _sr_total))
-            elif total == 0:
-                report["scope_warning"] = (report["scope_warning"] or "") + _tr(
-                    " 注册库未检索到相关试验，属空白/新兴方向。",
-                    " No related trials were found in the registry — a blank/emerging direction.")
-                report["feasibility"]["crowding"] = "empty"
-                report["feasibility"]["risk_alert"] = _tr(
-                    "⚠️ 方向空白，可能原始研究极少，预期可纳入研究数量不足（meta 至少 k≥2）。",
-                    "⚠️ Blank direction — primary studies may be very scarce, so the expected number of includable studies may be insufficient (a meta-analysis needs at least k≥2).")
-            elif total < 5:
-                report["feasibility"]["crowding"] = "low"
-                report["feasibility"]["expected_studies"] = total
-                report["feasibility"]["risk_alert"] = _tr(
-                    f"⚠️ 注册库仅 {total} 项，预期可纳入研究较少，meta 分析效能可能不足。",
-                    f"⚠️ Only {total} registry records — few expected includable studies; the meta-analysis may be under-powered.")
-            elif total >= 200:
-                report["scope_warning"] = (report["scope_warning"] or "") + _tr(
-                    f" 注册库已检索到 {total} 项相关试验，方向可能已较拥挤，建议明确差异化角度。",
-                    f" {total} related trials were found in the registry — the direction may already be crowded; define a clear differentiation.")
-                report["feasibility"]["crowding"] = "high"
-                report["feasibility"]["expected_studies"] = total
-            else:
-                report["feasibility"]["crowding"] = "moderate"
-                report["feasibility"]["expected_studies"] = total
+    # 拥挤度/风险预警改用 primary_total（已发表 RCT 优先）
+    try:
+        _co_n, _pm_n = topic_assess._extract_dedup_counts(dedup_probe)
+    except Exception:  # noqa: BLE001
+        _co_n, _pm_n = None, None
+    _sr_total = (_co_n or 0) + (_pm_n or 0)
+    if primary_total is not None:
+        if primary_total == 0 and _sr_total >= 20:
+            # 矛盾态：原始研究探针 0 命中但文献库大量 SR/MA → 探针未命中，待核实
+            report["feasibility"]["crowding"] = "unknown"
+            report["feasibility"]["expected_studies"] = None
+            report["feasibility"]["risk_alert"] = _tr(
+                "⚠️ 原始研究探针 0 命中，但文献库已有 %d 篇同类 SR/MA —— "
+                "两者矛盾，按「探针未命中」处理（多为检索词/语言与库不匹配），"
+                "不据此判定为空白方向；原始研究数建议人工核查。" % _sr_total,
+                "⚠️ The primary-study probe returned 0 hits, but the literature already contains %d similar SR/MA — "
+                "the two conflict, so this is treated as a probe miss (usually a query/language mismatch) "
+                "rather than a blank direction; verify the primary-study count manually." % _sr_total)
+        elif primary_total == 0:
+            report["scope_warning"] = (report["scope_warning"] or "") + _tr(
+                " 原始研究探针未检索到相关 RCT，属空白/新兴方向。",
+                " No related RCTs were found — a blank/emerging direction.")
+            report["feasibility"]["crowding"] = "empty"
+            report["feasibility"]["risk_alert"] = _tr(
+                "⚠️ 方向空白，可能原始研究极少，预期可纳入研究数量不足（meta 至少 k≥2）。",
+                "⚠️ Blank direction — primary studies may be very scarce, so the expected number of includable studies may be insufficient (a meta-analysis needs at least k≥2).")
+        elif primary_total < 5:
+            report["feasibility"]["crowding"] = "low"
+            report["feasibility"]["expected_studies"] = primary_total
+            report["feasibility"]["risk_alert"] = _tr(
+                f"⚠️ {primary_src}仅 {primary_total} 项，预期可纳入研究较少，meta 分析效能可能不足（已用已发表 RCT 校正注册库偏窄）。",
+                f"⚠️ Only {primary_total} {primary_src} records — few expected includable studies; the meta-analysis may be under-powered (registry narrowness corrected by published RCTs).")
+        elif primary_total >= 200:
+            report["scope_warning"] = (report["scope_warning"] or "") + _tr(
+                f" {primary_src}已检索到 {primary_total} 项相关研究，方向可能已较拥挤，建议明确差异化角度。",
+                f" {primary_total} related studies found — the direction may already be crowded; define a clear differentiation.")
+            report["feasibility"]["crowding"] = "high"
+            report["feasibility"]["expected_studies"] = primary_total
+        else:
+            report["feasibility"]["crowding"] = "moderate"
+            report["feasibility"]["expected_studies"] = primary_total
 
     # 2026-09-24：本地确定性选题评分（4 维 + R1-R6 + PRISMA/AMSTAR-2 预检 + real-gap）
     if run_local_assessment:
@@ -361,12 +382,13 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
             _assess = topic_assess.assess(
                 topic=topic, picos=picos, missing=missing,
                 dedup=dedup_probe, registry=registry_probe, prospero=_prospero,
-                topic_en=topic_en, lang=lang,
+                rct=rct_probe, topic_en=topic_en, lang=lang,
             )
             # 2026-09-24：coze 临床价值判断 + 选题策展（P1 结构就位，默认关；
             # META_TOPIC_COZE=1 且 coze 节点就绪后启用；失败自动降级默认中值）
             _coze = _try_coze_topic_assessment(
-                topic, picos, missing, _assess, registry_probe, dedup_probe, _prospero)
+                topic, picos, missing, _assess, registry_probe, dedup_probe, _prospero,
+                rct_probe=rct_probe)
             # 2026-09-25：coze 不可用时，走后台大模型（LongCat-2.0 等）评估临床价值，
             # 不再静默取默认中值。任何失败仍回退中值（_llm_clinical_fallback 返回 None）。
             _clinical = None
@@ -381,6 +403,7 @@ def a1_topic_selection(topic, registry_probe=None, dedup_probe=None, run_local_a
                     topic=topic, picos=picos, missing=missing,
                     dedup=dedup_probe, registry=registry_probe, prospero=_prospero,
                     clinical_override=_clinical, curation=_curation, lang=lang,
+                    rct=rct_probe,
                 )
             report["topic_analysis"] = _assess
         except Exception as _ae:  # noqa: BLE001
@@ -3375,7 +3398,7 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
                 override_screened=None, on_line=None,
                 on_a4_event=None, start_stage=None, cached_envelope=None,
                 workers=4, pdf_cache_map=None, include_reviews=False,
-                sources=None, pdf_dir=None):
+                sources=None, pdf_dir=None, topic_en=None):
     """本地优先 Block A 驱动器。返回与 run_pipeline 同构的 dict。
 
     - use_coze=False（默认）：A1/A3 走本地启发式，A2 走本地 ct-literature，A4 本地强执闸。
@@ -3459,7 +3482,7 @@ def run_block_a(topic, max_results=50, year_from=None, debug=False,
             except Exception as e:  # noqa: BLE001
                 reg_probe = {"status": "error", "total": None, "returned": None,
                              "sample": [], "note": f"registry 探针异常: {type(e).__name__}: {e}"}
-        rep1, nha1 = a1_topic_selection(topic, registry_probe=reg_probe)
+        rep1, nha1 = a1_topic_selection(topic, registry_probe=reg_probe, topic_en=topic_en)
         # A1 页面「纳入综述」开关初值 = 本次 A 块配置（A1 revision 可随后覆盖）
         rep1["include_reviews"] = bool(include_reviews)
         # A1 页面「检索数据源」初值 = 本次 A 块配置（A1 revision 可随后增减）。

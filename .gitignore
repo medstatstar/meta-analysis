@@ -164,3 +164,8 @@ browser_tests.py
 ctqa.config.json
 # 检索缓存（运行时生成，不进发布包）
 adapters/.search_cache/
+
+# 选题评估探针调试产物（2026-10-30，会话期调试产出，不进发布包）
+/probe_*.json
+/probe_*.py
+/gap.json

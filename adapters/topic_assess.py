@@ -104,21 +104,47 @@ def _registry_total(registry):
     return None
 
 
+def _rct_total(rct):
+    """从 rct_probe 结果取「已发表 RCT 文献数」（可为 0；None=未探针/失败）。"""
+    if isinstance(rct, dict):
+        t = rct.get("total")
+        try:
+            return int(t) if t is not None else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _primary_total(registry_total, rct_total, pubmed_hits, cochrane_hits):
+    """统一「可纳入原始研究数」代理：已发表 RCT 文献数优先，交叉 CT.gov 注册数。
+
+    返回 (total, source)，source ∈ {"rct","registry","unverified"}。
+    已发表 RCT（Europe PMC PUB_TYPE:RCT）是最直接的「可纳入 Meta 的原始研究」代理；
+    ClinicalTrials.gov 注册数仅反映试验注册活跃度（含进行中/未发表），作次选。
+    两者都不可用 → (None, "unverified")，由上游降级处理。
+    """
+    if rct_total is not None:
+        return rct_total, "rct"
+    if registry_total is not None:
+        return registry_total, "registry"
+    return None, "unverified"
+
+
 # ---------------------------------------------------------------------------
 # Deterministic per-dimension scorers (0–5)
 # ---------------------------------------------------------------------------
-def _score_data(registry_total, pubmed_hits, cochrane_hits):
-    # 2026-10-25 修（用户报「结论自相矛盾」）：注册库 0 命中、文献库却已有大量同类
-    # SR/MA 时，那个 0 几乎一定是探针没打中（中文主题查英文注册库），不能据此判
-    # 「数据可得性 0 分」。此时退回文献库代理口径并降置信，note 如实标注。
+def _score_data(primary_total, pubmed_hits, cochrane_hits, primary_source="registry"):
+    # 2026-10-30 修：primary_total 现统一为「可纳入原始研究数」代理——优先已发表
+    # RCT 文献数（rct 探针），其次 ClinicalTrials.gov 注册数（registry）。原「注册库 0
+    # 命中、文献库却已有大量同类 SR/MA」的降级逻辑保留（此时注册库计数不可信）。
     _sr = (pubmed_hits or 0) + (cochrane_hits or 0)
     degraded = False
-    if registry_total == 0 and _sr >= 20:
-        registry_total = None
+    if primary_total == 0 and _sr >= 20:
+        primary_total = None
         pubmed_hits = max(pubmed_hits or 0, _sr)
         degraded = True
-    if registry_total is not None:
-        t, conf = registry_total, "registry"
+    if primary_total is not None:
+        t, conf = primary_total, primary_source
     elif pubmed_hits is not None:
         t, conf = pubmed_hits, "pubmed_proxy"
     else:
@@ -139,13 +165,18 @@ def _score_data(registry_total, pubmed_hits, cochrane_hits):
     if degraded:
         note = _tr("注册库未命中但文献库有 %d 篇同类 SR/MA → 按文献代理估计（原始研究数需人工核实）" % t,
                    "no registry hits, but %d similar SR/MA in the literature → literature-proxy estimate (primary-study count needs manual verification)" % t)
-    elif registry_total is not None:
-        # 文案修正：0~9 项时不能说「原始研究充足」（此前 s=0 仍输出「充足」，与分数打脸）
-        note = (_tr("注册库 %d 项 → 原始研究充足" % registry_total,
-                    "%d registry records → primary studies are plentiful" % registry_total)
-                if registry_total >= 10 else
-                _tr("注册库仅 %d 项 → 原始研究可能不足，需人工核实" % registry_total,
-                    "only %d registry records → primary studies may be insufficient; verify manually" % registry_total))
+    elif conf == "rct":
+        note = (_tr("已发表 RCT %d 篇 → 原始研究充足" % t,
+                    "%d published RCTs → primary studies are plentiful" % t)
+                if t >= 10 else
+                _tr("已发表 RCT 仅 %d 篇 → 原始研究可能不足，需人工核实" % t,
+                    "only %d published RCTs → primary studies may be insufficient; verify manually" % t))
+    elif conf == "registry":
+        note = (_tr("注册库 %d 项 → 原始研究充足" % t,
+                    "%d registry records → primary studies are plentiful" % t)
+                if t >= 10 else
+                _tr("注册库仅 %d 项 → 原始研究可能不足，需人工核实" % t,
+                    "only %d registry records → primary studies may be insufficient; verify manually" % t))
     else:
         note = _tr("PubMed SR/MA %d 篇（代理，置信低于注册库）" % pubmed_hits,
                    "%d PubMed SR/MA (proxy; lower confidence than the registry)" % pubmed_hits)
@@ -170,17 +201,14 @@ def _score_novelty(pubmed_hits, cochrane_hits):
                               "few similar reviews — there is room for a genuine gap")
 
 
-def _score_feasibility(registry_total, pubmed_hits, missing):
-    # 2026-10-25：与 _score_data 同一处矛盾的可行性侧修复 —— 注册库 0 命中但文献库
-    # 已有大量同类 SR/MA 时，0 是「探针没打中」而非「没有原始研究」。此时不判 0 分
-    # （否则「可行性 0/5」会与「778 篇同类 SR/MA」并列，结论互相打脸），
-    # 按「中等、待核实」给分并在 note 里说明依据。
-    _proxy = (registry_total == 0 and (pubmed_hits or 0) >= 20)
+def _score_feasibility(primary_total, pubmed_hits, missing, primary_source="registry"):
+    # 2026-10-30 修：primary_total 统一为「可纳入原始研究数」代理（已发表 RCT 优先）。
+    _proxy = (primary_total == 0 and (pubmed_hits or 0) >= 20)
     if _proxy:
         s = 3
         k = None
     else:
-        k = registry_total if registry_total is not None else (pubmed_hits
+        k = primary_total if primary_total is not None else (pubmed_hits
                                                                 if pubmed_hits is not None else 0)
         if k >= 10:
             s = 5
@@ -194,11 +222,15 @@ def _score_feasibility(registry_total, pubmed_hits, missing):
             s = 0
     if len(missing or []) >= 3:
         s = min(s, 2)
+    _src = (_tr("已发表 RCT", "published RCT") if primary_source == "rct"
+            else _tr("注册库", "registry") if primary_source == "registry"
+            else _tr("文献代理", "literature proxy"))
     if _proxy:
         note = _tr("注册库未命中，但文献库已有 %d 篇同类 SR/MA → 原始研究数按「可纳入、待核实」处理，不判空白方向" % pubmed_hits,
                    "no registry hits, but %d similar SR/MA in the literature → treat the primary-study count as \"includable, pending verification\" rather than a blank direction" % pubmed_hits)
     else:
-        note = _tr("预期可纳入研究数 k=%s" % k, "expected includable studies k=%s" % k)
+        note = _tr("预期可纳入研究数 k=%s（来源：%s）" % (k, _src),
+                   "expected includable studies k=%s (source: %s)" % (k, _src))
     return s, note
 
 
@@ -294,7 +326,7 @@ def _compliance():
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def assess(topic, picos=None, missing=None, dedup=None, registry=None,
+def assess(topic, picos=None, missing=None, dedup=None, registry=None, rct=None,
            clinical_override=None, prospero=None, curation=None, topic_en=None,
            lang="zh"):
     """Build the full local topic assessment.
@@ -321,10 +353,15 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
     missing = missing or []
     cochrane_hits, pubmed_hits = _extract_dedup_counts(dedup)
     registry_total = _registry_total(registry)
+    rct_total = _rct_total(rct)
+    # 2026-10-30：统一「可纳入原始研究数」代理——已发表 RCT 文献数优先，
+    # 交叉 ClinicalTrials.gov 注册数；两者都不可用时退回 unverified。
+    primary_total, primary_source = _primary_total(registry_total, rct_total,
+                                                  pubmed_hits, cochrane_hits)
 
-    data_s, data_conf, data_note = _score_data(registry_total, pubmed_hits, cochrane_hits)
+    data_s, data_conf, data_note = _score_data(primary_total, pubmed_hits, cochrane_hits, primary_source)
     nov_s, nov_label, nov_note = _score_novelty(pubmed_hits, cochrane_hits)
-    fea_s, fea_note = _score_feasibility(registry_total, pubmed_hits, missing)
+    fea_s, fea_note = _score_feasibility(primary_total, pubmed_hits, missing, primary_source)
     cli_s, cli_needs, cli_note, cli_rationale = _score_clinical(topic, clinical_override)
 
     scores = {"clinical": cli_s, "feasibility": fea_s, "data": data_s,
@@ -395,14 +432,16 @@ def assess(topic, picos=None, missing=None, dedup=None, registry=None,
     # 2026-10-25：注册库 0 命中但文献库已有大量同类 SR/MA 时，不能写「约 0 项注册试验」——
     # 与「同类 SR/MA 已饱和」并列会自相矛盾，改为如实标注待核实。
     _sr_n = (pubmed_hits or 0) + (cochrane_hits or 0)
-    if registry_total == 0 and _sr_n >= 20:
+    if primary_total == 0 and _sr_n >= 20:
         expected = _tr("待核实（注册库未命中，但文献库已有 %d 篇同类 SR/MA）" % _sr_n,
                        "to be verified (no registry hits, but %d similar SR/MA in the literature)" % _sr_n)
-    elif registry_total is not None:
-        expected = _tr("约 %s 项注册试验 / 预期可纳入研究" % registry_total,
-                       "about %s registered trials / expected includable studies" % registry_total)
+    elif primary_total is not None:
+        _src = (_tr("已发表 RCT", "published RCT") if primary_source == "rct"
+                else _tr("注册试验", "registered trials"))
+        expected = _tr("约 %s 项%s / 预期可纳入研究" % (primary_total, _src),
+                       "about %s %s / expected includable studies" % (primary_total, _src))
     else:
-        expected = _tr("注册库未探针，预期研究数未知", "registry not probed; expected study count unknown")
+        expected = _tr("未探针，预期研究数未知", "not probed; expected study count unknown")
 
     compliance = _compliance()
 

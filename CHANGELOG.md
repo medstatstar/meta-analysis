@@ -4,6 +4,25 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.22.0] - 2026-10-30 · 选题评估 k 数据源改造（已发表 RCT 探针）
+
+### Added
+- **已发表 RCT 探针（`literature_probe.rct_probe`）**：新增 Europe PMC `PUB_TYPE:"Randomized Controlled Trial"` 实时探针，作为「预期可纳入研究数 k」的优先数据源（此前用注册试验数代理，系统性低估）。SGLT2-CKD 实测 528~796 篇。
+- **coze 选题评估 payload 增补 `evidence.rct`**：本地 payload 与 coze 端 `topic_llm_cfg.json` 模板（up + sp）同步支持已发表 RCT 计数，云端 LLM 评估可见真实可纳入研究体量。
+
+### Fixed
+- **CT.gov 检索假阴性（`registry_probe._normalize_ctgov_term`）**：长句短语精确匹配导致命中数被压到 2 项；改为停用词剥离 + 核心词 AND 归一化（SGLT2-CKD 2 → 103 项）。
+- **k<2 误判 veto（`topic_assess` / `block_a`）**：数据源优先级改为 已发表 RCT > 注册试验；矛盾检测扩展（primary=0 且 SR/MA≥20 判未知；primary<5 提示注册库偏窄已校正）。实测 SGLT2-CKD 从「数据不足以支撑 meta（k<2）」修正为 verdict=hold / gap=saturated。
+- **全管线 `topic_en` 线程化（`run_block_a` / `fullflow.run_fastpath`）**：全管线 A1 路径原本不传英文主题，RCT 探针会静默失效回退注册数。
+- **工作台口径标注（`workbench/app.js`）**：PROSPERO 明确标注「系统评价注册方案数（饱和度信号，≠ 可纳入 Meta 的原始 RCT）」；指标名改为「预期可纳入原始研究（已发表 RCT）」。
+- **探针调试产物出库**：`probe_*.json` / `probe_*.py` / `gap.json` 加入 `.gitignore`（会话期 debris，不进发布树）。
+
+### Verified
+- 线上工作台 https://meta.app.workbuddy.host/ 端到端抽验通过（expected_studies=528 已发表 RCT，verdict=hold）。
+- coze `topic_assessment` 节点真实调用通过：含 `evidence.rct` payload 契约兼容，云端 rationale 明确引用已发表 RCT 体量。
+
+---
+
 ## [2.21.2] - 2026-10-29 · 发布前检查整改 + 网页版入口（三平台发布）
 
 ### Fixed

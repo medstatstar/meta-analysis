@@ -599,7 +599,8 @@ def _run_block(letter, sess, debug, on_line=None, on_a4_event=None, start_stage=
             # 上次 studies，跳过全库检索；不一致才真实联网重跑。覆盖两个此前会白等 ~2 分钟的路径：
             #   ① 回退进 A 块（rewind 保留信封作复用源）；② 只回传裁决（screened）的 A2 修订。
             cached_envelope=cached_env,
-            include_reviews=include_reviews, sources=sources)
+            include_reviews=include_reviews, sources=sources,
+            topic_en=(sess.data.get("topic_en") or "").strip() or None)
     if letter == "B":
         # B3 过度声明检测：拼 claims_text（从 A2 检索结果标题/摘要 + 选题）
         # 修复 2026-09-17：此前未传 claims_text → detect_overclaims("") 文本模式全失效
