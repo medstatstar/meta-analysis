@@ -79,7 +79,14 @@ def _extract_dedup_counts(dedup):
         if layers:
             cochrane = (layers.get("cochrane") or {}).get("hit_count")
             pm = layers.get("pubmed_meta") or {}
-            pubmed = pm.get("hit_count") if isinstance(pm, dict) else None
+            # 2026-10-30 双口径：评分语义（同类综述饱和度/降级代理）需要的是「真实
+            # SR/MA 数」，优先取严格 PUB_TYPE 口径（strict_hit_count）；宽松自由词数
+            # （hit_count，含提及字样的普通文献）仅在严格口径缺失时兜底，避免把
+            # 5956 这类宽松数灌进饱和阈值（≥20 判 saturated）造成过度悲观。
+            pubmed = (pm.get("strict_hit_count")
+                      if isinstance(pm, dict) else None)
+            if pubmed is None:
+                pubmed = pm.get("hit_count") if isinstance(pm, dict) else None
         else:
             cochrane = dedup.get("cochrane")
             pubmed = dedup.get("pubmed")

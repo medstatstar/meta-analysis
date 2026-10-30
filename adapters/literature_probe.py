@@ -248,11 +248,42 @@ def probe(topic, layer="pubmed", review_type="systematic-review",
     # For the pubmed layer, also count any Cochrane reviews that surfaced
     # (post-filter, robust against query-term variance).
     cochrane_count = sum(1 for w in collected if w.get("is_cochrane"))
+
+    # 2026-10-30 双口径：宽松自由词命中（hit_count，词出现在标题/摘要任意位置，含普通
+    # 文献）之外，另给「出版类型过滤」的严格系统评价/Meta 分析数（strict_hit_count）。
+    # 注意只取 Systematic Review + Meta Analysis 两种类型、不含 Review——叙述性综述
+    # 常不含这些字样，加入后严格数会反超宽松数、破坏「子集」语义（实测 7513 vs 5956）。
+    # 一次额外单请求取 hitCount，失败降级为 None 不影响主结果。
+    strict_hit = None
+    strict_query = None
+    strict_error = None
+    if layer == "pubmed" and hit_count is not None:
+        strict_query = (q_topic + ' AND (PUB_TYPE:"Systematic Review"'
+                        ' OR PUB_TYPE:"Meta Analysis")')
+        if year_from or year_to:
+            strict_query += " AND (PUB_YEAR:[%s TO %s])" % (
+                year_from or 1900, year_to or 3000)
+        try:
+            _sp = {
+                "query": strict_query,
+                "format": "json",
+                "resultType": "idlist",
+                "pageSize": 1,
+                "page": 1,
+            }
+            _sj = _get_json(BASE + "?" + urllib.parse.urlencode(_sp))
+            strict_hit = _sj.get("hitCount")
+        except Exception as e:  # noqa: BLE001 - strict layer degrades silently
+            strict_error = str(e)
+
     return {
         "layer": layer,
         "query": q,
         "hit_count": hit_count,
         "cochrane_count": cochrane_count,
+        "strict_hit_count": strict_hit,
+        "strict_query": strict_query,
+        "strict_error": strict_error,
         "works": collected[:max_results],
         "error": None,
         "ct_handoff": _build_ct_handoff(q_topic, layer, year_from, year_to),
@@ -365,7 +396,9 @@ def dedup_probe(topic, year_from=None, year_to=None, max_results=8,
     else:
         parts.append("Cochrane: probe unavailable")
     if pubmed.get("hit_count") is not None:
-        parts.append("PubMed SR/MA (last %s y): %s" % (
+        # 2026-10-30 口径标注：PubMed 层是自由词宽松匹配（词出现在标题/摘要任意位置
+        # 即计入，含普通文献），非严格 SR 出版类型统计——有意宁高勿低作去重威胁估计。
+        parts.append("PubMed (loose: any mention of 'systematic review/meta-analysis', last %s y): %s" % (
             (datetime.date.today().year - (year_from or datetime.date.today().year)),
             pubmed["hit_count"]))
     else:

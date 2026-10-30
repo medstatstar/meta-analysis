@@ -4,6 +4,13 @@ All notable changes to the `meta-analysis` skill are recorded here. Format based
 
 ---
 
+## [2.22.1] - 2026-10-30 · 选题评估去重探针双口径化
+
+- literature_probe.probe()（pubmed 层）新增严格口径字段 strict_hit_count/strict_query/strict_error：PUB_TYPE:"Systematic Review" OR "Meta Analysis" 出版类型过滤，一次额外轻量单请求，失败降级 None 不影响主结果
+- 宽松口径（自由词，含提及 SR/MA 字样的普通文献）定性澄清：仅作去重威胁保守上限展示；界面标签改为「PubMed 相关文献（含"系统评价/Meta 分析"表述）」+ 常驻口径说明（工作台层）
+- topic_assess._extract_dedup_counts：pubmed 层评分取数优先严格口径（真实 SR/MA 数），缺失时兜底宽松——修复宽松数（如 5956）灌入饱和阈值（≥20 判 saturated）造成严重高估
+- 评分语义确认：饱和度=严格口径（综述数）；可纳入原始研究 k=已发表 RCT（rct_probe）> CT.gov 注册；不做「宽松−严格」减法（严格口径非宽松口径的真子集，差值无稳定语义）
+
 ## [2.22.0] - 2026-10-30 · 选题评估 k 数据源改造（已发表 RCT 探针）
 
 ### Added
